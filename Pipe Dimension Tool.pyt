@@ -457,7 +457,7 @@ class PipeDimensionToolTA(object):
 			displayName= "Field to assign diameter to",
 			name="result_field",
 			datatype="GPString",
-			parameterType="Required",
+			parameterType="Optional",
 			direction="Input")
 
         breakChainOnNodes = arcpy.Parameter(
@@ -524,6 +524,14 @@ class PipeDimensionToolTA(object):
             parameterType="Required",
             direction="Input")
         runoff_file.filter.list = ["txt","km2","kmd","csv"]
+        
+        keep_largest_diameter = arcpy.Parameter(
+            displayName="Only change diameter if it's greater than existing",
+            name="keep_largest_diameter",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+        keep_largest_diameter.category = "Additional settings"
 
         # get_start_time = arcpy.Parameter(
             # displayName="Copy start time from dfs0 file:",
@@ -535,7 +543,7 @@ class PipeDimensionToolTA(object):
         # get_start_time.category = "Additional settings"
         # get_start_time.enabled = False
 
-        parameters = [pipe_layer, reaches, result_field, runoff_file, scaling_factor, breakChainOnNodes, writeDischargeInstead, useMaxInflow, slopeOverwrite, writeDFS0]
+        parameters = [pipe_layer, reaches, result_field, runoff_file, scaling_factor, breakChainOnNodes, writeDischargeInstead, useMaxInflow, slopeOverwrite, writeDFS0, keep_largest_diameter]
         return parameters
 
     def isLicensed(self):
@@ -577,12 +585,22 @@ class PipeDimensionToolTA(object):
         useMaxInflow = parameters[7].Value
         slopeOverwrite = parameters[8].Value
         writeDFS0 = parameters[9].ValueAsText
+        keep_largest_diameter = parameters[10].ValueAsText
         # get_start_time = parameters[10].ValueAsText
 
         selected_pipes = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["MUID"])]
 
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
+        
+        def addLayer(layer_source, source, group = None, workspace_type = "ACCESS_WORKSPACE"):
+            layer = apmapping.Layer(layer_source)
+            if group:
+                apmapping.AddLayerToGroup(df, group, layer, "BOTTOM")
+            else:
+                apmapping.AddLayer(df, layer, "TOP")
+            updatelayer = apmapping.ListLayers(mxd, layer.name, df)[0]
+            updatelayer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, unicode(os.path.basename(source)))
 
         msm_Link = os.path.join(MU_database,"msm_Link")
         msm_Node = os.path.join(MU_database,"msm_Node")
@@ -758,6 +776,7 @@ class PipeDimensionToolTA(object):
         peak_discharge = {}
         peak_discharge_time = {}
         total_red_opl = {}
+        total_imp_opl = {}
 
         target_manholes = [msm_Link_Network.links[link].fromnode for link in selected_pipes]
 
@@ -785,6 +804,7 @@ class PipeDimensionToolTA(object):
             time_delays = {}
             runoffs = []
             total_red_opl[target_manhole] = 0
+            total_imp_opl[target_manhole] = 0
             for source in network.nodes:
                 if nx.has_path(network, source, target_manhole):
                     connected_sources.append(source)
@@ -811,6 +831,7 @@ class PipeDimensionToolTA(object):
                     catchIDs = catchment_connections_dict[MUID]
                     for catchID in catchIDs:
                         total_red_opl[target_manhole] += catchments_dict[catchID].reduced_area
+                        total_imp_opl[target_manhole] += catchments_dict[catchID].impervious_area
                         runoff += time_area(rain_event, catchments_dict[catchID].concentration_time, time_delay)/1e6*catchments_dict[catchID].reduced_area*1e3*scaling_factor
 
                 if useMaxInflow and MUID in maxInflow:
@@ -869,7 +890,7 @@ class PipeDimensionToolTA(object):
             return field_name
 
         arcpy.SetProgressorLabel("Creating debug output")
-        debug_output = True
+        debug_output = False
         if debug_output:
             if len(target_manholes)==1:
                 with open(r"C:\Papirkurv\Hydrograph.csv", 'w') as f:
@@ -885,46 +906,112 @@ class PipeDimensionToolTA(object):
                     row[2] = peak_discharge[msm_Link_Network.links[row[0]].fromnode]
                     row[3] = peak_discharge_time[msm_Link_Network.links[row[0]].fromnode]
                     cursor.updateRow(row)
-
+        
         arcpy.SetProgressor("step","Calculating Pipe Dimensions", 0, len(selected_pipes), 1)
         fields = ["Slope_C",result_field,"MaterialID","MUID"]
-        try:
-            with arcpy.da.UpdateCursor(msm_Link, fields, where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
-                for row_i, row in enumerate(cursor):
-                    # diameter_old = row[4]
-                    arcpy.SetProgressorPosition(row_i)
-                    D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[2].lower() else diameters_concrete
-                    slope = slopeOverwrite if slopeOverwrite else row[0]*1e-2
-                    if writeDischargeInstead:
-                        row[1] = peak_discharge[msm_Link_Network.links[row[3]].fromnode]
-                    else:
-                        QFull = 0
-                        Di = -1
-
-                        if peak_discharge[msm_Link_Network.links[row[3]].fromnode] == 0:
-                            Di = 0
+        if result_field:
+            try:
+                with arcpy.da.UpdateCursor(msm_Link, fields, where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
+                    for row_i, row in enumerate(cursor):
+                        # diameter_old = row[4]
+                        arcpy.SetProgressorPosition(row_i)
+                        D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[2].lower() else diameters_concrete
+                        slope = slopeOverwrite if slopeOverwrite else row[0]*1e-2
+                        if writeDischargeInstead:
+                            row[1] = peak_discharge[msm_Link_Network.links[row[3]].fromnode]
                         else:
-                            while QFull is not None and QFull*1e3<peak_discharge[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
-                                Di += 1
-                                QFull = colebrookWhite.QFull(D[Di]/1e3,slope,row[2])
-                        row[1] = D[Di]/1.0e3
-                        # if diameter_old != row[1]:
-                            # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
-                    try:
-                        cursor.updateRow(row)
-                    except Exception as e:
-                        arcpy.AddWarning("Could not update row:")
-                        arcpy.AddWarning(row)
-        except Exception as e:
-            if row[0] not in peak_discharge:
+                            QFull = 0
+                            Di = -1
+
+                            if peak_discharge[msm_Link_Network.links[row[3]].fromnode] == 0:
+                                Di = 0
+                            else:
+                                while QFull is not None and QFull*1e3<peak_discharge[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
+                                    Di += 1
+                                    QFull = colebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                            row[1] = D[Di]/1.0e3
+                            # if diameter_old != row[1]:
+                                # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
+                        try:
+                            cursor.updateRow(row)
+                        except Exception as e:
+                            arcpy.AddWarning("Could not update row:")
+                            arcpy.AddWarning(row)
+            except Exception as e:
+                if row[0] not in peak_discharge:
+                    arcpy.AddError(traceback.format_exc())
+                    arcpy.AddError("Failed to analyze catchments connected to node %s on pipe %s" % (msm_Link_Network.links[row[3]].fromnode, msm_Link_Network.links[row[3]].MUID))
+                    raise(e)
+                arcpy.AddError(row)
                 arcpy.AddError(traceback.format_exc())
-                arcpy.AddError("Failed to analyze catchments connected to node %s on pipe %s" % (msm_Link_Network.links[row[3]].fromnode, msm_Link_Network.links[row[3]].MUID))
                 raise(e)
-            arcpy.AddError(row)
-            arcpy.AddError(traceback.format_exc())
-            raise(e)
+                
+        else:  
+            result_layer = getAvailableFilename(arcpy.env.scratchGDB + "\Pipe_Dimensions", parent = MU_database)
+            arcpy.CreateFeatureclass_management(arcpy.env.scratchGDB, os.path.basename(result_layer), "POLYLINE")
+            fields = ["muid", "diameter", "materialid", "slope", "nettypeno", "enabled", "ImpArea", "RedArea", "MaxFlow", "CritTime"]
+
+            addField(result_layer, "muid", "TEXT")
+            addField(result_layer, "diameter", "FLOAT")
+            addField(result_layer, "materialid", "TEXT")
+            addField(result_layer, "slope", "FLOAT")
+            addField(result_layer, "nettypeno", "SHORT")
+            addField(result_layer, "enabled", "SHORT")
+            addField(result_layer, "ImpArea", "FLOAT")
+            addField(result_layer, "RedArea", "FLOAT")
+            addField(result_layer, "MaxFlow", "FLOAT")
+            addField(result_layer, "CritTime", "SHORT")
+
+
+            arcpy.SetProgressor("step","Calculating Pipe Dimensions", 0, len(selected_pipes), 1)
+            try:
+                with arcpy.da.InsertCursor(result_layer, ["SHAPE@"] + fields) as ins_cursor:
+                    with arcpy.da.SearchCursor(msm_Link, ["Slope_C", "Diameter", "MaterialID", "MUID", "SHAPE@", "NetTypeNo",
+                                                          "enabled"], where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
+                        for row_i, row in enumerate(cursor):
+                            # diameter_old = row[4]
+                            arcpy.SetProgressorPosition(row_i)
+                            D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[2].lower() else diameters_concrete
+                            slope = slopeOverwrite if slopeOverwrite else row[0]*1e-2
+                            # if writeDischargeInstead:
+                            #     diameter = # ins_row = (row[4], row[3], peak_discharge[msm_Link_Network.links[row[3]].fromnode], row[2], row[0], row[5], row[6])
+                            #     ins_cursor.insertRow(ins_row)
+                            QFull = 0
+                            Di = -1
+
+                            if peak_discharge[msm_Link_Network.links[row[3]].fromnode] == 0:
+                                Di = 0
+                            else:
+                                while QFull is not None and QFull*1e3<peak_discharge[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
+                                    Di += 1
+                                    QFull = colebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                            diameter = D[Di]/1.0e3
+                            if keep_largest_diameter and diameter < row[1]:
+                                diameter = row[1]
+                            # arcpy.AddMessage((colebrookWhite.QFull(D[Di]/1e3,slope,row[2]), peak_discharge[msm_Link_Network.links[row[3]].fromnode]))
+                            # arcpy.AddMessage((D[Di]/1e3,slope,row[2]))
+                            ins_row = (row[4], row[3], diameter, row[2], row[0], row[5], row[6],
+                                       total_imp_opl[msm_Link_Network.links[row[3]].fromnode],
+                                       total_red_opl[msm_Link_Network.links[row[3]].fromnode],
+                                       peak_discharge[msm_Link_Network.links[row[3]].fromnode],
+                                       peak_discharge_time[msm_Link_Network.links[row[3]].fromnode])
+                            ins_cursor.insertRow(ins_row)
+                                # if diameter_old != row[1]:
+                                    # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
+            except Exception as e:
+                if row[0] not in peak_discharge:
+                    arcpy.AddError(traceback.format_exc())
+                    arcpy.AddError("Failed to analyze catchments connected to node %s on pipe %s" % (msm_Link_Network.links[row[3]].fromnode, msm_Link_Network.links[row[3]].MUID))
+                    raise(e)
+                arcpy.AddError(row)
+                arcpy.AddError(traceback.format_exc())
+                raise(e)
+            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links Dimensioned.lyr", result_layer, workspace_type = "FILEGDB_WORKSPACE")        
+        
         edit.stopOperation()
         edit.stopEditing(True)
+        
+
         return
 
 class PipeDimensionToolTAPro(object):
