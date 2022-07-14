@@ -392,7 +392,7 @@ class DisplayMikeUrban(object):
                     catchcons, group = empty_group_layer)
         
         printStepAndTime("Adding catchments to map")
-        if join_catchments and not ".sqlite" in source:
+        if join_catchments and not ".sqlite" in MU_database:
             arcpy.SetProgressor("default","Joining ms_Catchment and msm_HModA and adding catchments to map")
             ms_Catchment = arcpy.CopyFeatures_management(MU_database + r"\mu_Geometry\ms_Catchment", getAvailableFilename(arcpy.env.scratchGDB + "\ms_CatchmentImp", parent = MU_database)).getOutput(0)
             ms_CatchmentImpLayer = arcpy.MakeFeatureLayer_management(ms_Catchment, getAvailableFilename(arcpy.env.scratchGDB + "\ms_CatchmentImpLayer", parent = MU_database)).getOutput(0).name

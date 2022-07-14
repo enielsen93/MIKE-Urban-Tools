@@ -165,6 +165,7 @@ class DisplayMikeUrban(object):
                 try:
                     arcpy.mapping.UpdateLayer(df, update_layer, layer, symbology_only = True)
                 except Exception as e:
+                    arcpy.AddWarning(source)
                     pass
             else:
                 layer = apmapping.Layer(layer_source)
