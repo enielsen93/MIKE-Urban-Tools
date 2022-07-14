@@ -22,12 +22,12 @@ import pythonaddins
 
 if "mapping" in dir(arcpy):
     import arcpy.mapping as apmapping
-    from arcpy.mapping  import MapDocument as MapDocument
-    from arcpy.mapping  import MapDocument as MapDocument
+    from arcpy.mapping import MapDocument as MapDocument
+    from arcpy.mapping import MapDocument as MapDocument
 else:
     import arcpy.mp as apmapping
     from arcpy.mp import ArcGISProject as MapDocument
-    from arcpy.mapping  import MapDocument as MapDocument
+    from arcpy.mapping import MapDocument as MapDocument
 
 diameters_plastic = [180, 233, 276, 392, 493, 588, 781, 985, 1185, 1385, 1485, 1585, 2000, 2200, 2400, 2600, 2800, 3000]
 diameters_concrete = [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1400, 1600, 1800, 2000, 2250, 2500, 3000, 3500]
@@ -390,7 +390,7 @@ class PipeDimensionTool(object):
                         else:
                             while QFull is not None and QFull*1e3<nodesInflow[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
                                 Di += 1
-                                QFull = colebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                                QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
                         row[1] = D[Di]/1.0e3
                     try:
                         cursor.updateRow(row)
@@ -767,7 +767,7 @@ class PipeDimensionToolTA(object):
         with arcpy.da.SearchCursor(msm_Link, ["MUID", "Slope_C", "Diameter", "Length_C", "Length"]) as cursor:
             for row in cursor:
                 try:
-                    VFull = colebrookWhite.QFull(row[2], row[1]/1e2 if row[1]/1e2>1e-3 else 1e-3, "PL")/((row[2]/2)**2*3.1415)
+                    VFull = ColebrookWhite.QFull(row[2], row[1]/1e2 if row[1]/1e2>1e-3 else 1e-3, "PL")/((row[2]/2)**2*3.1415)
                 except Exception as e:
                     VFull = 1
 
@@ -937,7 +937,7 @@ class PipeDimensionToolTA(object):
                             else:
                                 while QFull is not None and QFull*1e3<peak_discharge[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
                                     Di += 1
-                                    QFull = colebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                                    QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
                             row[1] = D[Di]/1.0e3
                             row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
                             # if diameter_old != row[1]:
@@ -998,11 +998,11 @@ class PipeDimensionToolTA(object):
                             else:
                                 while QFull is not None and QFull*1e3<peak_discharge[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
                                     Di += 1
-                                    QFull = colebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                                    QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
                             diameter = D[Di]/1.0e3
                             if keep_largest_diameter and diameter < row[1]:
                                 diameter = row[1]
-                            # arcpy.AddMessage((colebrookWhite.QFull(D[Di]/1e3,slope,row[2]), peak_discharge[msm_Link_Network.links[row[3]].fromnode]))
+                            # arcpy.AddMessage((ColebrookWhite.QFull(D[Di]/1e3,slope,row[2]), peak_discharge[msm_Link_Network.links[row[3]].fromnode]))
                             # arcpy.AddMessage((D[Di]/1e3,slope,row[2]))
                             ins_row = (row[4], row[3], diameter, row[2], row[0], row[5], row[6],
                                        total_imp_opl[msm_Link_Network.links[row[3]].fromnode],
@@ -1375,7 +1375,7 @@ class PipeDimensionToolTAPro(object):
         with arcpy.da.SearchCursor(msm_Link, ["MUID", "Slope", "Diameter", "SHAPE@LENGTH", "Length"]) as cursor:
             for row in cursor:
                 try:
-                    VFull = colebrookWhite.QFull(row[2], row[1]/1e2 if row[1]/1e2>1e-3 else 1e-3, "PL")/((row[2]/2)**2*3.1415)
+                    VFull = ColebrookWhite.QFull(row[2], row[1]/1e2 if row[1]/1e2>1e-3 else 1e-3, "PL")/((row[2]/2)**2*3.1415)
                 except Exception as e:
                     VFull = 1
 
@@ -1568,11 +1568,11 @@ class PipeDimensionToolTAPro(object):
                         else:
                             while QFull is not None and QFull*1e3<peak_discharge[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
                                 Di += 1
-                                QFull = colebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                                QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
                         diameter = D[Di]/1.0e3
                         if keep_largest_diameter and diameter < row[1]:
                             diameter = row[1]
-                        # arcpy.AddMessage((colebrookWhite.QFull(D[Di]/1e3,slope,row[2]), peak_discharge[msm_Link_Network.links[row[3]].fromnode]))
+                        # arcpy.AddMessage((ColebrookWhite.QFull(D[Di]/1e3,slope,row[2]), peak_discharge[msm_Link_Network.links[row[3]].fromnode]))
                         # arcpy.AddMessage((D[Di]/1e3,slope,row[2]))
                         ins_row = (row[4], row[3], diameter, row[2], row[0], row[5], row[6],
                                    total_imp_opl[msm_Link_Network.links[row[3]].fromnode],
