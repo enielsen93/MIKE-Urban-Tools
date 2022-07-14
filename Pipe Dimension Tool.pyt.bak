@@ -13,7 +13,7 @@ import os
 import sys
 
 import networkx as nx
-import colebrookWhite
+import ColebrookWhite
 import networker
 import pandas as pd
 import traceback
@@ -22,12 +22,12 @@ import pythonaddins
 
 if "mapping" in dir(arcpy):
     import arcpy.mapping as apmapping
-    from arcpy.mapping  import MapDocument as MapDocument
-    from arcpy.mapping  import MapDocument as MapDocument
+    from arcpy.mapping import MapDocument as MapDocument
+    from arcpy.mapping import MapDocument as MapDocument
 else:
     import arcpy.mp as apmapping
     from arcpy.mp import ArcGISProject as MapDocument
-    from arcpy.mapping  import MapDocument as MapDocument
+    from arcpy.mapping import MapDocument as MapDocument
 
 diameters_plastic = [180, 233, 276, 392, 493, 588, 781, 985, 1185, 1385, 1485, 1585, 2000, 2200, 2400, 2600, 2800, 3000]
 diameters_concrete = [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1400, 1600, 1800, 2000, 2250, 2500, 3000, 3500]
@@ -390,7 +390,7 @@ class PipeDimensionTool(object):
                         else:
                             while QFull is not None and QFull*1e3<nodesInflow[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
                                 Di += 1
-                                QFull = colebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                                QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
                         row[1] = D[Di]/1.0e3
                     try:
                         cursor.updateRow(row)
@@ -767,7 +767,7 @@ class PipeDimensionToolTA(object):
         with arcpy.da.SearchCursor(msm_Link, ["MUID", "Slope_C", "Diameter", "Length_C", "Length"]) as cursor:
             for row in cursor:
                 try:
-                    VFull = colebrookWhite.QFull(row[2], row[1]/1e2 if row[1]/1e2>1e-3 else 1e-3, "PL")/((row[2]/2)**2*3.1415)
+                    VFull = ColebrookWhite.QFull(row[2], row[1]/1e2 if row[1]/1e2>1e-3 else 1e-3, "PL")/((row[2]/2)**2*3.1415)
                 except Exception as e:
                     VFull = 1
 
@@ -937,9 +937,10 @@ class PipeDimensionToolTA(object):
                             else:
                                 while QFull is not None and QFull*1e3<peak_discharge[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
                                     Di += 1
-                                    QFull = colebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                                    QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
                             row[1] = D[Di]/1.0e3
-                            row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
+                            if change_material:
+                                row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
                             # if diameter_old != row[1]:
                                 # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
                         try:
@@ -959,7 +960,8 @@ class PipeDimensionToolTA(object):
         else:  
             result_layer = getAvailableFilename(arcpy.env.scratchGDB + "\Pipe_Dimensions", parent = MU_database)
             arcpy.CreateFeatureclass_management(arcpy.env.scratchGDB, os.path.basename(result_layer), "POLYLINE")
-            fields = ["muid", "diameter", "materialid", "slope", "nettypeno", "enabled", "ImpArea", "RedArea", "MaxFlow", "CritTime"]
+            fields = ["muid", "diameter", "materialid", "slope", "nettypeno", "enabled", "ImpArea", "RedArea",
+                      "MaxFlow", "CritTime", "FromNode", "ToNode"]
 
             addField(result_layer, "muid", "TEXT")
             addField(result_layer, "diameter", "FLOAT")
@@ -971,6 +973,8 @@ class PipeDimensionToolTA(object):
             addField(result_layer, "RedArea", "FLOAT")
             addField(result_layer, "MaxFlow", "FLOAT")
             addField(result_layer, "CritTime", "SHORT")
+            addField(result_layer, "FromNode", "TEXT")
+            addField(result_layer, "ToNode", "TEXT")
 
 
             arcpy.SetProgressor("step","Calculating Pipe Dimensions", 0, len(selected_pipes), 1)
@@ -998,17 +1002,19 @@ class PipeDimensionToolTA(object):
                             else:
                                 while QFull is not None and QFull*1e3<peak_discharge[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
                                     Di += 1
-                                    QFull = colebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                                    QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
                             diameter = D[Di]/1.0e3
                             if keep_largest_diameter and diameter < row[1]:
                                 diameter = row[1]
-                            # arcpy.AddMessage((colebrookWhite.QFull(D[Di]/1e3,slope,row[2]), peak_discharge[msm_Link_Network.links[row[3]].fromnode]))
+                            # arcpy.AddMessage((ColebrookWhite.QFull(D[Di]/1e3,slope,row[2]), peak_discharge[msm_Link_Network.links[row[3]].fromnode]))
                             # arcpy.AddMessage((D[Di]/1e3,slope,row[2]))
                             ins_row = (row[4], row[3], diameter, row[2], row[0], row[5], row[6],
                                        total_imp_opl[msm_Link_Network.links[row[3]].fromnode],
                                        total_red_opl[msm_Link_Network.links[row[3]].fromnode],
                                        peak_discharge[msm_Link_Network.links[row[3]].fromnode],
-                                       peak_discharge_time[msm_Link_Network.links[row[3]].fromnode])
+                                       peak_discharge_time[msm_Link_Network.links[row[3]].fromnode],
+                                       msm_Link_Network.links[row[3]].fromnode,
+                                       msm_Link_Network.links[row[3]].tonode)
                             ins_cursor.insertRow(ins_row)
                                 # if diameter_old != row[1]:
                                     # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
@@ -1375,7 +1381,7 @@ class PipeDimensionToolTAPro(object):
         with arcpy.da.SearchCursor(msm_Link, ["MUID", "Slope", "Diameter", "SHAPE@LENGTH", "Length"]) as cursor:
             for row in cursor:
                 try:
-                    VFull = colebrookWhite.QFull(row[2], row[1]/1e2 if row[1]/1e2>1e-3 else 1e-3, "PL")/((row[2]/2)**2*3.1415)
+                    VFull = ColebrookWhite.QFull(row[2], row[1]/1e2 if row[1]/1e2>1e-3 else 1e-3, "PL")/((row[2]/2)**2*3.1415)
                 except Exception as e:
                     VFull = 1
 
@@ -1568,11 +1574,11 @@ class PipeDimensionToolTAPro(object):
                         else:
                             while QFull is not None and QFull*1e3<peak_discharge[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
                                 Di += 1
-                                QFull = colebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                                QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
                         diameter = D[Di]/1.0e3
                         if keep_largest_diameter and diameter < row[1]:
                             diameter = row[1]
-                        # arcpy.AddMessage((colebrookWhite.QFull(D[Di]/1e3,slope,row[2]), peak_discharge[msm_Link_Network.links[row[3]].fromnode]))
+                        # arcpy.AddMessage((ColebrookWhite.QFull(D[Di]/1e3,slope,row[2]), peak_discharge[msm_Link_Network.links[row[3]].fromnode]))
                         # arcpy.AddMessage((D[Di]/1e3,slope,row[2]))
                         ins_row = (row[4], row[3], diameter, row[2], row[0], row[5], row[6],
                                    total_imp_opl[msm_Link_Network.links[row[3]].fromnode],
@@ -1610,8 +1616,16 @@ class upgradeDimensions(object):
             datatype="GPFeatureLayer",
             parameterType="Required",
             direction="Input")
-
-        parameters = [pipe_layer]
+            
+        change_material = arcpy.Parameter(
+            displayName="Change material (Plastic if less than 500 mm, concrete if greater than or equal to 500 mm",
+            name="change_material",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+        change_material.Default = "true"
+        
+        parameters = [pipe_layer, change_material]
         return parameters
 
     def isLicensed(self):
@@ -1627,6 +1641,7 @@ class upgradeDimensions(object):
 
     def execute(self, parameters, messages):
         pipe_layer = parameters[0].Value
+        change_material = parameters[1].Value
 
         MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer,["MUID"])]
         if len(MUIDs) == len([row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).CatalogPath,["MUID"])]):
@@ -1637,12 +1652,24 @@ class upgradeDimensions(object):
         edit = arcpy.da.Editor(os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)))
         edit.startEditing(False, True)
         edit.startOperation()
+        
+        
+                                
         D_plastic = np.array(diameters_plastic)
         D_concrete = np.array(diameters_concrete)
         with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath,["MUID", "Diameter", "MaterialID"], where_clause = "MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
             for row in cursor:
+                if change_material:
+                    D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                        diameter for diameter in diameters_concrete if diameter > 450]
+                else:
+                    D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
+                        2].lower() else diameters_concrete
+                D = np.array(D)
                 oldDiameter = row[1]*1e3
-                row[1] = D_plastic[np.where(row[1]*1e3<D_plastic)[0][0]]/1e3 if (not "concrete" in row[2].lower() and not "beton" in row[2].lower()) else D_concrete[np.where(row[1]*1e3<D_concrete)[0][0]]/1e3
+                row[1] = D[np.where(row[1]*1e3<D)[0][0]]/1e3
+                if change_material:
+                    row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
                 cursor.updateRow(row)
                 arcpy.AddMessage("Upgraded pipe %s from %d to %d" % (row[0],oldDiameter,row[1]*1e3))
 
@@ -1665,9 +1692,17 @@ class downgradeDimensions(object):
             datatype="GPFeatureLayer",
             parameterType="Required",
             direction="Input")
+            
+        change_material = arcpy.Parameter(
+            displayName="Change material (Plastic if less than 500 mm, concrete if greater than or equal to 500 mm",
+            name="change_material",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+        change_material.value = "true"
         # pipe_layer.filter.list = ["Polyline"] # does not work for some reason
 
-        parameters = [pipe_layer]
+        parameters = [pipe_layer, change_material]
         return parameters
 
     def isLicensed(self):
@@ -1688,6 +1723,7 @@ class downgradeDimensions(object):
 
     def execute(self, parameters, messages):
         pipe_layer = parameters[0].Value
+        change_material = parameters[1].Value
 
         MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer,["MUID"])]
         if len(MUIDs) == len([row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).CatalogPath,["MUID"])]):
@@ -1702,8 +1738,17 @@ class downgradeDimensions(object):
         D_concrete = np.array(diameters_concrete)
         with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath,["MUID", "Diameter", "MaterialID"], where_clause = "MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
             for row in cursor:
+                if change_material:
+                    D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                        diameter for diameter in diameters_concrete if diameter > 450]
+                else:
+                    D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
+                        2].lower() else diameters_concrete
+                D = np.array(D)
                 oldDiameter = row[1]*1e3
-                row[1] = D_plastic[np.where(row[1]*1e3>D_plastic)[0][-1]]/1e3 if (not "concrete" in row[2].lower() and not "beton" in row[2].lower()) else D_concrete[np.where(row[1]*1e3>D_concrete)[0][-1]]/1e3
+                row[1] = D[np.where(row[1]*1e3>D)[0][-1]]/1e3
+                if change_material:
+                    row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
                 cursor.updateRow(row)
                 arcpy.AddMessage("Downgraded pipe %s from %d to %d" % (row[0],oldDiameter,row[1]*1e3))
 

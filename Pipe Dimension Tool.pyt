@@ -939,7 +939,8 @@ class PipeDimensionToolTA(object):
                                     Di += 1
                                     QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
                             row[1] = D[Di]/1.0e3
-                            row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
+                            if change_material:
+                                row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
                             # if diameter_old != row[1]:
                                 # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
                         try:
@@ -1615,8 +1616,16 @@ class upgradeDimensions(object):
             datatype="GPFeatureLayer",
             parameterType="Required",
             direction="Input")
-
-        parameters = [pipe_layer]
+            
+        change_material = arcpy.Parameter(
+            displayName="Change material (Plastic if less than 500 mm, concrete if greater than or equal to 500 mm",
+            name="change_material",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+        change_material.value = "true"
+        
+        parameters = [pipe_layer, change_material]
         return parameters
 
     def isLicensed(self):
@@ -1632,6 +1641,7 @@ class upgradeDimensions(object):
 
     def execute(self, parameters, messages):
         pipe_layer = parameters[0].Value
+        change_material = parameters[1].Value
 
         MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer,["MUID"])]
         if len(MUIDs) == len([row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).CatalogPath,["MUID"])]):
@@ -1642,12 +1652,24 @@ class upgradeDimensions(object):
         edit = arcpy.da.Editor(os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)))
         edit.startEditing(False, True)
         edit.startOperation()
+        
+        
+                                
         D_plastic = np.array(diameters_plastic)
         D_concrete = np.array(diameters_concrete)
         with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath,["MUID", "Diameter", "MaterialID"], where_clause = "MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
             for row in cursor:
+                if change_material:
+                    D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                        diameter for diameter in diameters_concrete if diameter > 450]
+                else:
+                    D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
+                        2].lower() else diameters_concrete
+                D = np.array(D)
                 oldDiameter = row[1]*1e3
-                row[1] = D_plastic[np.where(row[1]*1e3<D_plastic)[0][0]]/1e3 if (not "concrete" in row[2].lower() and not "beton" in row[2].lower()) else D_concrete[np.where(row[1]*1e3<D_concrete)[0][0]]/1e3
+                row[1] = D[np.where(row[1]*1e3<D)[0][0]]/1e3
+                if change_material:
+                    row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
                 cursor.updateRow(row)
                 arcpy.AddMessage("Upgraded pipe %s from %d to %d" % (row[0],oldDiameter,row[1]*1e3))
 
@@ -1670,9 +1692,17 @@ class downgradeDimensions(object):
             datatype="GPFeatureLayer",
             parameterType="Required",
             direction="Input")
+            
+        change_material = arcpy.Parameter(
+            displayName="Change material (Plastic if less than 500 mm, concrete if greater than or equal to 500 mm",
+            name="change_material",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+        change_material.value = "true"
         # pipe_layer.filter.list = ["Polyline"] # does not work for some reason
 
-        parameters = [pipe_layer]
+        parameters = [pipe_layer, change_material]
         return parameters
 
     def isLicensed(self):
@@ -1693,6 +1723,7 @@ class downgradeDimensions(object):
 
     def execute(self, parameters, messages):
         pipe_layer = parameters[0].Value
+        change_material = parameters[1].Value
 
         MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer,["MUID"])]
         if len(MUIDs) == len([row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).CatalogPath,["MUID"])]):
@@ -1707,8 +1738,17 @@ class downgradeDimensions(object):
         D_concrete = np.array(diameters_concrete)
         with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath,["MUID", "Diameter", "MaterialID"], where_clause = "MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
             for row in cursor:
+                if change_material:
+                    D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                        diameter for diameter in diameters_concrete if diameter > 450]
+                else:
+                    D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
+                        2].lower() else diameters_concrete
+                D = np.array(D)
                 oldDiameter = row[1]*1e3
-                row[1] = D_plastic[np.where(row[1]*1e3>D_plastic)[0][-1]]/1e3 if (not "concrete" in row[2].lower() and not "beton" in row[2].lower()) else D_concrete[np.where(row[1]*1e3>D_concrete)[0][-1]]/1e3
+                row[1] = D[np.where(row[1]*1e3>D)[0][-1]]/1e3
+                if change_material:
+                    row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
                 cursor.updateRow(row)
                 arcpy.AddMessage("Downgraded pipe %s from %d to %d" % (row[0],oldDiameter,row[1]*1e3))
 
