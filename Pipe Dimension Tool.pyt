@@ -959,7 +959,8 @@ class PipeDimensionToolTA(object):
         else:  
             result_layer = getAvailableFilename(arcpy.env.scratchGDB + "\Pipe_Dimensions", parent = MU_database)
             arcpy.CreateFeatureclass_management(arcpy.env.scratchGDB, os.path.basename(result_layer), "POLYLINE")
-            fields = ["muid", "diameter", "materialid", "slope", "nettypeno", "enabled", "ImpArea", "RedArea", "MaxFlow", "CritTime"]
+            fields = ["muid", "diameter", "materialid", "slope", "nettypeno", "enabled", "ImpArea", "RedArea",
+                      "MaxFlow", "CritTime", "FromNode", "ToNode"]
 
             addField(result_layer, "muid", "TEXT")
             addField(result_layer, "diameter", "FLOAT")
@@ -971,6 +972,8 @@ class PipeDimensionToolTA(object):
             addField(result_layer, "RedArea", "FLOAT")
             addField(result_layer, "MaxFlow", "FLOAT")
             addField(result_layer, "CritTime", "SHORT")
+            addField(result_layer, "FromNode", "TEXT")
+            addField(result_layer, "ToNode", "TEXT")
 
 
             arcpy.SetProgressor("step","Calculating Pipe Dimensions", 0, len(selected_pipes), 1)
@@ -1008,7 +1011,9 @@ class PipeDimensionToolTA(object):
                                        total_imp_opl[msm_Link_Network.links[row[3]].fromnode],
                                        total_red_opl[msm_Link_Network.links[row[3]].fromnode],
                                        peak_discharge[msm_Link_Network.links[row[3]].fromnode],
-                                       peak_discharge_time[msm_Link_Network.links[row[3]].fromnode])
+                                       peak_discharge_time[msm_Link_Network.links[row[3]].fromnode],
+                                       msm_Link_Network.links[row[3]].fromnode,
+                                       msm_Link_Network.links[row[3]].tonode)
                             ins_cursor.insertRow(ins_row)
                                 # if diameter_old != row[1]:
                                     # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
