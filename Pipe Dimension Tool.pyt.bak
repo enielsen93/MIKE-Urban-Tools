@@ -11,11 +11,7 @@ import hashlib
 import math
 import os
 import sys
-functionsPath = [r"K:\Hydrauliske modeller\Makroer & Beregningsark\Functions", r"C:\Makroer & Beregningsark\Functions", r"C:\Dokumenter\Makroer\Functions", os.path.join(os.path.dirname(os.path.dirname(__file__)),"Functions")]
-i = 0
-while not os.path.exists(functionsPath[i]):
-    i += 1
-sys.path.append(functionsPath[i])
+
 import networkx as nx
 import colebrookWhite
 import networker
@@ -96,7 +92,7 @@ class Toolbox(object):
         self.alias  = "Pipe Dimension Tool"
         self.canRunInBackground = True
         # List of tool classes associated with this toolbox
-        self.tools = [PipeDimensionTool, PipeDimensionToolTA, PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange]
+        self.tools = [PipeDimensionTool, PipeDimensionToolTA, PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope]
 
 class PipeDimensionTool(object):
     def __init__(self):
@@ -451,7 +447,6 @@ class PipeDimensionToolTA(object):
             direction="Input")
         reaches.filter.type = "ValueList"
         reaches.filter.list = ["Orifice","Weir","Pump", "Basin"]
-        reaches.value = ["Orifice","Weir","Pump", "Basin"]
 
         result_field = arcpy.Parameter(
 			displayName= "Field to assign diameter to",
@@ -533,6 +528,14 @@ class PipeDimensionToolTA(object):
             direction="Input")
         keep_largest_diameter.category = "Additional settings"
 
+        change_material = arcpy.Parameter(
+            displayName="Change material (Plastic if less than 500 mm, concrete if greater than or equal to 500 mm",
+            name="change_material",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+        change_material.category = "Additional settings"
+
         # get_start_time = arcpy.Parameter(
             # displayName="Copy start time from dfs0 file:",
             # name="get_start_time",
@@ -543,7 +546,7 @@ class PipeDimensionToolTA(object):
         # get_start_time.category = "Additional settings"
         # get_start_time.enabled = False
 
-        parameters = [pipe_layer, reaches, result_field, runoff_file, scaling_factor, breakChainOnNodes, writeDischargeInstead, useMaxInflow, slopeOverwrite, writeDFS0, keep_largest_diameter]
+        parameters = [pipe_layer, reaches, result_field, runoff_file, scaling_factor, breakChainOnNodes, writeDischargeInstead, useMaxInflow, slopeOverwrite, writeDFS0, keep_largest_diameter, change_material]
         return parameters
 
     def isLicensed(self):
@@ -585,13 +588,23 @@ class PipeDimensionToolTA(object):
         useMaxInflow = parameters[7].Value
         slopeOverwrite = parameters[8].Value
         writeDFS0 = parameters[9].ValueAsText
-        keep_largest_diameter = parameters[10].ValueAsText
+        keep_largest_diameter = parameters[10].Value
+        change_material = parameters[11].Value
         # get_start_time = parameters[10].ValueAsText
 
         selected_pipes = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["MUID"])]
 
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
+        
+        def addLayer(layer_source, source, group = None, workspace_type = "ACCESS_WORKSPACE"):
+            layer = apmapping.Layer(layer_source)
+            if group:
+                apmapping.AddLayerToGroup(df, group, layer, "BOTTOM")
+            else:
+                apmapping.AddLayer(df, layer, "TOP")
+            updatelayer = apmapping.ListLayers(mxd, layer.name, df)[0]
+            updatelayer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, unicode(os.path.basename(source)))
 
         msm_Link = os.path.join(MU_database,"msm_Link")
         msm_Node = os.path.join(MU_database,"msm_Node")
@@ -906,7 +919,12 @@ class PipeDimensionToolTA(object):
                     for row_i, row in enumerate(cursor):
                         # diameter_old = row[4]
                         arcpy.SetProgressorPosition(row_i)
-                        D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[2].lower() else diameters_concrete
+                        if change_material:
+                            D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                                diameter for diameter in diameters_concrete if diameter > 450]
+                        else:
+                            D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
+                                2].lower() else diameters_concrete
                         slope = slopeOverwrite if slopeOverwrite else row[0]*1e-2
                         if writeDischargeInstead:
                             row[1] = peak_discharge[msm_Link_Network.links[row[3]].fromnode]
@@ -921,6 +939,7 @@ class PipeDimensionToolTA(object):
                                     Di += 1
                                     QFull = colebrookWhite.QFull(D[Di]/1e3,slope,row[2])
                             row[1] = D[Di]/1.0e3
+                            row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
                             # if diameter_old != row[1]:
                                 # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
                         try:
@@ -962,7 +981,11 @@ class PipeDimensionToolTA(object):
                         for row_i, row in enumerate(cursor):
                             # diameter_old = row[4]
                             arcpy.SetProgressorPosition(row_i)
-                            D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[2].lower() else diameters_concrete
+                            if change_material:
+                                D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                                    diameter for diameter in diameters_concrete if diameter > 450]
+                            else:
+                                D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[2].lower() else diameters_concrete
                             slope = slopeOverwrite if slopeOverwrite else row[0]*1e-2
                             # if writeDischargeInstead:
                             #     diameter = # ins_row = (row[4], row[3], peak_discharge[msm_Link_Network.links[row[3]].fromnode], row[2], row[0], row[5], row[6])
@@ -1688,6 +1711,220 @@ class downgradeDimensions(object):
         edit.stopEditing(True)
         return
 
+class InterpolateInvertLevels(object):
+    def __init__(self):
+        self.label       = "Interpolate Invert Levels"
+        self.description = "Interpolate Invert Levels"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        #Define parameter definitions
+
+        pipe_layer = arcpy.Parameter(
+            displayName="Pipe feature layer",
+            name="pipe_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+
+        parameters = [pipe_layer]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):
+
+
+        return
+
+    def updateMessages(self, parameters): #optional
+        return
+
+    def execute(self, parameters, messages):
+        pipe_layer = parameters[0].Value
+        MU_database = os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath))
+        
+        links_MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer,["MUID"])]
+        msm_Node = os.path.join(MU_database, "msm_Node")
+        msm_Link = os.path.join(MU_database, "msm_Link")
+        end_node_critical = None
+
+        if len(links_MUIDs) == len(
+                [row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).CatalogPath, ["MUID"])]):
+            userquery = pythonaddins.MessageBox("Change dimension of %d pipes?" % (len(links_MUIDs)), "Confirm Assignment", 4)
+            if not userquery == "Yes":
+                return
+
+        msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link")
+
+        tonodes = [msm_Link_Network.links[MUID].tonode for MUID in links_MUIDs]
+        fromnodes = [msm_Link_Network.links[MUID].fromnode for MUID in links_MUIDs]
+        start_node = [fromnode for fromnode in fromnodes if fromnode not in tonodes][0]
+        end_node = [tonode for tonode in tonodes if tonode not in fromnodes][0]
+
+        invert_levels = {row[0]: row[1] for row in
+                         arcpy.da.SearchCursor(msm_Node,
+                                               ["MUID", "InvertLevel"],
+                                               where_clause="MUID IN ('%s', '%s')" % (start_node, end_node))}
+
+        end_node_critical = end_node_critical if end_node_critical else invert_levels[end_node]
+
+        network = nx.DiGraph()
+        for link in msm_Link_Network.links.values():
+            network.add_edge(link.fromnode, link.tonode,
+                             weight=link.length)
+
+        path_nodes = nx.bellman_ford_path(network, start_node, end_node, weight="weight")
+        lengths = np.zeros(len(path_nodes) - 1, dtype=np.float)
+        for i in range(1, len(path_nodes)):
+            lengths[i - 1] = network.edges[path_nodes[i - 1], path_nodes[i]]["weight"]
+
+        slope = (invert_levels[start_node] - invert_levels[end_node]) / np.sum(lengths)
+
+        arcpy.AddMessage("Assuming slope %d o/oo" % (slope*1e3))
+
+        edit = arcpy.da.Editor(MU_database)
+        edit.startEditing(False, True)
+        edit.startOperation()
+
+        minimum_ground_slope = None
+        with arcpy.da.UpdateCursor(msm_Node, ["MUID", "InvertLevel", "GroundLevel"],
+                                   where_clause="MUID IN ('%s')" % ("', '".join(path_nodes))) as cursor:
+            for row in cursor:
+                if row[0] != end_node:
+                    total_length = nx.bellman_ford_path_length(network, row[0], end_node, weight="weight")
+                    ground_slope = ((row[2] - end_node_critical)
+                                    / total_length)
+                    if not minimum_ground_slope or ground_slope < minimum_ground_slope[1]:
+                        minimum_ground_slope = [row[0], ground_slope]
+
+                    new_invert_level = round(invert_levels[end_node] + total_length * slope,2)
+                    if new_invert_level != row[1]:
+                        arcpy.AddMessage(
+                            "Changed invert level of %s from %1.2f to %1.2f" % (row[0], row[1], new_invert_level))
+                        row[1] = new_invert_level
+                        cursor.updateRow(row)
+        arcpy.AddMessage("Minimum slope from ground level to critical level is %d, by tracing from %s" % (minimum_ground_slope[1]*1e3, minimum_ground_slope[0]))
+
+        edit.stopOperation()
+        edit.stopEditing(True)
+        return
+
+class GetMinimumSlope(object):
+    def __init__(self):
+        self.label = "Calculate Minimum Slope of Energy Gradient"
+        self.description = "Calculate Minimum Slope of Energy Gradient"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        pipe_layer = arcpy.Parameter(
+            displayName="Pipe feature layer",
+            name="pipe_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+
+        end_node_critical = arcpy.Parameter(
+            displayName="Critical Level at End Node",
+            name="end_node_critical",
+            datatype="double",
+            parameterType="Optional",
+            direction="Input")
+
+        parameters = [pipe_layer, end_node_critical]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):
+
+        return
+
+    def updateMessages(self, parameters):  # optional
+        return
+
+    def execute(self, parameters, messages):
+        pipe_layer = parameters[0].Value
+        end_node_critical = parameters[1].Value
+        MU_database = os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath))
+        msm_Node = os.path.join(MU_database, "msm_Node")
+        msm_Link = os.path.join(MU_database, "msm_Link")
+
+        msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link")
+
+        links_MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer,["MUID"])]
+        tonodes = [msm_Link_Network.links[MUID].tonode for MUID in links_MUIDs]
+        fromnodes = [msm_Link_Network.links[MUID].fromnode for MUID in links_MUIDs]
+        start_nodes = [fromnode for fromnode in fromnodes if fromnode not in tonodes]
+        end_node = [tonode for tonode in tonodes if tonode not in fromnodes][0]
+
+        levels = {row[0]: [row[1], row[2]] for row in
+                  arcpy.da.SearchCursor(msm_Node,
+                                        ["MUID", "InvertLevel", "GroundLevel"],
+                                        where_clause="MUID IN ('%s')" % ("', '".join(set(fromnodes + tonodes))))}
+
+        with arcpy.da.SearchCursor(msm_Link, ["MUID", "Diameter"]) as cursor:
+            for row in cursor:
+                msm_Link_Network.links[row[0]].diameter = row[1]
+
+        # end_node_critical = (end_node_critical if
+        #                      end_node_critical else levels[end_node])
+
+        network = nx.DiGraph()
+        for link in msm_Link_Network.links.values():
+            network.add_edge(link.fromnode, link.tonode,
+                             weight=link.length)
+
+        critical_energy_gradient = {}
+        for start_node in start_nodes:
+            path_nodes = nx.bellman_ford_path(network, start_node, end_node, weight="weight")
+
+            minimum_ground_slope = {}
+            last_critical_energy_gradient = None
+            debug = []
+            for fromnode_i, fromnode in enumerate(path_nodes[:-1]):
+                total_gradient = ((levels[fromnode][1] -
+                                   (end_node_critical if end_node_critical else levels[end_node][0] +
+                                                                                [link.diameter for link in
+                                                                                 msm_Link_Network.links.values() if
+                                                                                 link.tonode == end_node and
+                                                                                 link.fromnode in path_nodes][0])) /
+                                  nx.bellman_ford_path_length(network, fromnode, end_node, weight="weight"))
+
+                for tonode in path_nodes[fromnode_i + 1:]:
+                    gradient = ((levels[fromnode][1] - levels[tonode][0] -
+                                 [link.diameter for link in msm_Link_Network.links.values() if link.tonode == tonode and
+                                  link.fromnode in path_nodes][0]) /
+                                nx.bellman_ford_path_length(network, fromnode, tonode, weight="weight"))
+
+                    gradient = gradient if gradient < total_gradient else total_gradient
+                    gradient = gradient if not last_critical_energy_gradient or gradient < last_critical_energy_gradient else last_critical_energy_gradient
+                    critical_energy_gradient[
+                        fromnode] = gradient if not fromnode in critical_energy_gradient or gradient < \
+                                                critical_energy_gradient[fromnode] else critical_energy_gradient[
+                        fromnode]
+                last_critical_energy_gradient = critical_energy_gradient[fromnode]
+
+        edit = arcpy.da.Editor(MU_database)
+        edit.startEditing(False, True)
+        edit.startOperation()
+        with arcpy.da.UpdateCursor(msm_Link, ["MUID", "Slope_C"],
+                                   where_clause="MUID IN ('%s')" % ("', '".join(links_MUIDs))) as cursor:
+            for row in cursor:
+                fromnode = msm_Link_Network.links[row[0]].fromnode
+                if fromnode in critical_energy_gradient:
+                    row[1] = critical_energy_gradient[fromnode] * 1e2
+                    cursor.updateRow(row)
+                else:
+                    arcpy.AddWarning("%s not in critical_energy_gradient" % (fromnode))
+        edit.stopOperation()
+        edit.stopEditing(True)
+
+        return
 
 class setOutletLoss(object):
     def __init__(self):

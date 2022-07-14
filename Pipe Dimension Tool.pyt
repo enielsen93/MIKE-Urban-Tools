@@ -11,13 +11,9 @@ import hashlib
 import math
 import os
 import sys
-functionsPath = [r"K:\Hydrauliske modeller\Makroer & Beregningsark\Functions", r"C:\Makroer & Beregningsark\Functions", r"C:\Dokumenter\Makroer\Functions", os.path.join(os.path.dirname(os.path.dirname(__file__)),"Functions")]
-i = 0
-while not os.path.exists(functionsPath[i]):
-    i += 1
-sys.path.append(functionsPath[i])
+
 import networkx as nx
-import colebrookWhite
+import ColebrookWhite
 import networker
 import pandas as pd
 import traceback
