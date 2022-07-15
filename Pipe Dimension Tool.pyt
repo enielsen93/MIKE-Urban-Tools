@@ -1802,11 +1802,18 @@ class InterpolateInvertLevels(object):
                 return
 
         msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link")
-
+        
         tonodes = [msm_Link_Network.links[MUID].tonode for MUID in links_MUIDs]
         fromnodes = [msm_Link_Network.links[MUID].fromnode for MUID in links_MUIDs]
-        start_node = [fromnode for fromnode in fromnodes if fromnode not in tonodes][0]
-        end_node = [tonode for tonode in tonodes if tonode not in fromnodes][0]
+        try:
+            start_node = [fromnode for fromnode in fromnodes if fromnode not in tonodes][0]
+            end_node = [tonode for tonode in tonodes if tonode not in fromnodes][0]
+        except Exception as e:
+            for MUID in links_MUIDs:
+                arcpy.AddMessage("%s: %s-%s" % (MUID, msm_Link_Network.links[MUID].fromnode, msm_Link_Network.links[MUID].tonode))
+            arcpy.AddWarning(("fromnodes:", fromnodes))
+            arcpy.AddWarning(("tonodes:", tonodes))
+            raise(e)
 
         invert_levels = {row[0]: row[1] for row in
                          arcpy.da.SearchCursor(msm_Node,
@@ -1839,18 +1846,13 @@ class InterpolateInvertLevels(object):
             for row in cursor:
                 if row[0] != end_node:
                     total_length = nx.bellman_ford_path_length(network, row[0], end_node, weight="weight")
-                    ground_slope = ((row[2] - end_node_critical)
-                                    / total_length)
-                    if not minimum_ground_slope or ground_slope < minimum_ground_slope[1]:
-                        minimum_ground_slope = [row[0], ground_slope]
 
                     new_invert_level = round(invert_levels[end_node] + total_length * slope,2)
                     if new_invert_level != row[1]:
                         arcpy.AddMessage(
-                            "Changed invert level of %s from %1.2f to %1.2f" % (row[0], row[1], new_invert_level))
+                            "Changed invert level of %s from %1.2f to %1.2f" % (row[0], row[1] if row[1] else 0, new_invert_level))
                         row[1] = new_invert_level
                         cursor.updateRow(row)
-        arcpy.AddMessage("Minimum slope from ground level to critical level is %d, by tracing from %s" % (minimum_ground_slope[1]*1e3, minimum_ground_slope[0]))
 
         edit.stopOperation()
         edit.stopEditing(True)

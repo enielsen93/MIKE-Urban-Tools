@@ -1623,7 +1623,7 @@ class upgradeDimensions(object):
             datatype="Boolean",
             parameterType="optional",
             direction="Input")
-        change_material.Default = "true"
+        change_material.value = "true"
         
         parameters = [pipe_layer, change_material]
         return parameters
@@ -1802,11 +1802,18 @@ class InterpolateInvertLevels(object):
                 return
 
         msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link")
-
+        
         tonodes = [msm_Link_Network.links[MUID].tonode for MUID in links_MUIDs]
         fromnodes = [msm_Link_Network.links[MUID].fromnode for MUID in links_MUIDs]
-        start_node = [fromnode for fromnode in fromnodes if fromnode not in tonodes][0]
-        end_node = [tonode for tonode in tonodes if tonode not in fromnodes][0]
+        try:
+            start_node = [fromnode for fromnode in fromnodes if fromnode not in tonodes][0]
+            end_node = [tonode for tonode in tonodes if tonode not in fromnodes][0]
+        except Exception as e:
+            for MUID in links_MUIDs:
+                arcpy.AddMessage("%s: %s-%s" % (MUID, msm_Link_Network.links[MUID].fromnode, msm_Link_Network.links[MUID]))
+            arcpy.AddWarning(("fromnodes:", fromnodes))
+            arcpy.AddWarning(("tonodes:", tonodes))
+            raise(e)
 
         invert_levels = {row[0]: row[1] for row in
                          arcpy.da.SearchCursor(msm_Node,
