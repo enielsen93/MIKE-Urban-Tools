@@ -48,7 +48,7 @@ class Toolbox(object):
         self.alias  = "Display Mike Urban Model"
 
         # List of tool classes associated with this toolbox
-        self.tools = [DisplayMikeUrban, DimensionAnalysis, DisplayPipeElevation] 
+        self.tools = [DisplayMikeUrban, DimensionAnalysis, DisplayPipeElevation, GenerateCatchmentConnections] 
 
 class DisplayMikeUrban(object):
     def __init__(self):
@@ -509,6 +509,7 @@ class DimensionAnalysis(object):
         return
         
 class DisplayPipeElevation(object):
+
     def __init__(self):
         self.label       = "Show Pipes with Erronous Elevation"
         self.description = "Show Pipes with Erronous Elevation"
@@ -555,4 +556,80 @@ class DisplayPipeElevation(object):
         
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
+        return
+        
+class GenerateCatchmentConnections(object):
+    def __init__(self):
+        self.label       = "Generate Catchment Connections"
+        self.description = "Generate Catchment Connections"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        #Define parameter definitions
+
+        catchment_layer = arcpy.Parameter(
+            displayName="Catchment feature layer",
+            name="pipe_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+        
+        parameters = [catchment_layer]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):
+
+
+        return
+
+    def updateMessages(self, parameters): #optional
+        return
+
+    def execute(self, parameters, messages):
+        catchment_layer = parameters[0].Value
+        mu_database = os.path.dirname(os.path.dirname(arcpy.Describe(catchment_layer).catalogPath))
+        
+        MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchment_layer,["MUID"])]
+        
+        msm_Node = os.path.join(mu_database, "msm_Node")
+        ms_Catchment = os.path.join(mu_database, "ms_Catchment")
+        msm_CatchCon = os.path.join(mu_database, "msm_CatchCon")
+        msm_CatchConLink = os.path.join(mu_database, "msm_CatchConLink")
+
+        with arcpy.da.UpdateCursor(msm_CatchConLink, ["MUID"]) as cursor:
+            for row in cursor:
+                cursor.deleteRow()
+
+        where_clause = "MUID IN ('%s')" % "', '".join(MUIDs)
+        if len(where_clause) > 2900:
+            where_clause = ""
+            arcpy.AddMessage("Query exceeds 2900 chars")
+        
+        catchments_coordinates = {row[0]:row[1] for row in arcpy.da.SearchCursor(ms_Catchment, ["MUID", "SHAPE@XY"], 
+                                    where_clause = where_clause)}
+
+        links = {row[0]:[row[1], row[2]] for row in arcpy.da.SearchCursor(msm_CatchCon, ["MUID", "CatchID", "NodeID"], 
+                                    where_clause = where_clause.replace("MUID","CatchID")) if row[1] in MUIDs}
+
+        nodes_MUIDs = [node for catchment, node in links.values()]
+        
+        nodes_coordinates = {row[0]:row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "SHAPE@XY"], 
+                                    where_clause = "MUID IN ('%s')" % "', '".join(nodes_MUIDs) if where_clause else "")}
+
+        arcpy.AddMessage("Generating %d links" % (len(links)))
+        arcpy.SetProgressor("step","Generating Catchment Connections", 0, len(links), 1)
+        with arcpy.da.InsertCursor(msm_CatchConLink, ["SHAPE@", "MUID", "CatchConID","SHAPE_Length"]) as cursor:
+            for link_i, link in enumerate(links.keys()):
+                catchment, node = links[link]
+                catchment_coordinate = catchments_coordinates[catchment]
+                node_coordinate = nodes_coordinates[node]
+                shape = arcpy.Polyline(arcpy.Array([arcpy.Point(catchment_coordinate[0], catchment_coordinate[1]),
+                                             arcpy.Point(node_coordinate[0], node_coordinate[1])]))
+                row = [shape, link_i, link, shape.length]
+                cursor.insertRow(row)
+                arcpy.SetProgressorPosition(link_i)
+                
         return
