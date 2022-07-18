@@ -106,10 +106,17 @@ class SummarizeButton(object):
         HParA_conctime = {}
         
         if combobox_1.selectedfield not in [field.name for field in arcpy.ListFields(catchmentLayer)]:
+            MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchmentLayer, ["MUID"])]     
+            
+            # If there's more than 500 catchments, the length of the where_clause might exceed memory. If so, then ignore where_clause. 
+            if len(MUIDs)<500:
+                where_clause = "MUID IN ('%s')" % ("', '".join(MUIDs))
+            else:
+                where_clause = ""
+            
             if ".mdb" in arcpy.Describe(catchmentLayer).path:
                 msm_HModA = os.path.join(os.path.dirname(arcpy.Describe(catchmentLayer).path), "msm_HModA")
-                msm_HParA = os.path.join(os.path.dirname(arcpy.Describe(catchmentLayer).path), "msm_HParA")
-                MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchmentLayer, ["MUID"])]      
+                msm_HParA = os.path.join(os.path.dirname(arcpy.Describe(catchmentLayer).path), "msm_HParA") 
                 
                 with arcpy.da.SearchCursor(msm_HParA, ["MUID", "RedFactor", "InitLoss", "ConcTime"]) as cursor:
                     for row in cursor:
@@ -117,7 +124,7 @@ class SummarizeButton(object):
                         HParA_initloss[row[0]] = row[2]
                         HParA_conctime[row[0]] = row[3]
                         
-                with arcpy.da.SearchCursor(msm_HModA, ["CatchID", "ImpArea", "LocalNo", "RFactor", "ParAID", "ILoss", "ConcTime"], where_clause = "CatchID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
+                with arcpy.da.SearchCursor(msm_HModA, ["CatchID", "ImpArea", "LocalNo", "RFactor", "ParAID", "ILoss", "ConcTime"], where_clause = where_clause.replace("MUID","CatchID")) as cursor:
                     for row in cursor:
                         catchments[row[0]] = Catchment(row[0])
                         catchments[row[0]].imperviousness = row[1]
@@ -131,7 +138,7 @@ class SummarizeButton(object):
                             catchments[row[0]].initial_loss = HParA_initloss[row[4]]
                             catchments[row[0]].concentration_time = HParA_conctime[row[4]]
                     
-                with arcpy.da.SearchCursor(catchmentLayer, ["MUID", "SHAPE@AREA", "Area"], where_clause = "MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
+                with arcpy.da.SearchCursor(catchmentLayer, ["MUID", "SHAPE@AREA", "Area"], where_clause = where_clause) as cursor:
                     for row in cursor:
                         if row[2]:
                             catchments[row[0]].area = row[2]*1e4
@@ -140,14 +147,13 @@ class SummarizeButton(object):
                             
             elif ".sqlite" in arcpy.Describe(catchmentLayer).path:
                 msm_HParA = os.path.join(arcpy.Describe(catchmentLayer).path, "main.msm_HParA")
-                MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchmentLayer, ["muid"])]
                 with arcpy.da.SearchCursor(msm_HParA, ["muid", "redfactor", "initloss", "conctime"]) as cursor:
                     for row in cursor:
                         HParA_redfactor[row[0]] = row[1]
                         HParA_initloss[row[0]] = row[2]
                         HParA_conctime[row[0]] = row[3]
                         
-                with arcpy.da.SearchCursor(catchmentLayer, ["muid", "SHAPE@AREA", "area", "ModelAImpArea", "ModelAParAID", "modelalocalno", "ModelARFactor", "ModelAILoss", "ModelAConcTime"], where_clause = "muid IN ('%s')" % ("', '".join(MUIDs))) as cursor:
+                with arcpy.da.SearchCursor(catchmentLayer, ["muid", "SHAPE@AREA", "area", "ModelAImpArea", "ModelAParAID", "modelalocalno", "ModelARFactor", "ModelAILoss", "ModelAConcTime"], where_clause = where_clause) as cursor:
                     for row in cursor:
                         catchments[row[0]] = Catchment(row[0])
                         if row[2]:
@@ -169,7 +175,12 @@ class SummarizeButton(object):
             
             # for catchment in catchments.values():
                 # pythonaddins.MessageBox((catchment.area, catchment.imperviousness, catchment.reduction_factor), "Catchment summary", 0)
-                
+            
+            if where_clause:
+                catchments_selected = {MUID: catchments[MUID] for MUID in MUIDs}
+            else: 
+                catchments_selected = catchments
+            
             catchment_area = np.sum([catchment.area for catchment in catchments.values()])
             catchment_impervious_area = np.sum([catchment.impervious_area for catchment in catchments.values()])
             catchment_reduced_area = np.sum([catchment.reduced_area for catchment in catchments.values()])
@@ -178,10 +189,12 @@ class SummarizeButton(object):
             
             message_text = "Total area: %1.2f ha\nImpervious area: %1.2f ha (%1.0f%s)\nReduced area: %1.2f ha" % (
                             catchment_area/1e4, catchment_impervious_area/1e4, catchment_impervious_area/catchment_area*1e2, "%", catchment_reduced_area/1e4)
-            message_text += "\nInitial loss: %s mm\nConcentration time: %s min\n" % ("%d,
-                                                                                          np.min([catchment.concentration_time for catchment in catchments.values()]),
-                                                                                          np.max([catchment.concentration_time for catchment in catchments.values()]))
+            # message_text += "\nInitial loss: %s mm\nConcentration time: %s min\n" % ("%d",
+            #                                                                               np.min([catchment.concentration_time for catchment in catchments.values()]),
+            #                                                                               np.max([catchment.concentration_time for catchment in catchments.values()]))
         else:
+            impArea = []
+            shapeArea = []
             if "Area" in arcpy.ListFields(catchmentLayer): # if selected field and discharge area
                 with arcpy.da.SearchCursor(catchmentLayer, ["SHAPE@AREA", "Area", combobox_1.selectedfield]) as cursor:
                     for row in cursor:
