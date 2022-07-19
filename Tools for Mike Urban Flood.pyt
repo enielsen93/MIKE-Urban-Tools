@@ -6,11 +6,6 @@ import re
 from arcpy import env
 arcpy.env.addOutputsToMap = False
 import sys
-functionsPath = [r"K:\Hydrauliske modeller\Makroer & Beregningsark\Functions", r"C:\Dokumenter\Makroer\Functions", os.path.join(os.path.dirname(os.path.dirname(__file__)),"Functions")]
-i = 0
-while not os.path.exists(functionsPath[i]):
-    i += 1
-sys.path.append(functionsPath[i])
 import time
 import mikeio
 import bisect
