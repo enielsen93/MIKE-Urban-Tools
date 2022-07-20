@@ -1832,8 +1832,17 @@ class InterpolateInvertLevels(object):
         for i in range(1, len(path_nodes)):
             lengths[i - 1] = network.edges[path_nodes[i - 1], path_nodes[i]]["weight"]
 
-        slope = (invert_levels[start_node] - invert_levels[end_node]) / np.sum(lengths)
-
+        try:
+            slope = (invert_levels[start_node] - invert_levels[end_node]) / np.sum(lengths)
+        except Exception as e:
+            arcpy.AddError(("start_node", start_node))
+            arcpy.AddError(("end_node", end_node))
+            arcpy.AddError(("tonodes", tonodes))
+            arcpy.AddError(("fromnodes", fromnodes))
+            arcpy.AddError(("invert_levels[start_node]", invert_levels[start_node]))
+            arcpy.AddError(("invert_levels[end_node]", invert_levels[end_node]))
+            arcpy.AddError(("np.sum(lengths)", np.sum(lengths)))
+            raise(e)
         arcpy.AddMessage("Assuming slope %d o/oo" % (slope*1e3))
 
         edit = arcpy.da.Editor(MU_database)
