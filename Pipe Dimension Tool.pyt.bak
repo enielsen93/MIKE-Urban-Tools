@@ -1800,7 +1800,16 @@ class InterpolateInvertLevels(object):
             userquery = pythonaddins.MessageBox("Change dimension of %d pipes?" % (len(links_MUIDs)), "Confirm Assignment", 4)
             if not userquery == "Yes":
                 return
-
+        
+        if not len(links_MUIDs) == len(set(links_MUIDs)):
+            arcpy.AddError("Error: There's two or more pipes with identical names.")
+            duplicates = []
+            for MUID in links_MUIDs:
+                if links_MUIDs.count(MUID)>1 and MUID not in duplicates:
+                    arcpy.AddError("Pipe %s" % (MUID))
+                    duplicates.append(MUID)
+            raise("Cancelling toolbox")
+        
         msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link")
         
         tonodes = [msm_Link_Network.links[MUID].tonode for MUID in links_MUIDs]
@@ -1810,7 +1819,7 @@ class InterpolateInvertLevels(object):
             end_node = [tonode for tonode in tonodes if tonode not in fromnodes][0]
         except Exception as e:
             for MUID in links_MUIDs:
-                arcpy.AddMessage("%s: %s-%s" % (MUID, msm_Link_Network.links[MUID].fromnode, msm_Link_Network.links[MUID]))
+                arcpy.AddMessage("%s: %s-%s" % (MUID, msm_Link_Network.links[MUID].fromnode, msm_Link_Network.links[MUID].tonode))
             arcpy.AddWarning(("fromnodes:", fromnodes))
             arcpy.AddWarning(("tonodes:", tonodes))
             raise(e)
@@ -1832,8 +1841,17 @@ class InterpolateInvertLevels(object):
         for i in range(1, len(path_nodes)):
             lengths[i - 1] = network.edges[path_nodes[i - 1], path_nodes[i]]["weight"]
 
-        slope = (invert_levels[start_node] - invert_levels[end_node]) / np.sum(lengths)
-
+        try:
+            slope = (invert_levels[start_node] - invert_levels[end_node]) / np.sum(lengths)
+        except Exception as e:
+            arcpy.AddError(("start_node", start_node))
+            arcpy.AddError(("end_node", end_node))
+            arcpy.AddError(("tonodes", tonodes))
+            arcpy.AddError(("fromnodes", fromnodes))
+            arcpy.AddError(("invert_levels[start_node]", invert_levels[start_node]))
+            arcpy.AddError(("invert_levels[end_node]", invert_levels[end_node]))
+            arcpy.AddError(("np.sum(lengths)", np.sum(lengths)))
+            raise(e)
         arcpy.AddMessage("Assuming slope %d o/oo" % (slope*1e3))
 
         edit = arcpy.da.Editor(MU_database)
@@ -1846,18 +1864,13 @@ class InterpolateInvertLevels(object):
             for row in cursor:
                 if row[0] != end_node:
                     total_length = nx.bellman_ford_path_length(network, row[0], end_node, weight="weight")
-                    ground_slope = ((row[2] - end_node_critical)
-                                    / total_length)
-                    if not minimum_ground_slope or ground_slope < minimum_ground_slope[1]:
-                        minimum_ground_slope = [row[0], ground_slope]
 
                     new_invert_level = round(invert_levels[end_node] + total_length * slope,2)
                     if new_invert_level != row[1]:
                         arcpy.AddMessage(
-                            "Changed invert level of %s from %1.2f to %1.2f" % (row[0], row[1], new_invert_level))
+                            "Changed invert level of %s from %1.2f to %1.2f" % (row[0], row[1] if row[1] else 0, new_invert_level))
                         row[1] = new_invert_level
                         cursor.updateRow(row)
-        arcpy.AddMessage("Minimum slope from ground level to critical level is %d, by tracing from %s" % (minimum_ground_slope[1]*1e3, minimum_ground_slope[0]))
 
         edit.stopOperation()
         edit.stopEditing(True)

@@ -1800,7 +1800,16 @@ class InterpolateInvertLevels(object):
             userquery = pythonaddins.MessageBox("Change dimension of %d pipes?" % (len(links_MUIDs)), "Confirm Assignment", 4)
             if not userquery == "Yes":
                 return
-
+        
+        if not len(links_MUIDs) == len(set(links_MUIDs)):
+            arcpy.AddError("Error: There's two or more pipes with identical names.")
+            duplicates = []
+            for MUID in links_MUIDs:
+                if links_MUIDs.count(MUID)>1 and MUID not in duplicates:
+                    arcpy.AddError("Pipe %s" % (MUID))
+                    duplicates.append(MUID)
+            raise(Exception("Cancelling toolbox"))
+        
         msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link")
         
         tonodes = [msm_Link_Network.links[MUID].tonode for MUID in links_MUIDs]
