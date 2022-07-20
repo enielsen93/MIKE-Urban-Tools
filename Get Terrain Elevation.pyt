@@ -165,7 +165,13 @@ class GetTerrainElevation(object):
                         arcpy.AddError("Error on row %s" % row[1])
                         arcpy.AddError(e.message)
         edit.stopOperation()
-        edit.stopEditing(True)
+        try:
+            edit.stopEditing(True)
+        except RuntimeError as e:
+            if "GDB_Release" in e.message:
+                pass
+            else:
+                raise(e)
         return
         
 class GetTerrainElevationDandas(object):

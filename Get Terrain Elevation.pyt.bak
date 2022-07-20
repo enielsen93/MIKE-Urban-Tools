@@ -139,8 +139,8 @@ class GetTerrainElevation(object):
                     arcpy.SetProgressorPosition(i)
                     
                     if DHM_file:
-                        arcpy.AddMessage(str(arcpy.GetCellValue_management(DHM_file, "%1.2f %1.2f" % (point_layer_shapes[row[0]][0],point_layer_shapes[row[0]][1]), "1").getOutput(0).replace(",",".")))
-                        row[1] = str(arcpy.GetCellValue_management(DHM_file, "%1.2f %1.2f" % (point_layer_shapes[row[0]][0],point_layer_shapes[row[0]][1]), "1").getOutput(0).replace(",","."))
+                        arcpy.AddMessage(str(arcpy.GetCellValue_management(DHM_file, "%1.2f %1.2f" % (point_layer_shapes[row[0]][0],point_layer_shapes[row[0]][1]), "1").getOutput(0).replace(".",",")))
+                        row[1] = str(arcpy.GetCellValue_management(DHM_file, "%1.2f %1.2f" % (point_layer_shapes[row[0]][0],point_layer_shapes[row[0]][1]), "1").getOutput(0).replace(".",","))
                     else:
                         if not coordinate_system.PCSCode == 25832:
                             point_reprojected = arcpy.PointGeometry(arcpy.Point(point_layer_shapes[row[0]][0], point_layer_shapes[row[0]][1]), coordinate_system).projectAs(arcpy.SpatialReference("ETRS 1989 UTM Zone 32N"))
@@ -165,7 +165,11 @@ class GetTerrainElevation(object):
                         arcpy.AddError("Error on row %s" % row[1])
                         arcpy.AddError(e.message)
         edit.stopOperation()
-        edit.stopEditing(True)
+        try:
+            edit.stopEditing(True)
+        except RuntimeError as e:
+            if "GDB_Release" in e.message:
+                pass
         return
         
 class GetTerrainElevationDandas(object):
