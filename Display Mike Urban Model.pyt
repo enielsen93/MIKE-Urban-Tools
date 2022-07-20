@@ -599,10 +599,6 @@ class GenerateCatchmentConnections(object):
         msm_CatchCon = os.path.join(mu_database, "msm_CatchCon")
         msm_CatchConLink = os.path.join(mu_database, "msm_CatchConLink")
 
-        with arcpy.da.UpdateCursor(msm_CatchConLink, ["MUID"]) as cursor:
-            for row in cursor:
-                cursor.deleteRow()
-
         where_clause = "MUID IN ('%s')" % "', '".join(MUIDs)
         if len(where_clause) > 2900:
             where_clause = ""
@@ -613,6 +609,10 @@ class GenerateCatchmentConnections(object):
 
         links = {row[0]:[row[1], row[2]] for row in arcpy.da.SearchCursor(msm_CatchCon, ["MUID", "CatchID", "NodeID"], 
                                     where_clause = where_clause.replace("MUID","CatchID")) if row[1] in MUIDs}
+
+        with arcpy.da.UpdateCursor(msm_CatchConLink, ["MUID"], where_clause = "CatchConID IN (%s)" % ", ".join([str(key) for key in links.keys()])) as cursor:
+            for row in cursor:
+                cursor.deleteRow()
 
         nodes_MUIDs = [node for catchment, node in links.values()]
         
