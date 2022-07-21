@@ -573,8 +573,16 @@ class GenerateCatchmentConnections(object):
             datatype="GPFeatureLayer",
             parameterType="Required",
             direction="Input")
-        
-        parameters = [catchment_layer]
+
+        delete_old_connections = arcpy.Parameter(
+            displayName="Delete All Old Catchment Connections",
+            name="delete_old_connections",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Output")
+        delete_old_connections.value = True
+
+        parameters = [catchment_layer, delete_old_connections]
         return parameters
 
     def isLicensed(self):
@@ -590,9 +598,11 @@ class GenerateCatchmentConnections(object):
 
     def execute(self, parameters, messages):
         catchment_layer = parameters[0].Value
+        delete_old_connections = parameters[0].ValueAsText
         mu_database = os.path.dirname(os.path.dirname(arcpy.Describe(catchment_layer).catalogPath))
         
         MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchment_layer,["MUID"])]
+        arcpy.AddMessage("%d selected catchments" % (len(MUIDs)))
         
         msm_Node = os.path.join(mu_database, "msm_Node")
         ms_Catchment = os.path.join(mu_database, "ms_Catchment")
@@ -610,7 +620,8 @@ class GenerateCatchmentConnections(object):
         links = {row[0]:[row[1], row[2]] for row in arcpy.da.SearchCursor(msm_CatchCon, ["MUID", "CatchID", "NodeID"], 
                                     where_clause = where_clause.replace("MUID","CatchID")) if row[1] in MUIDs}
 
-        with arcpy.da.UpdateCursor(msm_CatchConLink, ["MUID"], where_clause = "CatchConID IN (%s)" % ", ".join([str(key) for key in links.keys()])) as cursor:
+        with arcpy.da.UpdateCursor(msm_CatchConLink, ["MUID"], where_clause = "CatchConID IN (%s)" % ", ".join([str(key) for key in links.keys()])
+                                                                                if not delete_old_connections else "") as cursor:
             for row in cursor:
                 cursor.deleteRow()
 
