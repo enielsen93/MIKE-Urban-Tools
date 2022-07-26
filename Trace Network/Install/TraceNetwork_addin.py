@@ -119,10 +119,10 @@ class TraceUpstreamToolClass16(object):
                                                 "MUID IN ('%s')" % ("', '".join(links_MUID)))
 
         total_catchments = []
-        for node in upstream_nodes:
-            catchments = group_layer.graph.find_connected_catchments(node)
-            for catchment in catchments:
-                total_catchments.append(catchment)
+
+        catchments = group_layer.graph.find_connected_catchments(upstream_nodes)
+        for catchment in catchments:
+            total_catchments.append(catchment)
 
         arcpy.SelectLayerByAttribute_management(group_layer.ms_Catchment.longName, "ADD_TO_SELECTION",
                                                 "MUID IN ('%s')" % ("', '".join(total_catchments)))
