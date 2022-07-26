@@ -1,0 +1,14 @@
+<ESRI.Configuration xmlns="http://schemas.esri.com/Desktop/AddIns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><Name>Trace Network</Name><AddInID>{1ca47447-c512-454d-88b5-7271561848b4}</AddInID><Description>Trace Mike Urban Network</Description><Version>0.2</Version><Image /><Author>Emil Nielsen</Author><Company /><Date>07/26/2022</Date><Targets><Target name="Desktop" version="10.1" /></Targets><AddIn language="PYTHON" library="TraceNetwork_addin.py" namespace="TraceNetwork_addin"><ArcMap>
+    <Commands>
+        <ComboBox caption="Group" category="Trace Network" class="GroupComboBoxClass1" id="TraceNetwork_addin.group_layer" itemSizeString="WWWWWW" message="Group Layer" rows="8" sizeString="WWWWWW" tip="Pick the Group Layer"><Help heading="" /></ComboBox>
+        <Tool caption="Trace Upstream" category="Trace Network" class="TraceUpstreamToolClass16" id="TraceNetwork_addin.tool" image="Images\Trace Upstream.png" message="Trace Upstream" tip=""><Help heading="" /></Tool>
+        <Tool caption="Trace Downstream" category="Trace Network" class="TraceDownstreamToolClass18" id="TraceNetwork_addin.tool_1" image="Images\Trace Downstream.png" message="Trace Downstream" tip=""><Help heading="" /></Tool>
+        </Commands>
+    <Extensions>
+        </Extensions>
+    <Toolbars>
+        <Toolbar caption="Trace Network" category="Trace Network" id="TraceNetwork_addin.toolbar" showInitially="true"><Items><ComboBox refID="TraceNetwork_addin.combobox" /><Tool refID="TraceNetwork_addin.tool" /><Tool refID="TraceNetwork_addin.tool_1" /></Items></Toolbar>
+        </Toolbars>
+    <Menus>
+        </Menus>
+    </ArcMap></AddIn></ESRI.Configuration>
