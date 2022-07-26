@@ -7,7 +7,9 @@
     <Extensions>
         </Extensions>
     <Toolbars>
-        <Toolbar caption="Connect Catchments To Node" category="Connect Catchments to Node" id="CatchmentConnector.toobar1" showInitially="true"><Items><Tool refID="toolbar1.btn1_1" /><ComboBox refID="CatchmentConnector.manholeLayer" /><ComboBox refID="CatchmentConnector.catchmentLayer" /></Items></Toolbar>
+        <Toolbar caption="Connect Catchments To Node" category="Connect Catchments to Node" id="CatchmentConnector.toobar1" showInitially="true"><Items><Tool refID="toolbar1.btn1_1" />
+		<ComboBox refID="CatchmentConnector.manholeLayer" />
+		<ComboBox refID="CatchmentConnector.catchmentLayer" /></Items></Toolbar>
         </Toolbars>
     <Menus>
         </Menus>

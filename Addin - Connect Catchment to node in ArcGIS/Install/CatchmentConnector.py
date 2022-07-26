@@ -43,6 +43,9 @@ class ConnectCatchment(object):
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
         nodeLayer = [layer for layer in arcpy.mapping.ListLayers(mxd) if layer.longName == manholeLayer.selectedLayer][0]
+        if arcpy.Exists(os.path.join(nodeLayer.workspacePath, "msm_Node")):
+            nodeLayer = os.path.join(nodeLayer.workspacePath, "msm_Node")
+            
         nodesCount = int(arcpy.GetCount_management(nodeLayer)[0])
         nodes = np.empty(nodesCount,dtype=object)
         nodesX = np.empty(nodesCount)
