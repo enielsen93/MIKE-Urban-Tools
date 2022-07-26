@@ -3,11 +3,13 @@
         <ComboBox caption="Group" category="Trace Network" class="GroupComboBoxClass1" id="TraceNetwork_addin.group_layer" itemSizeString="WWWWWW" message="Group Layer" rows="8" sizeString="WWWWWW" tip="Pick the Group Layer"><Help heading="" /></ComboBox>
         <Tool caption="Trace Upstream" category="Trace Network" class="TraceUpstreamToolClass16" id="TraceNetwork_addin.tool" image="Images\Trace Upstream.png" message="Trace Upstream" tip=""><Help heading="" /></Tool>
         <Tool caption="Trace Downstream" category="Trace Network" class="TraceDownstreamToolClass18" id="TraceNetwork_addin.tool_1" image="Images\Trace Downstream.png" message="Trace Downstream" tip=""><Help heading="" /></Tool>
+        <Button caption="Find all connected catchments" category="Trace Network" class="ButtonClass21" id="TraceNetwork_addin.find_all_connected_catchments" image="Images\Select Connected Catchments.png" message="Find all connected catchments to selected nodes" tip=""><Help heading="" /></Button>
+        <Button caption="Find all connected catchments" category="Trace Network" class="ButtonClass25" id="TraceNetwork_addin.find_all_unconnected_catchments" image="Images\Select Unconnected Catchments.png" message="Find all unconnected catchments" tip=""><Help heading="" /></Button>
         </Commands>
     <Extensions>
         </Extensions>
     <Toolbars>
-        <Toolbar caption="Trace Network" category="Trace Network" id="TraceNetwork_addin.toolbar" showInitially="true"><Items><ComboBox refID="TraceNetwork_addin.group_layer" /><Tool refID="TraceNetwork_addin.tool" /><Tool refID="TraceNetwork_addin.tool_1" /></Items></Toolbar>
+        <Toolbar caption="Trace Network" category="Trace Network" id="TraceNetwork_addin.toolbar" showInitially="true"><Items><ComboBox refID="TraceNetwork_addin.group_layer" /><Tool refID="TraceNetwork_addin.tool" /><Tool refID="TraceNetwork_addin.tool_1" /><Button refID="TraceNetwork_addin.find_all_connected_catchments" /><Button refID="TraceNetwork_addin.find_all_unconnected_catchments" /></Items></Toolbar>
         </Toolbars>
     <Menus>
         </Menus>

@@ -2,37 +2,73 @@
 import arcpy
 import pythonaddins
 import numpy as np
+import os
 
 class Node:
     def __init__(self, MUID, shape):
         self.MUID = MUID
         self.shape = shape
 
+class ButtonClass21(object):
+    """Implementation for TraceNetwork_addin.find_all_connected_catchments (Button)"""
+    def __init__(self):
+        self.enabled = True
+        self.checked = False
+    def onClick(self):
+        nodes_MUID = [row[0] for row in arcpy.da.SearchCursor(group_layer.msm_Node, ["MUID"])]
+        print(nodes_MUID)
+        catchments = group_layer.graph.find_connected_catchments(nodes_MUID)
+        catchments_MUID = [catchment.MUID for catchment in catchments]
+
+        print("MUID IN ('%s')" % ("', '".join(catchments_MUID)))
+        arcpy.SelectLayerByAttribute_management(group_layer.ms_Catchment.longName, "ADD_TO_SELECTION",
+                                                "MUID IN ('%s')" % ("', '".join(catchments_MUID)))
+
+        pass
+        
+class ButtonClass25(object):
+    """Implementation for TraceNetwork_addin.find_all_unconnected_catchments (Button)"""
+    def __init__(self):
+        self.enabled = True
+        self.checked = False
+    def onClick(self):
+        graph._read_catchments()
+        nodes_MUID = [row[0] for row in arcpy.da.SearchCursor(os.path.join(group_layer.msm_Node.workspacePath, "msm_Node"), ["MUID"])]
+        catchments_MUID = [catchment.MUID for catchment in group_layer.graph.catchments_dict.values() if not catchment.nodeID and catchment.nodeID not in nodes_MUID]
+        print("MUID IN ('%s')" % ("', '".join(catchments_MUID)))
+        arcpy.SelectLayerByAttribute_management(group_layer.ms_Catchment.longName, "ADD_TO_SELECTION",
+                                                "MUID IN ('%s')" % ("', '".join(catchments_MUID)))
+        pass
+
 class GroupComboBoxClass1(object):
     """Implementation for TraceNetwork_addin.combobox (ComboBox)"""
     def __init__(self):
-        self.items = ["item1", "item2"]
+        self.items = ["item1", "item2","item1", "item2","item1", "item2"]
         self.editable = True
         self.enabled = True
         self.dropdownWidth = 'WWWWWWWWWWWWWWWWWW'
         self.width = 'WWWWWWWWWWWWWWWWWW'
+        self.msm_Node = None
+        self.msm_Link = None
+        self.ms_Catchment = None
+        self.layers_in_group = []
+
     def onSelChange(self, selection):
         self.selected_group = selection
-        layers_in_group = [layer for layer in arcpy.mapping.ListLayers(self.mxd) if self.selected_group + "\\" in layer.longName]
+        self.layers_in_group = [layer for layer in arcpy.mapping.ListLayers(self.mxd) if self.selected_group + "\\" in layer.longName]
 
-        self.msm_Node = [layer for layer in layers_in_group if u"Brønd" in layer]
-        self.msm_Link = [layer for layer in layers_in_group if "Ledning" in layer]
-        self.ms_Catchment = [layer for layer in layers_in_group if "Delopland" in layer]
+        self.msm_Node = [layer for layer in self.layers_in_group if u"Brønd" in layer.longName][0]
+        self.msm_Link = [layer for layer in self.layers_in_group if "Ledning" in layer.longName][0]
+        self.ms_Catchment = [layer for layer in self.layers_in_group if "Delopland" in layer.longName][0]
 
+        import mikegraph
         self.graph = mikegraph.Graph(self.msm_Node.workspacePath)
         self.graph.map_network()
-        print("Does this work?")
         pass
     def onEditChange(self, text):
         pass
     def onFocus(self, focused):
         if focused:
-        print("Does this work?")
             self.mxd = arcpy.mapping.MapDocument("Current")
             self.df = arcpy.mapping.ListDataFrames(self.mxd)[0]
             
@@ -41,8 +77,6 @@ class GroupComboBoxClass1(object):
             if len(group_layers) != 0:
                 for layer in group_layers:
                     self.items.append(layer.longName)
-                    
-            import mikegraph
         pass
     def onEnter(self):
         pass
@@ -89,12 +123,11 @@ class TraceUpstreamToolClass16(object):
     def onMouseDown(self, x, y, button, shift):
         pass
     def onMouseDownMap(self, x, y, button, shift):
-        points_xy = np.zeros((int(arcpy.management.GetCount(GroupComboBoxClass1.msm_Node)[0]),2))
+        points_xy = np.zeros((int(arcpy.management.GetCount(os.path.join(group_layer.msm_Node.workspacePath, "msm_Node"))[0]),2))
         points_muid = []
 
-        with arcpy.da.SearchCursor(msm_Node, ["MUID", "SHAPE@"]) as cursor:
+        with arcpy.da.SearchCursor(os.path.join(group_layer.msm_Node.workspacePath, "msm_Node"), ["MUID", "SHAPE@"]) as cursor:
             for i,row in enumerate(cursor):
-                nodes[row[0]] = self.Node(row[0], row[1])
                 points_xy[i,:] = [row[1].firstPoint.X, row[1].firstPoint.Y]
                 points_muid.append(row[0])
 
@@ -104,11 +137,27 @@ class TraceUpstreamToolClass16(object):
             muid = points_muid[index_closest]
             return muid
 
+
         target = findClosestNode([x,y])
 
-        upstream_nodes = self.graph.find_upstream_nodes([target])
+        upstream_nodes = group_layer.graph.find_upstream_nodes([target])[0]
 
-        arcpy.SelectLayerByAttribute_management(GroupComboBoxClass1.msm_Node, "ADD_TO_SELECTION", "MUID IN ('%s')" % ("', '".join(upstream_nodes)))
+        print("MUID IN ('%s')" % ("', '".join(upstream_nodes)))
+        arcpy.SelectLayerByAttribute_management(group_layer.msm_Node.longName, "ADD_TO_SELECTION", "MUID IN ('%s')" % ("', '".join(upstream_nodes)))
+        links_MUID = [link.MUID for link in group_layer.graph.network.links.values() if
+                      link.fromnode in upstream_nodes and link.tonode in upstream_nodes]
+        arcpy.SelectLayerByAttribute_management(group_layer.msm_Link.longName, "ADD_TO_SELECTION",
+                                                "MUID IN ('%s')" % ("', '".join(links_MUID)))
+
+        total_catchments = []
+
+        catchments = group_layer.graph.find_connected_catchments(upstream_nodes)
+        for catchment in catchments:
+            total_catchments.append(catchment.MUID)
+
+        arcpy.SelectLayerByAttribute_management(group_layer.ms_Catchment.longName, "ADD_TO_SELECTION",
+                                                "MUID IN ('%s')" % ("', '".join(total_catchments)))
+
         pass
     def onMouseUp(self, x, y, button, shift):
         pass

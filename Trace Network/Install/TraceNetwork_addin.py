@@ -9,6 +9,37 @@ class Node:
         self.MUID = MUID
         self.shape = shape
 
+class ButtonClass21(object):
+    """Implementation for TraceNetwork_addin.find_all_connected_catchments (Button)"""
+    def __init__(self):
+        self.enabled = True
+        self.checked = False
+    def onClick(self):
+        nodes_MUID = [row[0] for row in arcpy.da.SearchCursor(group_layer.msm_Node, ["MUID"])]
+        print(nodes_MUID)
+        catchments = group_layer.graph.find_connected_catchments(nodes_MUID)
+        catchments_MUID = [catchment.MUID for catchment in catchments]
+
+        print("MUID IN ('%s')" % ("', '".join(catchments_MUID)))
+        arcpy.SelectLayerByAttribute_management(group_layer.ms_Catchment.longName, "ADD_TO_SELECTION",
+                                                "MUID IN ('%s')" % ("', '".join(catchments_MUID)))
+
+        pass
+        
+class ButtonClass25(object):
+    """Implementation for TraceNetwork_addin.find_all_unconnected_catchments (Button)"""
+    def __init__(self):
+        self.enabled = True
+        self.checked = False
+    def onClick(self):
+        group_layer.graph._read_catchments()
+        nodes_MUID = [row[0] for row in arcpy.da.SearchCursor(os.path.join(group_layer.msm_Node.workspacePath, "msm_Node"), ["MUID"])]
+        catchments_MUID = [catchment.MUID for catchment in group_layer.graph.catchments_dict.values() if not catchment.nodeID and catchment.nodeID not in nodes_MUID]
+        print("MUID IN ('%s')" % ("', '".join(catchments_MUID)))
+        arcpy.SelectLayerByAttribute_management(group_layer.ms_Catchment.longName, "ADD_TO_SELECTION",
+                                                "MUID IN ('%s')" % ("', '".join(catchments_MUID)))
+        pass
+
 class GroupComboBoxClass1(object):
     """Implementation for TraceNetwork_addin.combobox (ComboBox)"""
     def __init__(self):
@@ -20,19 +51,19 @@ class GroupComboBoxClass1(object):
         self.msm_Node = None
         self.msm_Link = None
         self.ms_Catchment = None
+        self.layers_in_group = []
 
     def onSelChange(self, selection):
         self.selected_group = selection
-        layers_in_group = [layer for layer in arcpy.mapping.ListLayers(self.mxd) if self.selected_group + "\\" in layer.longName]
+        self.layers_in_group = [layer for layer in arcpy.mapping.ListLayers(self.mxd) if self.selected_group + "\\" in layer.longName]
 
-        self.msm_Node = [layer for layer in layers_in_group if u"Brønd" in layer.longName][0]
-        self.msm_Link = [layer for layer in layers_in_group if "Ledning" in layer.longName][0]
-        self.ms_Catchment = [layer for layer in layers_in_group if "Delopland" in layer.longName][0]
+        self.msm_Node = [layer for layer in self.layers_in_group if u"Brønd" in layer.longName][0]
+        self.msm_Link = [layer for layer in self.layers_in_group if "Ledning" in layer.longName][0]
+        self.ms_Catchment = [layer for layer in self.layers_in_group if "Delopland" in layer.longName][0]
 
         import mikegraph
         self.graph = mikegraph.Graph(self.msm_Node.workspacePath)
         self.graph.map_network()
-        print("Does this work?")
         pass
     def onEditChange(self, text):
         pass
@@ -122,7 +153,7 @@ class TraceUpstreamToolClass16(object):
 
         catchments = group_layer.graph.find_connected_catchments(upstream_nodes)
         for catchment in catchments:
-            total_catchments.append(catchment)
+            total_catchments.append(catchment.MUID)
 
         arcpy.SelectLayerByAttribute_management(group_layer.ms_Catchment.longName, "ADD_TO_SELECTION",
                                                 "MUID IN ('%s')" % ("', '".join(total_catchments)))
