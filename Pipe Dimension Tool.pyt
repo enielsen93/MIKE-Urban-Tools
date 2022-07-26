@@ -11,7 +11,6 @@ import hashlib
 import math
 import os
 import sys
-
 import networkx as nx
 import ColebrookWhite
 import networker
@@ -229,13 +228,13 @@ class PipeDimensionTool(object):
         ms_Catchment = os.path.join(MU_database,"ms_Catchment")
         msm_HModA = os.path.join(MU_database,"msm_HModA")
         msm_HParA = os.path.join(MU_database,"msm_HParA")
-
+        
         networkLinks = [msm_Link]
         if reaches:
             networkLinks.append(msm_Orifice) if "Orifice" in reaches else None
             networkLinks.append(msm_Weir) if "Weir" in reaches else None
             networkLinks.append(msm_Pump) if "Pump" in reaches else None
-
+        
         network = nx.DiGraph()
         # network.add_nodes_from([row[0] for row in arcpy.da.SearchCursor(msm_Node,"MUID")])
 
@@ -1797,7 +1796,7 @@ class InterpolateInvertLevels(object):
 
         if len(links_MUIDs) == len(
                 [row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).CatalogPath, ["MUID"])]):
-            userquery = pythonaddins.MessageBox("Change dimension of %d pipes?" % (len(links_MUIDs)), "Confirm Assignment", 4)
+            userquery = pythonaddins.MessageBox("Interpolate invert slope for %d pipes?" % (len(links_MUIDs)), "Confirm Assignment", 4)
             if not userquery == "Yes":
                 return
         
