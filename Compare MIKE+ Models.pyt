@@ -115,7 +115,11 @@ class CompareMikePlusModels(object):
         for feature in check_features:
             arcpy.AddMessage("Checking feature %s" % (feature))
             feature_path_1 = os.path.join(database1, feature)
+            if ".mdb" in feature_path_1 and "Catchment" in feature_path_1:
+                feature_path_1 = feature_path_1.replace("msm_Catchment", "ms_Catchment")
             feature_path_2 = os.path.join(database2, feature)
+            if ".mdb" in feature_path_2 and "Catchment" in feature_path_2:
+                feature_path_2 = feature_path_2.replace("msm_Catchment", "ms_Catchment")
             result_layer = getAvailableFilename(os.path.join(arcpy.env.scratchGDB, feature))
             arcpy.CreateFeatureclass_management(arcpy.env.scratchGDB, os.path.basename(result_layer),
                                                 template=feature_path_1)
@@ -126,6 +130,8 @@ class CompareMikePlusModels(object):
             features_2 = {}
             fields = [field.name if field.name != "geometry" else "SHAPE@" for field in arcpy.ListFields(feature_path_1)
                       if field.name not in ["N/A"]]
+            if "SHAPE@" not in fields:
+                fields.append("SHAPE@")
 
             with arcpy.da.SearchCursor(feature_path_1, fields) as cursor:
                 for row in cursor:
@@ -161,7 +167,8 @@ class CompareMikePlusModels(object):
                         cursor.insertRow(features_1[missing_MUID])
                     else:
                         cursor.insertRow(features_2[missing_MUID])
-
+            
+            arcpy.AddMessage(fields)
             geometry_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == "shape@"][0]
             MUID_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == "muid"][0]
             with arcpy.da.InsertCursor(result_layer, ["MUID", "SHAPE@", "fields"]) as cursor:
