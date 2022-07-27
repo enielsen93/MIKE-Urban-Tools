@@ -93,8 +93,7 @@ class DisplayMikeUrban(object):
             parameterType="optional",
             direction="Output")
         show_outlet_boundary_conditions.value = True
-        
-        
+                
         parameters = [MU_database, join_catchments, show_loss_par, show_outlet_boundary_conditions]
         
         return parameters

@@ -94,6 +94,14 @@ class DisplayMikeUrban(object):
             direction="Output")
         show_outlet_boundary_conditions.value = True
         
+        change_material = arcpy.Parameter(
+            displayName="Show Loss Parameters on Manhole Text",
+            name="show_loss_par",
+            datatype="Boolean",
+            category="Additional Settings",
+            parameterType="optional",
+            direction="Output")
+        show_loss_par.value = False
         
         parameters = [MU_database, join_catchments, show_loss_par, show_outlet_boundary_conditions]
         
@@ -394,7 +402,7 @@ class DisplayMikeUrban(object):
                     addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Boundary Water Level.lyr",
                         boundariesShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
                 except Exception as e:
-                    arcpy.AddError(trace
+                    arcpy.AddError(traceback.format_exc())
                 
         printStepAndTime("Adding catchment connections to map")
         arcpy.SetProgressor("default","Adding catchment connections to map")
