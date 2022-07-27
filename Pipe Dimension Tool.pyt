@@ -911,7 +911,7 @@ class PipeDimensionToolTA(object):
                     cursor.updateRow(row)
         
         arcpy.SetProgressor("step","Calculating Pipe Dimensions", 0, len(selected_pipes), 1)
-        fields = ["Slope_C",result_field,"MaterialID","MUID"]
+        fields = ["Slope_C",result_field,"MaterialID","MUID", "Diameter"]
         if result_field:
             try:
                 with arcpy.da.UpdateCursor(msm_Link, fields, where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
@@ -937,6 +937,10 @@ class PipeDimensionToolTA(object):
                                 while QFull is not None and QFull*1e3<peak_discharge[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
                                     Di += 1
                                     QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                            
+                            diameter = D[Di]
+                            if keep_largest_diameter and diameter < row[4]:
+                                diameter = row[4]
                             row[1] = D[Di]/1.0e3
                             if change_material:
                                 row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
