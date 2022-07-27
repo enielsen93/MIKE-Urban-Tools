@@ -380,19 +380,21 @@ class DisplayMikeUrban(object):
 
             if len([outlet for outlet in outlets.values() if outlet.boundary_water_level is not None])>0: # if any outlets with water level exist
                 boundariesShape = getAvailableFilename(arcpy.env.scratchGDB + r"\BoundaryWaterLevel", parent = MU_database)
-                arcpy.CreateFeatureclass_management(os.path.dirname(boundariesShape), os.path.basename(boundariesShape), "POINT")
-                arcpy.AddField_management(boundariesShape, "NodeID", "TEXT")
-                arcpy.AddField_management(boundariesShape, "B_MUID", "TEXT")
-                arcpy.AddField_management(boundariesShape, "BI_MUID", "TEXT")
-                arcpy.AddField_management(boundariesShape, "Wat_Lev", "FLOAT")
+                try:
+                    arcpy.CreateFeatureclass_management(os.path.dirname(boundariesShape), os.path.basename(boundariesShape), "POINT")
+                    arcpy.AddField_management(boundariesShape, "NodeID", "TEXT")
+                    arcpy.AddField_management(boundariesShape, "B_MUID", "TEXT")
+                    arcpy.AddField_management(boundariesShape, "BI_MUID", "TEXT")
+                    arcpy.AddField_management(boundariesShape, "Wat_Lev", "FLOAT")
 
-                with arcpy.da.InsertCursor(boundariesShape, ["SHAPE@", "NodeID", "B_MUID", "BI_MUID", "Wat_Lev"]) as cursor:
-                    for outlet in outlets.values():
-                        if outlet.boundary_water_level is not None:
-                            cursor.insertRow([outlet.geometry, outlet.nodeID, outlet.boundary_MUID, outlet.boundary_item_MUID, outlet.boundary_water_level])
-                addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Boundary Water Level.lyr",
-                    boundariesShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
-                               
+                    with arcpy.da.InsertCursor(boundariesShape, ["SHAPE@", "NodeID", "B_MUID", "BI_MUID", "Wat_Lev"]) as cursor:
+                        for outlet in outlets.values():
+                            if outlet.boundary_water_level is not None:
+                                cursor.insertRow([outlet.geometry, outlet.nodeID, outlet.boundary_MUID, outlet.boundary_item_MUID, outlet.boundary_water_level])
+                    addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Boundary Water Level.lyr",
+                        boundariesShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
+                except Exception as e:
+                    arcpy.AddError(traceback.format_exc())
                 
         printStepAndTime("Adding catchment connections to map")
         arcpy.SetProgressor("default","Adding catchment connections to map")
