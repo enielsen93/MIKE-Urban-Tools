@@ -19,6 +19,7 @@ import traceback
 import datetime
 import pythonaddins
 import mikegraph
+import sqlite3
 
 if "mapping" in dir(arcpy):
     import arcpy.mapping as apmapping
@@ -31,36 +32,6 @@ else:
 
 diameters_plastic = [180, 233, 276, 392, 493, 588, 781, 985, 1185, 1385, 1485, 1585, 2000, 2200, 2400, 2600, 2800, 3000]
 diameters_concrete = [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1400, 1600, 1800, 2000, 2250, 2500, 3000, 3500]
-
-class HParA:
-    reduction_factor = None
-    concentration_time = None
-
-    def __init__(self, MUID):
-        self.MUID = MUID
-
-class Catchment:
-    area = None
-    persons = None
-
-    imperviousness = None
-    reduction_factor = None
-    concentration_time = None
-    connection = None
-    nettypeno = None
-
-    use_local_parameters = None
-
-    def __init__(self, MUID):
-        self.MUID = MUID
-
-    @property
-    def impervious_area(self):
-        return self.area*self.imperviousness/1e2
-
-    @property
-    def reduced_area(self):
-        return self.area*self.imperviousness/1e2*self.reduction_factor
 
 def getAvailableFilename(filepath, parent = None):
     parent = "F%s" % (parent) if parent and parent[0].isdigit() else None
@@ -92,328 +63,9 @@ class Toolbox(object):
         self.alias  = "Pipe Dimension Tool"
         self.canRunInBackground = True
         # List of tool classes associated with this toolbox
-        self.tools = [PipeDimensionTool, PipeDimensionToolTA, PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope]
+        self.tools = [PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope, CopyDiameter]
 
-class PipeDimensionTool(object):
-    def __init__(self):
-        self.label       = "Calculate minimum required pipe diameter through rationel method"
-        self.description = "Calculate minimum required pipe diameter through rationel method"
-        self.canRunInBackground = False
-
-    def getParameterInfo(self):
-        #Define parameter definitions
-
-        pipe_layer = arcpy.Parameter(
-            displayName="Pipe feature layer",
-            name="pipe_layer",
-            datatype="GPFeatureLayer",
-            parameterType="Required",
-            direction="Input")
-
-        # flags = arcpy.Parameter(
-            # displayName="Layer to trace upstream network and analyze catchment for",
-            # name="flags",
-            # datatype="GPFeatureLayer",
-            # parameterType="Required",
-            # direction="Input")
-        # flags.filter.list = ["Simple Junction"]
-
-        reaches = arcpy.Parameter(
-            displayName="Trace network through:",
-            name="reaches",
-            datatype="GPString",
-            parameterType="Optional",
-            multiValue=True,
-            direction="Input")
-        reaches.filter.type = "ValueList"
-        reaches.filter.list = ["Orifice","Weir","Pump", "Basin"]
-        reaches.value = ["Orifice","Weir","Pump", "Basin"]
-
-        field = arcpy.Parameter(
-			displayName= "Field to assign diameter to",
-			name="Field",
-			datatype="GPString",
-			parameterType="Required",
-			direction="Input")
-
-        breakChainOnNodes = arcpy.Parameter(
-            displayName="End each trace at following node MUIDs (each node should by delimited by a comma: node1, node2)",
-            name="breakChainOnNodes",
-            datatype="GPString",
-            parameterType="optional",
-            direction="Input")
-        breakChainOnNodes.category = "Additional settings"
-
-        runoff = arcpy.Parameter(
-            displayName="Runoff (L/s/ha)",
-            name="runoff",
-            datatype="double",
-            parameterType="Required",
-            direction="Input")
-        # runoff.filter.list = [209, 259, 331, 392]
-        runoff.value = 209
-
-        writeDischargeInstead = arcpy.Parameter(
-            displayName="Calculate QMax instead of required pipe dimension",
-            name="writeDischargeInstead",
-            datatype="Boolean",
-            parameterType="optional",
-            direction="Input")
-        writeDischargeInstead.category = "Additional settings"
-
-        useMaxInflow = arcpy.Parameter(
-            displayName="Use Max. Inflow field as additional discharge to system (checkbox on msm_Node must be left unticked)",
-            name="useMaxInflow",
-            datatype="Boolean",
-            parameterType="optional",
-            direction="Input")
-        useMaxInflow.category = "Additional settings"
-        useMaxInflow.value = True
-
-        slopeOverwrite = arcpy.Parameter(
-            displayName="Overwrite slope of pipes to:",
-            name="slopeOverwrite",
-            datatype="double",
-            parameterType="optional",
-            direction="Input")
-        slopeOverwrite.category = "Additional settings"
-        # slopeOverwrite.filter.list = [5e-3, 7e-3, 10e-3, 15e-3, 20e-3]
-
-        parameters = [pipe_layer, reaches, field, runoff, breakChainOnNodes, writeDischargeInstead, useMaxInflow, slopeOverwrite]
-        return parameters
-
-    def isLicensed(self):
-        return True
-
-    def updateParameters(self, parameters): #optional
-        # mxd = arcpy.mapping.MapDocument("CURRENT")  
-        # df = arcpy.mapping.ListDataFrames(mxd)[0]  
-        # workspaces = set()
-        # for lyr in arcpy.mapping.ListLayers(mxd, df):
-            # if lyr.supports("workspacepath"):
-                # workspaces.add(lyr.workspacePath)
-
-
-        if parameters[0].altered:
-            pipe_layer = parameters[0].ValueAsText
-            MU_database = os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath))
-            parameters[2].filter.list = [f.name for f in arcpy.Describe(MU_database + "\msm_Link").fields]
-
-        return
-
-    def updateMessages(self, parameters): #optional
-        return
-
-    def execute(self, parameters, messages):
-        pipe_layer = parameters[0].ValueAsText
-        MU_database = os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath))
-        # flags = parameters[1].ValueAsText
-        reaches = parameters[1].ValueAsText
-        field = parameters[2].ValueAsText
-        runoff = parameters[3].Value
-        breakChainOnNodes = parameters[4].ValueAsText
-        writeDischargeInstead = parameters[5].ValueAsText
-        useMaxInflow = parameters[6].Value
-        slopeOverwrite = parameters[7].Value
-        selected_pipes = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["MUID"])]
-
-        mxd = arcpy.mapping.MapDocument("CURRENT")
-        df = arcpy.mapping.ListDataFrames(mxd)[0]
-
-        msm_Link = os.path.join(MU_database,"msm_Link")
-        msm_Node = os.path.join(MU_database,"msm_Node")
-        msm_Orifice = os.path.join(MU_database,"msm_Orifice")
-        msm_Weir = os.path.join(MU_database,"msm_Weir")
-        msm_Pump = os.path.join(MU_database,"msm_Pump")
-        msm_CatchCon = os.path.join(MU_database,"msm_CatchCon")
-        ms_Catchment = os.path.join(MU_database,"ms_Catchment")
-        msm_HModA = os.path.join(MU_database,"msm_HModA")
-        msm_HParA = os.path.join(MU_database,"msm_HParA")
-        
-        networkLinks = [msm_Link]
-        if reaches:
-            networkLinks.append(msm_Orifice) if "Orifice" in reaches else None
-            networkLinks.append(msm_Weir) if "Weir" in reaches else None
-            networkLinks.append(msm_Pump) if "Pump" in reaches else None
-        
-        network = nx.DiGraph()
-        # network.add_nodes_from([row[0] for row in arcpy.da.SearchCursor(msm_Node,"MUID")])
-
-        hParA_dict = {}
-        with arcpy.da.SearchCursor(msm_HParA,["MUID","RedFactor", "ConcTime"]) as cursor:
-            for row in cursor:
-                hParA_dict[row[0]] = HParA(row[0])
-                hParA_dict[row[0]].reduction_factor = row[1]
-                hParA_dict[row[0]].concentration_time = row[2]
-
-        catchments_dict = {}
-        with arcpy.da.SearchCursor(msm_HModA, ["CatchID", "ImpArea", "ParAID", "LocalNo", "RFactor", "ConcTime"]) as cursor:
-            for row in cursor:
-                catchments_dict[row[0]] = Catchment(row[0])
-                catchments_dict[row[0]].imperviousness = row[1]
-                catchments_dict[row[0]].reduction_factor = hParA_dict[row[2]].reduction_factor if row[3] == 0 else row[4]
-                catchments_dict[row[0]].concentration_time = hParA_dict[row[2]].concentration_time if row[3] == 0 else row[5]
-
-        catchment_connections_dict = {}
-        with arcpy.da.SearchCursor(msm_CatchCon, ["CatchID", "NodeID"]) as cursor:
-            for row in cursor:
-                if row[1] not in catchment_connections_dict:
-                    catchment_connections_dict[row[1]] = [row[0]]
-                else:
-                    catchment_connections_dict[row[1]].append(row[0])
-
-        with arcpy.da.SearchCursor(ms_Catchment, ['MUID','SHAPE@AREA','Area','Persons',"NetTypeNo"]) as cursor:
-            for row in cursor:
-                if row[0] not in catchments_dict:
-                    catchments_dict[row[0]] = catchments(row[0])
-                    arcpy.AddWarning("Warning: Could not find model record for Catchment %s" % (row[0]))
-                catchments_dict[row[0]].persons = row[3] if row[3] is not None else 0
-                catchments_dict[row[0]].area = row[2]*1e4 if row[2] is not None else row[1]
-                catchments_dict[row[0]].nettypeno = row[4]
-
-        if useMaxInflow:
-            maxInflow = {}
-            with arcpy.da.SearchCursor(msm_Node, ["MUID","InletControlNo","MaxInlet"],where_clause = "[MaxInlet] IS NOT NULL AND [InletControlNo] = 0") as cursor:
-                for row in cursor:
-                    maxInflow[row[0]] = row[2]
-                    arcpy.AddMessage("Added additional discharge %1.3f m3/s to node %s" % (row[2],row[0]))
-
-        nodeTypeDict = {}
-        basins = []
-        nodeTypes = {1:u"Brønd",2:"Bassin",3:u"Udløb"}
-        with arcpy.da.SearchCursor(msm_Node,["MUID","TypeNo"]) as cursor:
-            for row in cursor:
-                network.add_node(row[0])
-                nodeTypeDict[row[0]] = nodeTypes[row[1]]
-                if nodeTypeDict[row[0]] == "Bassin":
-                    basins.append(row[0])
-
-        msm_Link_Network = networker.NetworkLinks(MU_database)
-        arcpy.AddMessage(dir(msm_Link_Network))
-        # for link in msm_Link_Network.links:
-            # arcpy.AddMessage("%s: %s-%s" % (msm_Link_Network.links[link].MUID, msm_Link_Network.links[link].fromnode, msm_Link_Network.links[link].tonode))
-        weights = {"msm_Link":1, "msm_Pump":1e4, "msm_Orifice":1e4, "msm_Weir":1e4}
-        for networkLink in networkLinks:
-            weight = weights[os.path.basename(networkLink)]
-            try:
-                with arcpy.da.SearchCursor(networkLink,["MUID","SHAPE@LENGTH"]) as cursor:
-                    for row in cursor:
-                        if os.path.basename(networkLink) == "msm_Link":
-                            network.add_edge(msm_Link_Network.links[row[0]].fromnode, msm_Link_Network.links[row[0]].tonode, weight = weight*row[1])
-                        elif os.path.basename(networkLink) == "msm_Pump":
-                            network.add_edge(msm_Link_Network.pumps[row[0]].fromnode, msm_Link_Network.pumps[row[0]].tonode, weight = weight*row[1])
-                        elif os.path.basename(networkLink) == "msm_Orifice":
-                            network.add_edge(msm_Link_Network.orifices[row[0]].fromnode, msm_Link_Network.orifices[row[0]].tonode, weight = weight*row[1])
-                        elif os.path.basename(networkLink) == "msm_Weir":
-                            network.add_edge(msm_Link_Network.weirs[row[0]].fromnode, msm_Link_Network.weirs[row[0]].tonode, weight = weight*row[1])
-                        # arcpy.AddMessage("%s-%s" % (msm_Link_Network.links[row[0]].fromnode,msm_Link_Network.links[row[0]].tonode))
-
-            except Exception as e:
-                if "FromNode" in e.message:
-                    arcpy.AddError("Error on creating network from layer %s" % (networkLink))
-                    raise(e)
-                else:
-                    arcpy.AddError(traceback.format_exc())
-                    raise(e)
-
-        if reaches and not "Basin" in reaches:
-            for basin in basins:
-                for edge in network.out_edges(basin):
-                    network.remove_edge(basin,edge[1])
-                    arcpy.AddMessage("Removed edge %s-%s because tracing through basins is disabled" % (basin,edge[1]))
-
-        if breakChainOnNodes:
-            breakEdges = [edge for edge in network.edges if edge[0] in re.findall("([^'^(),; \n]+)",breakChainOnNodes)]
-            network.remove_edges_from(breakEdges)
-            for edge in breakEdges:
-                arcpy.AddMessage("Removed edge %s-%s because %s is included in list of nodes to end trace at" % (edge[0],edge[1]))
-
-        outlets = []
-        junctions = []
-        for node in list(network.nodes):
-            if not network.out_edges(node):
-                outlets.append(node)
-            if len(network.out_edges(node))>1:
-                junctions.append(node)
-
-        for source in junctions:
-            if source != None:
-                lengths = np.ones((len(outlets),1))*1e6
-                for i,target in enumerate(outlets):
-                    try:
-                        if nx.has_path(network, source, target):
-                            lengths[i] = (nx.bellman_ford_path_length(network, source, target, weight="weight"))
-                    except:
-                        arcpy.AddError("Failed upon tracing network from %s to %s" % (source,target))
-                toNode = nx.bellman_ford_path(network, source, outlets[np.argmin(lengths)])[1]
-                for edge in network.out_edges(source):
-                    if not edge[1] == toNode:
-                        network.remove_edge(source,edge[1])
-                        arcpy.AddMessage("Removed edge %s-%s so that node %s exclusively leads to outlet %s" % (source,edge[1],source,outlets[np.argmin(lengths)]))
-
-        nodesUsed = []
-        nodesInflow = {}
-        catchmentOutlet = {}
-        for node in list(network.nodes):
-            if node:
-                nodesUpstream = nx.ancestors(network,node)
-                nodesUpstream.add(node)
-                catchIDs = [catchment_connections_dict[n] for n in nodesUpstream if n in catchment_connections_dict]
-                catchIDs = [catchID for sublist in catchIDs for catchID in sublist]
-                nodesInflow[node] = np.sum([catchments_dict[catchID].reduced_area for catchID in catchIDs])/1.0e4*runoff
-                if useMaxInflow and maxInflow:
-                    nodesInflow[node] += np.sum([maxInflow[n] for n in nodesUpstream if n in maxInflow])*1.0e3
-
-        edit = arcpy.da.Editor(MU_database)
-        edit.startEditing(False, True)
-        edit.startOperation()
-
-
-        fields = ["Slope_C",field,"MaterialID","MUID", "Diameter"]
-        # arcpy.AddMessage(writeDischargeInstead)
-        # arcpy.AddMessage(msm_Link)
-        # arcpy.AddMessage(nodesInflow)
-        try:
-            with arcpy.da.UpdateCursor(msm_Link, fields, where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
-                for row in cursor:
-                    diameter_old = row[4]
-                    D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[2].lower() else diameters_concrete
-                    slope = slopeOverwrite if slopeOverwrite else row[0]*1e-2
-                    if writeDischargeInstead:
-                        row[1] = nodesInflow[msm_Link_Network.links[row[3]].fromnode]
-                    else:
-                        QFull = 0
-                        Di = -1
-                        if nodesInflow[msm_Link_Network.links[row[3]].fromnode] == 0:
-                            Di = 0
-                        else:
-                            while QFull is not None and QFull*1e3<nodesInflow[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
-                                Di += 1
-                                QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
-                        row[1] = D[Di]/1.0e3
-                    try:
-                        cursor.updateRow(row)
-                        arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
-                    except Exception as e:
-                        arcpy.AddWarning("Could not update row:")
-                        arcpy.AddWarning(row)
-        except Exception as e:
-            if row[0] not in nodesInflow:
-                arcpy.AddError(traceback.format_exc())
-                arcpy.AddError("Failed to analyze catchments connected to node %s on pipe %s" % (msm_Link_Network.links[row[3]].fromnode, msm_Link_Network.links[row[3]].MUID))
-                raise(e)
-            arcpy.AddError(row)
-            # arcpy.AddError("Failed on calculating QFull for link %s. Try Recomputing Links and/or run Project Check Tool." % row[4])
-            # for i in range(len(fields)-1):
-                # arcpy.AddError("%s = %s" % (fields[i], row[i]))
-            # arcpy.AddError("Impervious area passing through node: %s" % (nodesInflow[row[0]]))
-            arcpy.AddError(traceback.format_exc())
-            raise(e)
-        edit.stopOperation()
-        edit.stopEditing(True)
-        return
-
-class PipeDimensionToolTA(object):
+class PipeDimensionToolTAPro(object):
     def __init__(self):
         self.label       = "Calculate minimum required pipe diameter through Time Area Method"
         self.description = "Calculate minimum required pipe diameter through Time Area Method"
@@ -446,630 +98,6 @@ class PipeDimensionToolTA(object):
             direction="Input")
         reaches.filter.type = "ValueList"
         reaches.filter.list = ["Orifice","Weir","Pump", "Basin"]
-
-        result_field = arcpy.Parameter(
-			displayName= "Field to assign diameter to",
-			name="result_field",
-			datatype="GPString",
-			parameterType="Optional",
-			direction="Input")
-
-        breakChainOnNodes = arcpy.Parameter(
-            displayName="End each trace at following node MUIDs (each node should by delimited by a comma: node1, node2)",
-            name="breakChainOnNodes",
-            datatype="GPString",
-            parameterType="optional",
-            direction="Input")
-        breakChainOnNodes.category = "Additional settings"
-
-        runoff_file = arcpy.Parameter(
-            displayName="Runoff rain event in ASCII Format",
-            name="runoff",
-            datatype="file",
-            parameterType="Required",
-            direction="Input")
-        runoff_file.filter.list = ["txt","km2","kmd","csv"]
-
-        scaling_factor = arcpy.Parameter(
-			displayName= "Scaling Factor for runoff rain event",
-			name="scaling_factor",
-			datatype="GPString",
-			parameterType="Required",
-			direction="Input")
-        scaling_factor.value = "1"
-
-        writeDischargeInstead = arcpy.Parameter(
-            displayName="Calculate QMax instead of required pipe dimension",
-            name="writeDischargeInstead",
-            datatype="Boolean",
-            parameterType="optional",
-            direction="Input")
-        writeDischargeInstead.category = "Additional settings"
-
-        useMaxInflow = arcpy.Parameter(
-            displayName="Use Max. Inflow field as additional discharge to system (checkbox on msm_Node must be left unticked) - unit m3/s",
-            name="useMaxInflow",
-            datatype="Boolean",
-            parameterType="optional",
-            direction="Input")
-        useMaxInflow.category = "Additional settings"
-        useMaxInflow.value = True
-
-        slopeOverwrite = arcpy.Parameter(
-            displayName="Overwrite slope of pipes to:",
-            name="slopeOverwrite",
-            datatype="double",
-            parameterType="optional",
-            direction="Input")
-        slopeOverwrite.category = "Additional settings"
-
-        writeDFS0 = arcpy.Parameter(
-            displayName="Write csv file of runoff for every selected pipe to txt file:",
-            name="writeDFS0",
-            datatype="file",
-            parameterType="optional",
-            direction="Output")
-        writeDFS0.category = "Additional settings"
-
-        runoff_file = arcpy.Parameter(
-            displayName="Runoff rain event in ASCII Format",
-            name="runoff",
-            datatype="file",
-            parameterType="Required",
-            direction="Input")
-        runoff_file.filter.list = ["txt","km2","kmd","csv"]
-        
-        keep_largest_diameter = arcpy.Parameter(
-            displayName="Only change diameter if it's greater than existing",
-            name="keep_largest_diameter",
-            datatype="Boolean",
-            parameterType="optional",
-            direction="Input")
-        keep_largest_diameter.category = "Additional settings"
-
-        change_material = arcpy.Parameter(
-            displayName="Change material (Plastic if less than 500 mm, concrete if greater than or equal to 500 mm",
-            name="change_material",
-            datatype="Boolean",
-            parameterType="optional",
-            direction="Input")
-        change_material.category = "Additional settings"
-
-        # get_start_time = arcpy.Parameter(
-            # displayName="Copy start time from dfs0 file:",
-            # name="get_start_time",
-            # datatype="file",
-            # parameterType="optional",
-            # direction="Input")
-        # get_start_time.filter.list = ["dfs0"]
-        # get_start_time.category = "Additional settings"
-        # get_start_time.enabled = False
-
-        parameters = [pipe_layer, reaches, result_field, runoff_file, scaling_factor, breakChainOnNodes, writeDischargeInstead, useMaxInflow, slopeOverwrite, writeDFS0, keep_largest_diameter, change_material]
-        return parameters
-
-    def isLicensed(self):
-        return True
-
-    def updateParameters(self, parameters): #optional
-        # mxd = arcpy.mapping.MapDocument("CURRENT")  
-        # df = arcpy.mapping.ListDataFrames(mxd)[0]  
-        # workspaces = set()
-        # for lyr in arcpy.mapping.ListLayers(mxd, df):
-            # if lyr.supports("workspacepath"):
-                # workspaces.add(lyr.workspacePath)
-
-
-        if parameters[0].altered:
-            pipe_layer = parameters[0].ValueAsText
-            MU_database = os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath))
-            parameters[2].filter.list = [f.name for f in arcpy.Describe(MU_database + "\msm_Link").fields]
-
-        # if parameters[9].ValueAsText:
-            # parameters[10].enabled = True
-        # else:
-            # parameters[10].enabled = False
-        return
-
-    def updateMessages(self, parameters): #optional
-        return
-
-    def execute(self, parameters, messages):
-        pipe_layer = parameters[0].ValueAsText
-        MU_database = os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath))
-        # flags = parameters[1].ValueAsText
-        reaches = parameters[1].ValueAsText
-        result_field = parameters[2].ValueAsText
-        runoff_file = parameters[3].ValueAsText
-        scaling_factor = float(parameters[4].Value)
-        breakChainOnNodes = parameters[5].ValueAsText
-        writeDischargeInstead = parameters[6].ValueAsText
-        useMaxInflow = parameters[7].Value
-        slopeOverwrite = parameters[8].Value
-        writeDFS0 = parameters[9].ValueAsText
-        keep_largest_diameter = parameters[10].Value
-        change_material = parameters[11].Value
-        # get_start_time = parameters[10].ValueAsText
-
-        selected_pipes = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["MUID"])]
-
-        mxd = arcpy.mapping.MapDocument("CURRENT")
-        df = arcpy.mapping.ListDataFrames(mxd)[0]
-        
-        def addLayer(layer_source, source, group = None, workspace_type = "ACCESS_WORKSPACE"):
-            layer = apmapping.Layer(layer_source)
-            if group:
-                apmapping.AddLayerToGroup(df, group, layer, "BOTTOM")
-            else:
-                apmapping.AddLayer(df, layer, "TOP")
-            updatelayer = apmapping.ListLayers(mxd, layer.name, df)[0]
-            updatelayer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, unicode(os.path.basename(source)))
-
-        msm_Link = os.path.join(MU_database,"msm_Link")
-        msm_Node = os.path.join(MU_database,"msm_Node")
-        msm_Orifice = os.path.join(MU_database,"msm_Orifice")
-        msm_Weir = os.path.join(MU_database,"msm_Weir")
-        msm_Pump = os.path.join(MU_database,"msm_Pump")
-        msm_CatchCon = os.path.join(MU_database,"msm_CatchCon")
-        ms_Catchment = os.path.join(MU_database,"ms_Catchment")
-        msm_HModA = os.path.join(MU_database,"msm_HModA")
-        msm_HParA = os.path.join(MU_database,"msm_HParA")
-
-        networkLinks = [msm_Link]
-        if reaches:
-            networkLinks.append(msm_Orifice) if "Orifice" in reaches else None
-            networkLinks.append(msm_Weir) if "Weir" in reaches else None
-            networkLinks.append(msm_Pump) if "Pump" in reaches else None
-
-        network = nx.DiGraph()
-        # network.add_nodes_from([row[0] for row in arcpy.da.SearchCursor(msm_Node,"MUID")])
-
-        hParA_dict = {}
-        with arcpy.da.SearchCursor(msm_HParA,["MUID","RedFactor", "ConcTime"]) as cursor:
-            for row in cursor:
-                hParA_dict[row[0]] = HParA(row[0])
-                hParA_dict[row[0]].reduction_factor = row[1]
-                hParA_dict[row[0]].concentration_time = row[2]
-
-        # pipe_discharge_from_res1d = 
-
-        catchments_dict = {}
-        with arcpy.da.SearchCursor(msm_HModA, ["CatchID", "ImpArea", "ParAID", "LocalNo", "RFactor", "ConcTime"]) as cursor:
-            for row in cursor:
-                catchments_dict[row[0]] = Catchment(row[0])
-                catchments_dict[row[0]].imperviousness = row[1]
-                catchments_dict[row[0]].reduction_factor = hParA_dict[row[2]].reduction_factor if row[3] == 0 else row[4]
-                catchments_dict[row[0]].concentration_time = hParA_dict[row[2]].concentration_time if row[3] == 0 else row[5]
-
-        catchment_connections_dict = {}
-        with arcpy.da.SearchCursor(msm_CatchCon, ["CatchID", "NodeID"]) as cursor:
-            for row in cursor:
-                if row[1] not in catchment_connections_dict:
-                    catchment_connections_dict[row[1]] = [row[0]]
-                else:
-                    catchment_connections_dict[row[1]].append(row[0])
-
-        with arcpy.da.SearchCursor(ms_Catchment, ['MUID','SHAPE@AREA','Area','Persons',"NetTypeNo"]) as cursor:
-            for row in cursor:
-                if row[0] not in catchments_dict:
-                    catchments_dict[row[0]] = catchments(row[0])
-                    arcpy.AddWarning("Warning: Could not find model record for Catchment %s" % (row[0]))
-                catchments_dict[row[0]].persons = row[3] if row[3] is not None else 0
-                catchments_dict[row[0]].area = row[2]*1e4 if row[2] is not None else row[1]
-                catchments_dict[row[0]].nettypeno = row[4]
-
-        maxInflow = {}
-        if useMaxInflow:
-            with arcpy.da.SearchCursor(msm_Node, ["MUID","InletControlNo","MaxInlet"], where_clause = "[MaxInlet] IS NOT NULL AND [InletControlNo] = 0") as cursor:
-                for row in cursor:
-                    maxInflow[row[0]] = row[2]
-                    arcpy.AddMessage("Added additional discharge %1.1f to node %s" % (row[2],row[0]))
-
-        nodeTypeDict = {}
-        basins = []
-        nodeTypes = {1:u"Brønd",2:"Bassin",3:u"Udløb"}
-        with arcpy.da.SearchCursor(msm_Node,["MUID","TypeNo"]) as cursor:
-            for row in cursor:
-                network.add_node(row[0])
-                nodeTypeDict[row[0]] = nodeTypes[row[1]]
-                if nodeTypeDict[row[0]] == "Bassin":
-                    basins.append(row[0])
-
-        msm_Link_Network = networker.NetworkLinks(MU_database)
-        # arcpy.AddMessage(dir(msm_Link_Network))
-        # for link in msm_Link_Network.links:
-            # arcpy.AddMessage("%s: %s-%s" % (msm_Link_Network.links[link].MUID, msm_Link_Network.links[link].fromnode, msm_Link_Network.links[link].tonode))
-        weights = {"msm_Link":1, "msm_Pump":1e4, "msm_Orifice":1e4, "msm_Weir":1e4}
-        for networkLink in networkLinks:
-            weight = weights[os.path.basename(networkLink)]
-            try:
-                with arcpy.da.SearchCursor(networkLink,["MUID","SHAPE@LENGTH"]) as cursor:
-                    for row in cursor:
-                        if os.path.basename(networkLink) == "msm_Link":
-                            network.add_edge(msm_Link_Network.links[row[0]].fromnode, msm_Link_Network.links[row[0]].tonode, weight = weight*row[1])
-                        elif os.path.basename(networkLink) == "msm_Pump":
-                            network.add_edge(msm_Link_Network.pumps[row[0]].fromnode, msm_Link_Network.pumps[row[0]].tonode, weight = weight*row[1])
-                        elif os.path.basename(networkLink) == "msm_Orifice":
-                            network.add_edge(msm_Link_Network.orifices[row[0]].fromnode, msm_Link_Network.orifices[row[0]].tonode, weight = weight*row[1])
-                        elif os.path.basename(networkLink) == "msm_Weir":
-                            network.add_edge(msm_Link_Network.weirs[row[0]].fromnode, msm_Link_Network.weirs[row[0]].tonode, weight = weight*row[1])
-                        # arcpy.AddMessage("%s-%s" % (msm_Link_Network.links[row[0]].fromnode,msm_Link_Network.links[row[0]].tonode))
-
-            except Exception as e:
-                if "FromNode" in e.message:
-                    arcpy.AddError("Error on creating network from layer %s" % (networkLink))
-                    raise(e)
-                else:
-                    arcpy.AddError(traceback.format_exc())
-                    raise(e)
-
-        if reaches and not "Basin" in reaches:
-            for basin in basins:
-                for edge in network.out_edges(basin):
-                    network.remove_edge(basin,edge[1])
-                    arcpy.AddMessage("Removed edge %s-%s because tracing through basins is disabled" % (basin,edge[1]))
-
-        if breakChainOnNodes:
-            breakEdges = [edge for edge in network.edges if edge[0] in re.findall("([^'^(),; \n]+)",breakChainOnNodes)]
-            network.remove_edges_from(breakEdges)
-            for edge in breakEdges:
-                arcpy.AddMessage("Removed edge %s-%s because %s is included in list of nodes to end trace at" % (edge[0],edge[1]))
-
-        outlets = []
-        junctions = []
-        for node in list(network.nodes):
-            if not network.out_edges(node):
-                outlets.append(node)
-            if len(network.out_edges(node))>1:
-                junctions.append(node)
-
-        for source in junctions:
-            if source != None:
-                lengths = np.ones((len(outlets),1))*1e6
-                for i,target in enumerate(outlets):
-                    try:
-                        if nx.has_path(network, source, target):
-                            lengths[i] = (nx.bellman_ford_path_length(network, source, target, weight="weight"))
-                    except:
-                        arcpy.AddError("Failed upon tracing network from %s to %s" % (source,target))
-                toNode = nx.bellman_ford_path(network, source, outlets[np.argmin(lengths)])[1]
-                for edge in network.out_edges(source):
-                    if not edge[1] == toNode:
-                        network.remove_edge(source,edge[1])
-                        arcpy.AddMessage("Removed edge %s-%s so that node %s exclusively leads to outlet %s" % (source,edge[1],source,outlets[np.argmin(lengths)]))
-
-        msm_Node_ground_level = {}
-        msm_Node_invert_level = {}
-        with arcpy.da.SearchCursor(msm_Node, ["MUID", "GroundLevel", "InvertLevel"]) as cursor:
-            for row in cursor:
-                msm_Node_ground_level[row[0]] = row[1]
-                msm_Node_invert_level[row[0]] = row[2]
-
-        with open(runoff_file, 'r') as f:
-            txt = f.read()
-        delimiter = r"  " if "  " in txt else r"\t"
-
-        if "," in txt:
-            from io import StringIO
-            runoff_file = StringIO(unicode(txt.replace(r",",r".")))
-
-        series = pd.read_csv(runoff_file, delimiter = delimiter, skiprows=3, names = ["Intensity"])
-        series.index = pd.to_datetime(series.index)
-        series = series.resample("60S").backfill()
-
-        rain_event = np.concatenate((series.values[:,0], np.zeros(60)))
-
-        arcpy.SetProgressorLabel("Calculating full velocity of pipe")
-        msm_Link_TravelTime = {}
-        msm_Link_distance = {}
-        velocities = []
-        with arcpy.da.SearchCursor(msm_Link, ["MUID", "Slope_C", "Diameter", "Length_C", "Length"]) as cursor:
-            for row in cursor:
-                try:
-                    VFull = ColebrookWhite.QFull(row[2], row[1]/1e2 if row[1]/1e2>1e-3 else 1e-3, "PL")/((row[2]/2)**2*3.1415)
-                except Exception as e:
-                    VFull = 1
-
-                length = row[4] if row[4] else row[3]
-                length = 10 if not length else length
-                msm_Link_TravelTime["%s-%s" % (msm_Link_Network.links[row[0]].fromnode, msm_Link_Network.links[row[0]].tonode)] = length/VFull
-                msm_Link_distance["%s-%s" % (msm_Link_Network.links[row[0]].fromnode, msm_Link_Network.links[row[0]].tonode)] = length
-
-        arcpy.SetProgressorLabel("Tracing")
-        peak_discharge = {}
-        peak_discharge_time = {}
-        total_red_opl = {}
-        total_imp_opl = {}
-
-        target_manholes = [msm_Link_Network.links[link].fromnode for link in selected_pipes]
-
-        def time_area(rain_event, conc_time, travel_time):
-            try:
-                runoff = np.zeros(len(rain_event))
-                for time_i , rain_intensity in enumerate(rain_event):
-                    time_i_adjusted = int(time_i - travel_time)
-                    rain = rain_event[max(time_i_adjusted-conc_time,0):max(0,time_i_adjusted)]
-                    runoff[time_i] = np.sum(rain)/conc_time if rain.any() else 0
-            except Exception as e:
-                arcpy.AddError((rain_event, conc_time, travel_time, time_i_adjusted))
-                raise(e)
-            return runoff
-
-        connected_sources = []
-        arcpy.SetProgressor("step","Tracing to every pipe selected", 0, len(target_manholes), 1)
-
-        # critical_node = {'MUID': None, 'Slope': None, 'Elevation Difference': None, 'Distance': None}
-
-        hydrographs = {}
-
-        for target_i, target_manhole in enumerate(target_manholes):
-            arcpy.SetProgressorPosition(target_i)
-            time_delays = {}
-            runoffs = []
-            total_red_opl[target_manhole] = 0
-            total_imp_opl[target_manhole] = 0
-            for source in network.nodes:
-                if nx.has_path(network, source, target_manhole):
-                    connected_sources.append(source)
-                    path = nx.shortest_path(network, source, target_manhole)
-                    time_delay = 0
-                    distance = 0
-                    for path_i in range(1, len(path)):
-                        time_delay += msm_Link_TravelTime["%s-%s" % (path[path_i-1], path[path_i])]/60.0
-                        distance += msm_Link_distance["%s-%s" % (path[path_i-1], path[path_i])]
-                    time_delays[source] = time_delay
-
-                    # if distance > 0:
-                        # source_to_target_slope = (msm_Node_ground_level[source]- msm_Node_invert_level[target])/distance# o/oo
-                        # if critical_node["Slope"] is None or source_to_target_slope < critical_node["Slope"]:
-                            # critical_node["MUID"] = source
-                            # critical_node["Slope"] = source_to_target_slope
-                            # critical_node["Elevation Difference"] = msm_Node_ground_level[source]- msm_Node_invert_level[target]
-                            # critical_node["Distance"] = distance
-
-
-            for MUID, time_delay in time_delays.items():
-                runoff = np.zeros(len(rain_event))
-                if MUID in catchment_connections_dict:
-                    catchIDs = catchment_connections_dict[MUID]
-                    for catchID in catchIDs:
-                        total_red_opl[target_manhole] += catchments_dict[catchID].reduced_area
-                        total_imp_opl[target_manhole] += catchments_dict[catchID].impervious_area
-                        runoff += time_area(rain_event, catchments_dict[catchID].concentration_time, time_delay)/1e6*catchments_dict[catchID].reduced_area*1e3*scaling_factor
-
-                if useMaxInflow and MUID in maxInflow:
-                    runoff += time_area(np.ones(len(rain_event))*maxInflow[MUID], 1, time_delay)*1e3
-                runoffs.append(runoff)
-
-            hydrographs[target_manhole] = np.sum(np.array(runoffs), axis=0)
-            peak_discharge[target_manhole] = np.max(np.sum(np.array(runoffs), axis=0))
-            peak_discharge_time[target_manhole] = np.argmax(np.sum(np.array(runoffs), axis=0))
-
-        if writeDFS0:
-            dfs0_text = np.empty((2+len(hydrographs[hydrographs.keys()[0]])), dtype = object)
-            dfs0_text[0] = "\t".join(["Discharge[meter^3/sec]:Instantaneous"]*len(hydrographs.keys()))
-            dfs0_text[1] = "Time"
-            for i in range(len(dfs0_text)-2):
-                dfs0_text[i+2] = str(series.index[0] + datetime.timedelta(minutes=i))
-
-            for target_manhole in sorted(hydrographs.keys()):
-                dfs0_text[1] += "\t" + target_manhole
-                for discharge_i, discharge in enumerate(hydrographs[target_manhole]/1e3):
-                    dfs0_text[discharge_i+2] += "\t%1.6f" % (discharge)
-            filepath = writeDFS0
-            with open(filepath,'w') as f:
-                for i in range(len(dfs0_text)):
-                    f.write(dfs0_text[i] + "\n")
-            # import mikeio
-            # dfs0_template = mikeio.dfs.Dfs0(get_start_time)
-            # for target_manhole in hydrographs.keys():
-                # filepath = os.path.join(writeDFS0, target_manhole + ".txt")
-                # with open(filepath,'w') as f:
-                    # f.write("Discharge[meter^3/sec]:Instantaneous\n")
-                    # f.write("Time\t%s\n" % target_manhole)
-                    # for discharge_i, discharge in enumerate((hydrographs[target_manhole])):
-                        # f.write("%s\t%1.6f\n" % (series.index[0] + datetime.timedelta(minutes=discharge_i), discharge))
-                # dfs0 = mikeio.dfs0.Dfs0()
-                # dfs0.write(filepath, data = [np.concatenate((hydrograph_summed,np.zeros((60))))], start_time = dfs0_template.start_time,
-                           # items = [mikeio.eum.ItemInfo("Discharge", mikeio.eum.EUMType.Discharge, unit = mikeio.eum.EUMUnit.meter_pow_3_per_sec)],
-                           # title=target_manhole, dt = 60)
-
-
-        arcpy.SetProgressorLabel("Calculating Pipe Dimensions")
-        #arcpy.AddMessage("Upstream Manholes: ('%s')" % ("', '".join(connected_sources)))
-        arcpy.AddMessage(peak_discharge)
-        arcpy.AddMessage(peak_discharge_time)
-        # if len(selected_pipes) == 1:
-            # arcpy.AddMessage(critical_node)
-        edit = arcpy.da.Editor(MU_database)
-        edit.startEditing(False, True)
-        edit.startOperation()
-
-        def addField(shapefile, field_name, datatype):
-            i = 1
-            while field_name in [f.name for f in arcpy.Describe(shapefile).fields]:
-                field_name = "%s_%d" % (field_name, i)
-            arcpy.AddField_management(shapefile,field_name,datatype)
-            return field_name
-
-        arcpy.SetProgressorLabel("Creating debug output")
-        debug_output = False
-        if debug_output:
-            if len(target_manholes)==1:
-                with open(r"C:\Papirkurv\Hydrograph.csv", 'w') as f:
-                    for discharge in runoffs:
-                        f.write("%s\n" % ("\t".join([str(d) for d in discharge])))
-            debug_output_fc = str(arcpy.CopyFeatures_management(pipe_layer, getAvailableFilename(arcpy.env.scratchGDB + "\debug_output")))
-            RedOpl_field = addField(debug_output_fc, "RedOpl", "FLOAT")
-            QMax_field = addField(debug_output_fc, "QMax", "FLOAT")
-            QMaxT_field = addField(debug_output_fc, "QMaxT", "FLOAT")
-            with arcpy.da.UpdateCursor(debug_output_fc, ["MUID", RedOpl_field, QMax_field, QMaxT_field], where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
-                for row in cursor:
-                    row[1] = total_red_opl[msm_Link_Network.links[row[0]].fromnode]
-                    row[2] = peak_discharge[msm_Link_Network.links[row[0]].fromnode]
-                    row[3] = peak_discharge_time[msm_Link_Network.links[row[0]].fromnode]
-                    cursor.updateRow(row)
-        
-        arcpy.SetProgressor("step","Calculating Pipe Dimensions", 0, len(selected_pipes), 1)
-        fields = ["Slope_C",result_field,"MaterialID","MUID", "Diameter"]
-        if result_field:
-            try:
-                with arcpy.da.UpdateCursor(msm_Link, fields, where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
-                    for row_i, row in enumerate(cursor):
-                        # diameter_old = row[4]
-                        arcpy.SetProgressorPosition(row_i)
-                        if change_material:
-                            D = [diameter for diameter in diameters_plastic if diameter < 450] + [
-                                diameter for diameter in diameters_concrete if diameter > 450]
-                        else:
-                            D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
-                                2].lower() else diameters_concrete
-                        slope = slopeOverwrite if slopeOverwrite else row[0]*1e-2
-                        if writeDischargeInstead:
-                            row[1] = peak_discharge[msm_Link_Network.links[row[3]].fromnode]
-                        else:
-                            QFull = 0
-                            Di = -1
-
-                            if peak_discharge[msm_Link_Network.links[row[3]].fromnode] == 0:
-                                Di = 0
-                            else:
-                                while QFull is not None and QFull*1e3<peak_discharge[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
-                                    Di += 1
-                                    QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
-                            
-                            diameter = D[Di]
-                            if keep_largest_diameter and diameter < row[4]:
-                                diameter = row[4]
-                            row[1] = D[Di]/1.0e3
-                            if change_material:
-                                row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
-                            # if diameter_old != row[1]:
-                                # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
-                        try:
-                            cursor.updateRow(row)
-                        except Exception as e:
-                            arcpy.AddWarning("Could not update row:")
-                            arcpy.AddWarning(row)
-            except Exception as e:
-                if row[0] not in peak_discharge:
-                    arcpy.AddError(traceback.format_exc())
-                    arcpy.AddError("Failed to analyze catchments connected to node %s on pipe %s" % (msm_Link_Network.links[row[3]].fromnode, msm_Link_Network.links[row[3]].MUID))
-                    raise(e)
-                arcpy.AddError(row)
-                arcpy.AddError(traceback.format_exc())
-                raise(e)
-                
-        else:  
-            result_layer = getAvailableFilename(arcpy.env.scratchGDB + "\Pipe_Dimensions", parent = MU_database)
-            arcpy.CreateFeatureclass_management(arcpy.env.scratchGDB, os.path.basename(result_layer), "POLYLINE")
-            fields = ["muid", "diameter", "materialid", "slope", "nettypeno", "enabled", "ImpArea", "RedArea",
-                      "MaxFlow", "CritTime", "FromNode", "ToNode"]
-
-            addField(result_layer, "muid", "TEXT")
-            addField(result_layer, "diameter", "FLOAT")
-            addField(result_layer, "materialid", "TEXT")
-            addField(result_layer, "slope", "FLOAT")
-            addField(result_layer, "nettypeno", "SHORT")
-            addField(result_layer, "enabled", "SHORT")
-            addField(result_layer, "ImpArea", "FLOAT")
-            addField(result_layer, "RedArea", "FLOAT")
-            addField(result_layer, "MaxFlow", "FLOAT")
-            addField(result_layer, "CritTime", "SHORT")
-            addField(result_layer, "FromNode", "TEXT")
-            addField(result_layer, "ToNode", "TEXT")
-
-
-            arcpy.SetProgressor("step","Calculating Pipe Dimensions", 0, len(selected_pipes), 1)
-            try:
-                with arcpy.da.InsertCursor(result_layer, ["SHAPE@"] + fields) as ins_cursor:
-                    with arcpy.da.SearchCursor(msm_Link, ["Slope_C", "Diameter", "MaterialID", "MUID", "SHAPE@", "NetTypeNo",
-                                                          "enabled"], where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
-                        for row_i, row in enumerate(cursor):
-                            # diameter_old = row[4]
-                            arcpy.SetProgressorPosition(row_i)
-                            if change_material:
-                                D = [diameter for diameter in diameters_plastic if diameter < 450] + [
-                                    diameter for diameter in diameters_concrete if diameter > 450]
-                            else:
-                                D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[2].lower() else diameters_concrete
-                            slope = slopeOverwrite if slopeOverwrite else row[0]*1e-2
-                            # if writeDischargeInstead:
-                            #     diameter = # ins_row = (row[4], row[3], peak_discharge[msm_Link_Network.links[row[3]].fromnode], row[2], row[0], row[5], row[6])
-                            #     ins_cursor.insertRow(ins_row)
-                            QFull = 0
-                            Di = -1
-
-                            if peak_discharge[msm_Link_Network.links[row[3]].fromnode] == 0:
-                                Di = 0
-                            else:
-                                while QFull is not None and QFull*1e3<peak_discharge[msm_Link_Network.links[row[3]].fromnode] and Di+1 < len(D):
-                                    Di += 1
-                                    QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
-                            diameter = D[Di]/1.0e3
-                            if keep_largest_diameter and diameter < row[1]:
-                                diameter = row[1]
-                            # arcpy.AddMessage((ColebrookWhite.QFull(D[Di]/1e3,slope,row[2]), peak_discharge[msm_Link_Network.links[row[3]].fromnode]))
-                            # arcpy.AddMessage((D[Di]/1e3,slope,row[2]))
-                            ins_row = (row[4], row[3], diameter, row[2], row[0], row[5], row[6],
-                                       total_imp_opl[msm_Link_Network.links[row[3]].fromnode],
-                                       total_red_opl[msm_Link_Network.links[row[3]].fromnode],
-                                       peak_discharge[msm_Link_Network.links[row[3]].fromnode],
-                                       peak_discharge_time[msm_Link_Network.links[row[3]].fromnode],
-                                       msm_Link_Network.links[row[3]].fromnode,
-                                       msm_Link_Network.links[row[3]].tonode)
-                            ins_cursor.insertRow(ins_row)
-                                # if diameter_old != row[1]:
-                                    # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
-            except Exception as e:
-                if row[0] not in peak_discharge:
-                    arcpy.AddError(traceback.format_exc())
-                    arcpy.AddError("Failed to analyze catchments connected to node %s on pipe %s" % (msm_Link_Network.links[row[3]].fromnode, msm_Link_Network.links[row[3]].MUID))
-                    raise(e)
-                arcpy.AddError(row)
-                arcpy.AddError(traceback.format_exc())
-                raise(e)
-            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links Dimensioned.lyr", result_layer, workspace_type = "FILEGDB_WORKSPACE")        
-        
-        edit.stopOperation()
-        edit.stopEditing(True)
-        
-
-        return
-
-class PipeDimensionToolTAPro(object):
-    def __init__(self):
-        self.label       = "Calculate minimum required pipe diameter through Time Area Method (MIKE+)"
-        self.description = "Calculate minimum required pipe diameter through Time Area Method (MIKE+)"
-        self.canRunInBackground = False
-
-    def getParameterInfo(self):
-        #Define parameter definitions
-
-        pipe_layer = arcpy.Parameter(
-            displayName="Pipe feature layer",
-            name="pipe_layer",
-            datatype="GPFeatureLayer",
-            parameterType="Required",
-            direction="Input")
-
-        # flags = arcpy.Parameter(
-            # displayName="Layer to trace upstream network and analyze catchment for",
-            # name="flags",
-            # datatype="GPFeatureLayer",
-            # parameterType="Required",
-            # direction="Input")
-        # flags.filter.list = ["Simple Junction"]
-
-        reaches = arcpy.Parameter(
-            displayName="Trace network through:",
-            name="reaches",
-            datatype="GPString",
-            parameterType="Optional",
-            multiValue=True,
-            direction="Input")
-        reaches.filter.type = "ValueList"
-        reaches.filter.list = ["Orifice","Weir","Pump", "Basin"]
         
         result_field = arcpy.Parameter(
 			displayName= "Field to assign diameter to",
@@ -1142,6 +170,7 @@ class PipeDimensionToolTAPro(object):
             parameterType="optional",
             direction="Input")
         keep_largest_diameter.category = "Additional settings"
+        keep_largest_diameter.value = True
         
         change_material = arcpy.Parameter(
             displayName="Change material (Plastic if less than 500 mm, concrete if greater than or equal to 500 mm",
@@ -1150,7 +179,14 @@ class PipeDimensionToolTAPro(object):
             parameterType="optional",
             direction="Input")
         change_material.category = "Additional settings"
-            
+        change_material.value = True
+
+        debug_output = arcpy.Parameter(
+            displayName="Export Layer with attributes instead",
+            name="debug_output",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
         # get_start_time = arcpy.Parameter(
             # displayName="Copy start time from dfs0 file:",
             # name="get_start_time",
@@ -1161,20 +197,20 @@ class PipeDimensionToolTAPro(object):
         # get_start_time.category = "Additional settings"
         # get_start_time.enabled = False
 
-        parameters = [pipe_layer, reaches, result_field, runoff_file, scaling_factor, breakChainOnNodes, useMaxInflow, slopeOverwrite, writeDFS0, keep_largest_diameter, change_material]
+        parameters = [pipe_layer, reaches, result_field, runoff_file, scaling_factor, breakChainOnNodes, useMaxInflow, slopeOverwrite, writeDFS0, keep_largest_diameter, change_material, debug_output]
         return parameters
 
     def isLicensed(self):
         return True
 
     def updateParameters(self, parameters): #optional
-        pipe_layer = parameters[0].ValueAsText
-        MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)
+        #pipe_layer = parameters[0].ValueAsText
+        #MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)
         
-        if ".sqlite" in MU_database:
-            parameters[2].Enabled = False
-        else:
-            parameters[2].Enabled = True
+        #if ".sqlite" in MU_database:
+        #    parameters[2].Enabled = False
+        #else:
+        #    parameters[2].Enabled = True
         # mxd = arcpy.mapping.MapDocument("CURRENT")  
         # df = arcpy.mapping.ListDataFrames(mxd)[0]  
         # workspaces = set()
@@ -1211,6 +247,7 @@ class PipeDimensionToolTAPro(object):
         writeDFS0 = parameters[8].ValueAsText
         keep_largest_diameter = parameters[9].Value
         change_material = parameters[10].Value
+        debug_output = parameters[11].Value
         
         arcpy.SetProgressorLabel("Preparing")
         selected_pipes = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["muid"])]
@@ -1310,7 +347,8 @@ class PipeDimensionToolTAPro(object):
             runoffs = []
             total_red_opl[target_manhole] = 0
             total_imp_opl[target_manhole] = 0
-            for source in graph.network.nodes:
+            
+            for source in graph.graph.nodes:
                 if nx.has_path(graph.graph, source, target_manhole):
                     connected_sources.append(source)
                     path = nx.shortest_path(graph.graph, source, target_manhole)
@@ -1417,23 +455,7 @@ class PipeDimensionToolTAPro(object):
                     # row[2] = peak_discharge[msm_Link_Network.links[row[0]].fromnode]
                     # row[3] = peak_discharge_time[msm_Link_Network.links[row[0]].fromnode]
                     # cursor.updateRow(row)
-        if is_sqlite or not result_field:
-            result_layer = getAvailableFilename(arcpy.env.scratchGDB + "\Pipe_Dimensions", parent = MU_database)
-            
-            arcpy.CreateFeatureclass_management(arcpy.env.scratchGDB, os.path.basename(result_layer), "POLYLINE")
-            fields = ["muid", "diameter", "materialid", "slope", "nettypeno", "enabled", "ImpArea", "RedArea", "MaxFlow", "CritTime"]
-
-            addField(result_layer, "muid", "TEXT")
-            addField(result_layer, "diameter", "FLOAT")
-            addField(result_layer, "materialid", "TEXT")
-            addField(result_layer, "slope", "FLOAT")
-            addField(result_layer, "nettypeno", "SHORT")
-            addField(result_layer, "enabled", "SHORT")
-            addField(result_layer, "ImpArea", "FLOAT")
-            addField(result_layer, "RedArea", "FLOAT")
-            addField(result_layer, "MaxFlow", "FLOAT")
-            addField(result_layer, "CritTime", "SHORT")
-            arcpy.SetProgressor("step","Calculating Pipe Dimensions", 0, len(selected_pipes), 1)
+        if debug_output:
             try:
                 with arcpy.da.InsertCursor(result_layer, ["SHAPE@"] + fields) as ins_cursor:
                     with arcpy.da.SearchCursor(msm_Link, ["Slope" if is_sqlite else "Slope_C", "Diameter", "MaterialID", "MUID", "SHAPE@", "NetTypeNo",
@@ -1441,7 +463,12 @@ class PipeDimensionToolTAPro(object):
                         for row_i, row in enumerate(cursor):
                             # diameter_old = row[4]
                             arcpy.SetProgressorPosition(row_i)
-                            D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[2].lower() else diameters_concrete
+                            if change_material:
+                                D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                                    diameter for diameter in diameters_concrete if diameter > 450]
+                            else:
+                                D = diameters_plastic if not "concrete" in row[1].lower() and not "beton" in row[
+                                    1].lower() else diameters_concrete
                             slope = slopeOverwrite if slopeOverwrite else row[0]*1e-2
                             # if writeDischargeInstead:
                             #     diameter = # ins_row = (row[4], row[3], peak_discharge[msm_Link_Network.links[row[3]].fromnode], row[2], row[0], row[5], row[6])
@@ -1456,9 +483,15 @@ class PipeDimensionToolTAPro(object):
                                     Di += 1
                                     QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
                             diameter = D[Di]/1.0e3
+                            
+                            material = row[2]
                             if keep_largest_diameter and diameter < row[1]:
                                 diameter = row[1]
-                            ins_row = (row[4], row[3], diameter, row[2], row[0], row[5], row[6],
+                            else:
+                                if change_material:
+                                    material ="Concrete (Normal)" if diameter>0.45 else "Plastic"
+                                arcpy.AddMessage("Changed %s from %d to %d" % (row[3], row[1]*1e3, D[Di]))
+                            ins_row = (row[4], row[3], diameter, material, row[0], row[5], row[6],
                                        total_imp_opl[graph.network.links[row[3]].fromnode],
                                        total_red_opl[graph.network.links[row[3]].fromnode],
                                        peak_discharge[graph.network.links[row[3]].fromnode],
@@ -1475,13 +508,60 @@ class PipeDimensionToolTAPro(object):
                 arcpy.AddError(traceback.format_exc())
                 raise(e)
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links Dimensioned.lyr", result_layer, workspace_type = "FILEGDB_WORKSPACE")
+        elif is_sqlite:
+            with sqlite3.connect(
+                    MU_database) as connection:
+                update_cursor = connection.cursor()
+                with arcpy.da.SearchCursor(msm_Link,
+                                           ["Slope" if is_sqlite else "Slope_C", "Diameter", "MaterialID", "MUID", "SHAPE@",
+                                            "NetTypeNo",
+                                            "enabled"],
+                                           where_clause="MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
+                    for row_i, row in enumerate(cursor):
+                        arcpy.SetProgressorPosition(row_i)
+                        if change_material:
+                            D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                                diameter for diameter in diameters_concrete if diameter > 450]
+                        else:
+                            D = diameters_plastic if not "concrete" in row[1].lower() and not "beton" in row[
+                                1].lower() else diameters_concrete
+                        slope = slopeOverwrite if slopeOverwrite else row[0] * 1e-2
+                        # if writeDischargeInstead:
+                        #     diameter = # ins_row = (row[4], row[3], peak_discharge[msm_Link_Network.links[row[3]].fromnode], row[2], row[0], row[5], row[6])
+                        #     ins_cursor.insertRow(ins_row)
+                        QFull = 0
+                        Di = -1
+
+                        if peak_discharge[graph.network.links[row[3]].fromnode] == 0:
+                            Di = 0
+                        else:
+                            while QFull is not None and QFull * 1e3 < peak_discharge[
+                                graph.network.links[row[3]].fromnode] and Di + 1 < len(D):
+                                Di += 1
+                                QFull = ColebrookWhite.QFull(D[Di] / 1e3, slope, row[2])
+                        diameter = D[Di] / 1.0e3
+
+                        material = row[2]
+                        if keep_largest_diameter and diameter <= row[1]:
+                            diameter = row[1]
+                        else:
+                            if change_material:
+                                material = "Concrete (Normal)" if diameter > 0.45 else "Plastic"
+                            arcpy.AddMessage("Changed %s from %d to %d" % (row[3], row[1] * 1e3, D[Di]))
+                            # arcpy.AddMessage("UPDATE msm_Link SET Diameter = %1.3f, SET MaterialID = %s WHERE MUID = %s" % (diameter, material, row[3]))
+                            update_cursor.execute("UPDATE msm_Link SET Diameter = %1.3f, MaterialID = '%s' WHERE MUID = '%s'" % (diameter, material, row[3]))
+
         else:
             try:
-                arcpy.AddMessage(MU_database)
                 edit = arcpy.da.Editor(MU_database)
                 edit.startEditing(False, True)
                 edit.startOperation()
-                fields = ["Slope_C",result_field,"MaterialID","MUID", "Diameter"]
+                
+                fields = ["Slope_C","MaterialID","MUID", "Diameter"]
+                if result_field not in fields:
+                    result_field_index = len(fields)-1
+                    fields.append(result_field)
+                    
                 with arcpy.da.UpdateCursor(msm_Link, fields, where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
                     for row_i, row in enumerate(cursor):
                         # diameter_old = row[4]
@@ -1490,25 +570,27 @@ class PipeDimensionToolTAPro(object):
                             D = [diameter for diameter in diameters_plastic if diameter < 450] + [
                                 diameter for diameter in diameters_concrete if diameter > 450]
                         else:
-                            D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
-                                2].lower() else diameters_concrete
+                            D = diameters_plastic if not "concrete" in row[1].lower() and not "beton" in row[
+                                1].lower() else diameters_concrete
                         slope = slopeOverwrite if slopeOverwrite else row[0]*1e-2
                         QFull = 0
                         Di = -1
 
-                        if peak_discharge[graph.network.links[row[3]].fromnode] == 0:
+                        if peak_discharge[graph.network.links[row[2]].fromnode] == 0:
                             Di = 0
                         else:
-                            while QFull is not None and QFull*1e3<peak_discharge[graph.network.links[row[3]].fromnode] and Di+1 < len(D):
+                            while QFull is not None and QFull*1e3<peak_discharge[graph.network.links[row[2]].fromnode] and Di+1 < len(D):
                                 Di += 1
-                                QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                                QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[1])
                         
                         diameter = D[Di]
-                        if keep_largest_diameter and diameter < row[4]:
-                            diameter = row[4]
-                        row[1] = D[Di]/1.0e3
-                        if change_material:
-                            row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
+                        if keep_largest_diameter and diameter/1.0e3 <= row[3]:
+                            diameter = row[3]
+                        else:
+                            arcpy.AddMessage("Changed %s from %d to %d" % (row[2], row[3]*1e3, D[Di]))
+                            row[-1] = D[Di]/1.0e3
+                            if change_material:
+                                row[1] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
                             # if diameter_old != row[1]:
                                 # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
                         try:
@@ -1567,6 +649,8 @@ class upgradeDimensions(object):
     def execute(self, parameters, messages):
         pipe_layer = parameters[0].Value
         change_material = parameters[1].Value
+        MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry", "")
+        is_sqlite = True if ".sqlite" in MU_database else False
 
         MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer,["MUID"])]
         if len(MUIDs) == len([row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).CatalogPath,["MUID"])]):
@@ -1574,32 +658,56 @@ class upgradeDimensions(object):
             if not userquery == "Yes":
                 return
 
-        edit = arcpy.da.Editor(os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)))
-        edit.startEditing(False, True)
-        edit.startOperation()
-        
-        
-                                
-        D_plastic = np.array(diameters_plastic)
-        D_concrete = np.array(diameters_concrete)
-        with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath,["MUID", "Diameter", "MaterialID"], where_clause = "MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
-            for row in cursor:
-                if change_material:
-                    D = [diameter for diameter in diameters_plastic if diameter < 450] + [
-                        diameter for diameter in diameters_concrete if diameter > 450]
-                else:
-                    D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
-                        2].lower() else diameters_concrete
-                D = np.array(D)
-                oldDiameter = row[1]*1e3
-                row[1] = D[np.where(row[1]*1e3<D)[0][0]]/1e3
-                if change_material:
-                    row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
-                cursor.updateRow(row)
-                arcpy.AddMessage("Upgraded pipe %s from %d to %d" % (row[0],oldDiameter,row[1]*1e3))
+        if is_sqlite:
+            with sqlite3.connect(
+                    MU_database) as connection:
+                update_cursor = connection.cursor()
+                D_plastic = np.array(diameters_plastic)
+                D_concrete = np.array(diameters_concrete)
+                with arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).catalogPath, ["MUID", "Diameter", "MaterialID"],
+                                           where_clause="MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
+                    for row in cursor:
+                        if change_material:
+                            D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                                diameter for diameter in diameters_concrete if diameter > 450]
+                        else:
+                            D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
+                                2].lower() else diameters_concrete
+                        D = np.array(D)
+                        oldDiameter = row[1] * 1e3
+                        diameter = D[np.where(row[1] * 1e3 < D)[0][0]] / 1e3
+                        material = row[2]
+                        if change_material:
+                            material = "Concrete (Normal)" if row[1] > 0.45 else "Plastic"
+                        update_cursor.execute("UPDATE msm_Link SET Diameter = %1.3f, MaterialID = '%s' WHERE MUID = '%s'" % (diameter, material, row[0]))
+                        arcpy.AddMessage("Upgraded pipe %s from %d to %d" % (row[0], oldDiameter, diameter))
+        else:
+            edit = arcpy.da.Editor(os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)))
+            edit.startEditing(False, True)
+            edit.startOperation()
 
-        edit.stopOperation()
-        edit.stopEditing(True)
+
+
+            D_plastic = np.array(diameters_plastic)
+            D_concrete = np.array(diameters_concrete)
+            with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath,["MUID", "Diameter", "MaterialID"], where_clause = "MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
+                for row in cursor:
+                    if change_material:
+                        D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                            diameter for diameter in diameters_concrete if diameter > 450]
+                    else:
+                        D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
+                            2].lower() else diameters_concrete
+                    D = np.array(D)
+                    oldDiameter = row[1]*1e3
+                    row[1] = D[np.where(row[1]*1e3<D)[0][0]]/1e3
+                    if change_material:
+                        row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
+                    cursor.updateRow(row)
+                    arcpy.AddMessage("Upgraded pipe %s from %d to %d" % (row[0],oldDiameter,row[1]*1e3))
+
+            edit.stopOperation()
+            edit.stopEditing(True)
         return
 
 class downgradeDimensions(object):
@@ -1649,6 +757,8 @@ class downgradeDimensions(object):
     def execute(self, parameters, messages):
         pipe_layer = parameters[0].Value
         change_material = parameters[1].Value
+        MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry", "")
+        is_sqlite = True if ".sqlite" in MU_database else False
 
         MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer,["MUID"])]
         if len(MUIDs) == len([row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).CatalogPath,["MUID"])]):
@@ -1656,26 +766,163 @@ class downgradeDimensions(object):
             if not userquery == "Yes":
                 return
 
-        edit = arcpy.da.Editor(os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)))
+        if is_sqlite:
+            with sqlite3.connect(
+                    MU_database) as connection:
+                update_cursor = connection.cursor()
+                D_plastic = np.array(diameters_plastic)
+                D_concrete = np.array(diameters_concrete)
+                with arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).catalogPath, ["MUID", "Diameter", "MaterialID"],
+                                           where_clause="MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
+                    for row in cursor:
+                        if change_material:
+                            D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                                diameter for diameter in diameters_concrete if diameter > 450]
+                        else:
+                            D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
+                                2].lower() else diameters_concrete
+                        D = np.array(D)
+                        oldDiameter = row[1] * 1e3
+                        diameter = D[np.where(row[1]*1e3>D)[0][-1]]/1e3
+                        material = row[2]
+                        if change_material:
+                            material = "Concrete (Normal)" if row[1] > 0.45 else "Plastic"
+                        update_cursor.execute("UPDATE msm_Link SET Diameter = %1.3f, MaterialID = '%s' WHERE MUID = '%s'" % (diameter, material, row[0]))
+                        arcpy.AddMessage("Upgraded pipe %s from %d to %d" % (row[0], oldDiameter, diameter*1e3))
+        else:
+            edit = arcpy.da.Editor(os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)))
+            edit.startEditing(False, True)
+            edit.startOperation()
+            D_plastic = np.array(diameters_plastic)
+            D_concrete = np.array(diameters_concrete)
+            with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath,["MUID", "Diameter", "MaterialID"], where_clause = "MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
+                for row in cursor:
+                    if change_material:
+                        D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                            diameter for diameter in diameters_concrete if diameter > 450]
+                    else:
+                        D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
+                            2].lower() else diameters_concrete
+                    D = np.array(D)
+                    oldDiameter = row[1]*1e3
+                    row[1] = D[np.where(row[1]*1e3>D)[0][-1]]/1e3
+                    if change_material:
+                        row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
+                    cursor.updateRow(row)
+                    arcpy.AddMessage("Downgraded pipe %s from %d to %d" % (row[0],oldDiameter,row[1]*1e3))
+
+            edit.stopOperation()
+            edit.stopEditing(True)
+        return
+
+class CopyDiameter(object):
+    def __init__(self):
+        self.label       = "Copy field value from layer to layer"
+        self.description = "Copy field value from layer to layer"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        #Define parameter definitions
+
+        reference_feature_layer = arcpy.Parameter(
+            displayName="Reference feature layer",
+            name="reference_feature_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+
+        target_feature_layer = arcpy.Parameter(
+            displayName="Target feature layer",
+            name="target_feature_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+
+        copy_field = arcpy.Parameter(
+            displayName="Field to copy",
+            name="result_field",
+            datatype="GPString",
+            parameterType="Required",
+            multiValue=True,
+            direction="Input")
+        copy_field.filter.type = "ValueList"
+
+        match_by = arcpy.Parameter(
+            displayName="Match Feature Classes by",
+            name="match_by",
+            datatype="GPString",
+            parameterType="Required",
+            multiValue=True,
+            direction="Input")
+        match_by.filter.type = "ValueList"
+        match_by.filter.list = ["SHAPE", "OBJECTID", "MUID"]
+        match_by.value = "SHAPE"
+
+        parameters = [reference_feature_layer, target_feature_layer, copy_field, match_by]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters): #optional
+        if parameters[0].altered:
+            reference_feature_layer = parameters[0].ValueAsText
+            parameters[2].filter.list = [f.name for f in arcpy.Describe(reference_feature_layer).fields]
+
+        if "Diameter" in parameters[2].filter.list and not parameters[2].value:
+            parameters[2].value = "Diameter"
+            if "MaterialID" in parameters[2].filter.list:
+                parameters[2].value = ["Diameter", "MaterialID"]
+
+        return
+
+    def updateMessages(self, parameters): #optional
+        return
+
+    def execute(self, parameters, messages):
+        reference_feature_layer = parameters[0].Value
+        target_feature_layer = parameters[1].Value
+        copy_field = parameters[2].ValueAsText
+        match_by = parameters[3].ValueAsText
+        MU_database = os.path.dirname(os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath))
+
+        class Reference():
+            pass
+
+        references = []
+        fields = [field.name for field in arcpy.ListFields(reference_feature_layer)]
+        with arcpy.da.SearchCursor(reference_feature_layer, fields) as cursor:
+            for row in cursor:
+                reference = Reference()
+                for field_i, field in enumerate(fields):
+                    setattr(reference, field, row[field_i])
+
+                references.append(reference)
+
+        arcpy.AddMessage(os.path.dirname(os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath)))
+        arcpy.AddMessage(target_feature_layer)
+
+        edit = arcpy.da.Editor(MU_database)
         edit.startEditing(False, True)
         edit.startOperation()
-        D_plastic = np.array(diameters_plastic)
-        D_concrete = np.array(diameters_concrete)
-        with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath,["MUID", "Diameter", "MaterialID"], where_clause = "MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
+
+        fields = [field.name for field in arcpy.ListFields(target_feature_layer)]
+
+        arcpy.AddMessage(fields)
+        arcpy.AddMessage(match_by)
+        match_by_field_i = [field_i for field_i, field in enumerate(fields) if field == match_by][0]
+        with arcpy.da.UpdateCursor(arcpy.Describe(target_feature_layer).catalogPath, fields) as cursor:
             for row in cursor:
-                if change_material:
-                    D = [diameter for diameter in diameters_plastic if diameter < 450] + [
-                        diameter for diameter in diameters_concrete if diameter > 450]
-                else:
-                    D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
-                        2].lower() else diameters_concrete
-                D = np.array(D)
-                oldDiameter = row[1]*1e3
-                row[1] = D[np.where(row[1]*1e3>D)[0][-1]]/1e3
-                if change_material:
-                    row[2] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
-                cursor.updateRow(row)
-                arcpy.AddMessage("Downgraded pipe %s from %d to %d" % (row[0],oldDiameter,row[1]*1e3))
+                match = [reference for reference in references if getattr(reference, match_by) == row[match_by_field_i]]
+                if match:
+                    reference = match[0]
+                    for field_i, field in enumerate(fields):
+                        if field in copy_field:
+                            arcpy.AddMessage(
+                                "Changed %s field %s from %s to %s" % (row[match_by_field_i], field, row[field_i], getattr(reference, field)))
+                            row[field_i] = getattr(reference, field)
+                    cursor.updateRow(row)
+
 
         edit.stopOperation()
         edit.stopEditing(True)
