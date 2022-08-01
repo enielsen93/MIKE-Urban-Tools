@@ -20,6 +20,7 @@ import datetime
 import pythonaddins
 import mikegraph
 import sqlite3
+from copy import deepcopy
 
 if "mapping" in dir(arcpy):
     import arcpy.mapping as apmapping
@@ -348,7 +349,7 @@ class PipeDimensionToolTAPro(object):
             total_red_opl[target_manhole] = 0
             total_imp_opl[target_manhole] = 0
             
-            for source in graph.network.nodes:
+            for source in graph.graph.nodes:
                 if nx.has_path(graph.graph, source, target_manhole):
                     connected_sources.append(source)
                     path = nx.shortest_path(graph.graph, source, target_manhole)
@@ -855,8 +856,8 @@ class CopyDiameter(object):
             multiValue=True,
             direction="Input")
         match_by.filter.type = "ValueList"
-        match_by.filter.list = ["SHAPE", "OBJECTID", "MUID"]
-        match_by.value = "SHAPE"
+        match_by.filter.list = ["SHAPE@", "OBJECTID", "MUID"]
+        match_by.value = "SHAPE@"
 
         parameters = [reference_feature_layer, target_feature_layer, copy_field, match_by]
         return parameters
@@ -865,9 +866,15 @@ class CopyDiameter(object):
         return True
 
     def updateParameters(self, parameters): #optional
+        def changeShapeFieldname(fields):
+                for i in range(len(fields)):
+                    if fields[i] == "SHAPE":
+                        fields[i] = "SHAPE@"
+                return fields
         if parameters[0].altered:
             reference_feature_layer = parameters[0].ValueAsText
-            parameters[2].filter.list = [f.name for f in arcpy.Describe(reference_feature_layer).fields]
+
+            parameters[2].filter.list = changeShapeFieldname([f.name for f in arcpy.Describe(reference_feature_layer).fields])
 
         if "Diameter" in parameters[2].filter.list and not parameters[2].value:
             parameters[2].value = "Diameter"
@@ -885,12 +892,24 @@ class CopyDiameter(object):
         copy_field = parameters[2].ValueAsText
         match_by = parameters[3].ValueAsText
         MU_database = os.path.dirname(os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath))
-
+        
+        if len([row[0] for row in arcpy.da.SearchCursor(target_feature_layer, ["OBJECTID"])]) == len(
+                [row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(target_feature_layer).CatalogPath, ["MUID"])]):
+            userquery = pythonaddins.MessageBox("Change for %d features?" % (len([row[0] for row in arcpy.da.SearchCursor(target_feature_layer, ["OBJECTID"])])), "Confirm Assignment", 4)
+            if not userquery == "Yes":
+                return
+                
         class Reference():
             pass
+            
+        def changeShapeFieldname(fields):
+            for i in range(len(fields)):
+                if fields[i] == "SHAPE":
+                    fields[i] = "SHAPE@"
+            return fields
 
         references = []
-        fields = [field.name for field in arcpy.ListFields(reference_feature_layer)]
+        fields = changeShapeFieldname([field.name for field in arcpy.ListFields(reference_feature_layer)])
         with arcpy.da.SearchCursor(reference_feature_layer, fields) as cursor:
             for row in cursor:
                 reference = Reference()
@@ -906,8 +925,8 @@ class CopyDiameter(object):
         edit.startEditing(False, True)
         edit.startOperation()
 
-        fields = [field.name for field in arcpy.ListFields(target_feature_layer)]
-
+        fields = changeShapeFieldname([field.name for field in arcpy.ListFields(target_feature_layer)])
+        
         arcpy.AddMessage(fields)
         arcpy.AddMessage(match_by)
         match_by_field_i = [field_i for field_i, field in enumerate(fields) if field == match_by][0]
@@ -921,6 +940,10 @@ class CopyDiameter(object):
                             arcpy.AddMessage(
                                 "Changed %s field %s from %s to %s" % (row[match_by_field_i], field, row[field_i], getattr(reference, field)))
                             row[field_i] = getattr(reference, field)
+                        elif field == "SHAPE":
+                            shape = deepcopy(row[field_i])
+                            row[field_i] = shape
+                    
                     cursor.updateRow(row)
 
 
