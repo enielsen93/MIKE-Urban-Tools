@@ -34,24 +34,24 @@ def getAvailableFilename(filepath, parent=None):
 
 class Toolbox(object):
     def __init__(self):
-        self.label = "Compare MIKE+ Models"
-        self.alias = "Compare MIKE+ Models"
+        self.label = "Compare MIKE Models"
+        self.alias = "Compare MIKE Models"
         self.canRunInBackground = True
         # List of tool classes associated with this toolbox
-        self.tools = [CompareMikePlusModels]
+        self.tools = [CompareMikeModels]
 
 
-class CompareMikePlusModels(object):
+class CompareMikeModels(object):
     def __init__(self):
-        self.label = "Compare MIKE+ Models"
-        self.description = "Compare MIKE+ Models"
+        self.label = "Compare MIKE Models"
+        self.description = "Compare MIKE Models"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
         # Define parameter definitions
 
         database1 = arcpy.Parameter(
-            displayName="Reference MIKE+ Model",
+            displayName="Reference MIKE Model",
             name="database1",
             datatype="DEWorkspace",
             parameterType="Required",
@@ -59,7 +59,7 @@ class CompareMikePlusModels(object):
         database1.filter.list = ["sqlite"]
 
         database2 = arcpy.Parameter(
-            displayName="MIKE+ Model to compare to reference model",
+            displayName="MIKE Model to compare to reference model",
             name="database2",
             datatype="DEWorkspace",
             parameterType="Required",
@@ -103,14 +103,14 @@ class CompareMikePlusModels(object):
         database1 = parameters[0].ValueAsText
         database2 = parameters[1].ValueAsText
         check_features = parameters[2].ValueAsText.split(";")
-        ignore_fields = [field.lower() for field in parameters[2].ValueAsText.split(";")]
+        ignore_fields = [field.lower() for field in parameters[3].ValueAsText.split(";")]
         
         if "slope" in ignore_fields:
             ignore_fields.append("slope_c")
         if "shape" in ignore_fields:
             ignore_fields.append("shape@")
         
-        arcpy.AddMessage(ignore_fields)
+        #arcpy.AddMessage(ignore_fields)
         
         def ignore_field(fieldname):
             if fieldname.lower() in ignore_fields:
@@ -155,16 +155,19 @@ class CompareMikePlusModels(object):
             features_2 = {}
             fields = [field.name if field.name != "geometry" else "SHAPE@" for field in arcpy.ListFields(feature_path_1)
                       if not ignore_field(field.name)]
+
+            MUID_field_i = [i for i, field in enumerate(fields) if field.lower() == "muid"][0]
+
             if "SHAPE@" not in fields:
                 fields.append("SHAPE@")
 
             with arcpy.da.SearchCursor(feature_path_1, fields) as cursor:
                 for row in cursor:
-                    features_1[row[0]] = row
+                    features_1[row[MUID_field_i]] = row
 
             with arcpy.da.SearchCursor(feature_path_2, fields) as cursor:
                 for row in cursor:
-                    features_2[row[0]] = row
+                    features_2[row[MUID_field_i]] = row
 
             # Check MUIDs
             MUIDs = [features_1.keys() + features_2.keys()][0]
@@ -185,6 +188,50 @@ class CompareMikePlusModels(object):
                 idx = compare_rows(features_1[MUID], features_2[MUID])
                 if idx:
                     MUIDs_field_changed[MUID] = [fields[i] for i in idx]
+
+
+            if feature == "msm_Catchment" and ".mdb" in feature_path_1:
+                msm_HModA_1 = {}
+                msm_HModA_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_HModA"))]
+                catchID_field_i = [i for i, field in enumerate(msm_HModA_fields) if field.lower() == "catchid"][0]
+
+                with arcpy.da.SearchCursor(os.path.join(database1, "msm_HModA"), msm_HModA_fields) as cursor:
+                    for row in cursor:
+                        msm_HModA_1[row[catchID_field_i]] = row
+
+                msm_CatchCon_1 = {}
+                msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_CatchCon"))]
+                catchID_field_i = [i for i, field in enumerate(msm_CatchCon_fields) if field.lower() == "catchid"][0]
+                with arcpy.da.SearchCursor(os.path.join(database1, "msm_CatchCon"), msm_CatchCon_fields) as cursor:
+                    for row in cursor:
+                        msm_CatchCon_1[row[catchID_field_i]] = row
+
+                msm_HModA_2 = {}
+                msm_HModA_fields = [field.name for field in arcpy.ListFields(os.path.join(database2, "msm_HModA"))]
+                catchID_field_i = [i for i, field in enumerate(msm_HModA_fields) if field.lower() == "catchid"][0]
+
+                with arcpy.da.SearchCursor(os.path.join(database2, "msm_HModA"), msm_HModA_fields) as cursor:
+                    for row in cursor:
+                        msm_HModA_2[row[catchID_field_i]] = row
+
+                msm_CatchCon_2 = {}
+                msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_CatchCon"))]
+                catchID_field_i = [i for i, field in enumerate(msm_CatchCon_fields) if field.lower() == "catchid"][0]
+                with arcpy.da.SearchCursor(os.path.join(database2, "msm_CatchCon"), msm_CatchCon_fields) as cursor:
+                    for row in cursor:
+                        msm_CatchCon_2[row[catchID_field_i]] = row
+
+
+                for MUID in MUIDs_to_check:
+                    if MUID in msm_HModA_1 and MUID in msm_HModA_2:
+                        idx = compare_rows(msm_HModA_1[MUID], msm_HModA_2[MUID])
+                        if idx:
+                            MUIDs_field_changed[MUID] = [msm_HModA_fields[i] for i in idx]
+
+                    if MUID in msm_CatchCon_1 and MUID in msm_CatchCon_2:
+                        idx = compare_rows(msm_CatchCon_1[MUID], msm_CatchCon_2[MUID])
+                        if idx:
+                            MUIDs_field_changed[MUID] = [msm_CatchCon_fields[i] for i in idx]
 
             with arcpy.da.InsertCursor(result_layer, fields) as cursor:
                 for missing_MUID in missing_MUIDs:
