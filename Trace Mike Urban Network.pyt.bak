@@ -13,7 +13,6 @@ import hashlib
 import math
 import os
 import sys
-sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)),"Scripts"))
 import networkx as nx
 import xlwt
 functionsPath = [r"K:\Hydrauliske modeller\Makroer & Beregningsark\Functions", r"C:\Dokumenter\Makroer\Functions", os.path.join(os.path.dirname(os.path.dirname(__file__)),"Functions")]
@@ -881,7 +880,6 @@ class TimeAreaMethod(object):
                 length = row[4] if row[4] else row[3]
                 length = 10 if not length else length
                 msm_Link_TravelTime[row[0]] = length/VFull
-        
         
         arcpy.SetProgressorLabel("Tracing")       
         time_delays = {}

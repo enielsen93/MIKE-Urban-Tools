@@ -13,7 +13,6 @@ import hashlib
 import math
 import os
 import sys
-sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)),"Scripts"))
 import networkx as nx
 import xlwt
 functionsPath = [r"K:\Hydrauliske modeller\Makroer & Beregningsark\Functions", r"C:\Dokumenter\Makroer\Functions", os.path.join(os.path.dirname(os.path.dirname(__file__)),"Functions")]
@@ -22,7 +21,7 @@ while not os.path.exists(functionsPath[i]):
     i += 1
 sys.path.append(functionsPath[i])
 import networker
-import colebrookWhite
+import ColebrookWhite
 
 def getAvailableFilename(filepath):
     if arcpy.Exists(filepath):
