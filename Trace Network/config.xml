@@ -5,11 +5,12 @@
         <Tool caption="Trace Downstream" category="Trace Network" class="TraceDownstreamToolClass18" id="TraceNetwork_addin.tool_1" image="Images\Trace Downstream.png" message="Trace Downstream" tip=""><Help heading="" /></Tool>
         <Button caption="Find connected catchments" category="Trace Network" class="ButtonClass21" id="TraceNetwork_addin.find_all_connected_catchments" image="Images\Select Connected Catchments.png" message="Find all connected catchments to selected nodes" tip=""><Help heading="" /></Button>
         <Button caption="Find all unconnected catchments" category="Trace Network" class="ButtonClass25" id="TraceNetwork_addin.find_all_unconnected_catchments" image="Images\Select Unconnected Catchments.png" message="Find all unconnected catchments" tip=""><Help heading="" /></Button>
+		<Button caption="Trace Between Selected Nodes" category="Trace Network" class="ButtonClass26" id="TraceNetwork_addin.trace_between_selected_nodes" image="Images\Trace Between.png" message="Trace Between Selected Nodes" tip=""><Help heading="" /></Button>
         </Commands>
     <Extensions>
         </Extensions>
     <Toolbars>
-        <Toolbar caption="Trace Network" category="Trace Network" id="TraceNetwork_addin.toolbar" showInitially="true"><Items><ComboBox refID="TraceNetwork_addin.group_layer" /><Tool refID="TraceNetwork_addin.tool" /><Tool refID="TraceNetwork_addin.tool_1" /><Button refID="TraceNetwork_addin.find_all_connected_catchments" /><Button refID="TraceNetwork_addin.find_all_unconnected_catchments" /></Items></Toolbar>
+        <Toolbar caption="Trace Network" category="Trace Network" id="TraceNetwork_addin.toolbar" showInitially="true"><Items><ComboBox refID="TraceNetwork_addin.group_layer" /><Tool refID="TraceNetwork_addin.tool" /><Tool refID="TraceNetwork_addin.tool_1" /><Button refID="TraceNetwork_addin.find_all_connected_catchments" /><Button refID="TraceNetwork_addin.find_all_unconnected_catchments" /><Button refID="TraceNetwork_addin.trace_between_selected_nodes" /></Items></Toolbar>
         </Toolbars>
     <Menus>
         </Menus>

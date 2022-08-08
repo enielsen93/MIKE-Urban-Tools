@@ -34,11 +34,31 @@ class ButtonClass25(object):
     def onClick(self):
         group_layer.graph._read_catchments()
         nodes_MUID = [row[0] for row in arcpy.da.SearchCursor(os.path.join(group_layer.msm_Node.workspacePath, "msm_Node"), ["MUID"])]
-        catchments_MUID = [catchment.MUID for catchment in group_layer.graph.catchments_dict.values() if not catchment.nodeID and catchment.nodeID not in nodes_MUID]
+        catchments_MUID = [catchment.MUID for catchment in group_layer.graph.catchments_dict.values() if not catchment.nodeID or catchment.nodeID not in nodes_MUID]
         print("MUID IN ('%s')" % ("', '".join(catchments_MUID)))
         arcpy.SelectLayerByAttribute_management(group_layer.ms_Catchment.longName, "ADD_TO_SELECTION",
                                                 "MUID IN ('%s')" % ("', '".join(catchments_MUID)))
         pass
+
+class ButtonClass26(object):
+        def __init__(self):
+            self.enabled = True
+            self.checked = False
+
+        def onClick(self):
+            nodes_MUID = [row[0] for row in arcpy.da.SearchCursor(group_layer.msm_Node, ["MUID"])]
+            # print(nodes_MUID)
+            nodes_in_path, links_in_path = group_layer.graph.trace_between(nodes_MUID)
+            # print((nodes_in_path, links_in_path))
+            if group_layer.msm_Node and group_layer.msm_Node.visible:
+                arcpy.SelectLayerByAttribute_management(group_layer.msm_Node.longName, "NEW_SELECTION",
+                                                        "MUID IN ('%s')" % ("', '".join(nodes_in_path)))
+
+            if group_layer.msm_Link and group_layer.msm_Link.visible:
+                arcpy.SelectLayerByAttribute_management(group_layer.msm_Link.longName, "ADD_TO_SELECTION",
+                                                        "MUID IN ('%s')" % ("', '".join(links_in_path   )))
+
+            pass
 
 class GroupComboBoxClass1(object):
     """Implementation for TraceNetwork_addin.combobox (ComboBox)"""
@@ -58,17 +78,17 @@ class GroupComboBoxClass1(object):
         self.layers_in_group = [layer for layer in arcpy.mapping.ListLayers(self.mxd) if self.selected_group + "\\" in layer.longName]
         print([layer.longName for layer in self.layers_in_group])
         msm_Node_layer = [layer for layer in self.layers_in_group if
-                    u"Brønd" in layer.longName or "msm_Node" in layer.longName and layer.visible]
+                    u"Brønd" in layer.longName or "msm_Node" in layer.longName]
         print(msm_Node_layer)
         self.msm_Node = msm_Node_layer[0] if msm_Node_layer else None
 
         msm_Link_layer = [layer for layer in self.layers_in_group if
-         "Ledning" in layer.longName or "msm_Link" in layer.longName and layer.visible]
+         "Ledning" in layer.longName or "msm_Link" in layer.longName]
         print(msm_Link_layer)
         self.msm_Link = msm_Link_layer[0] if msm_Link_layer else None
 
         ms_Catchment_layer = [layer for layer in self.layers_in_group if
-         "Delopland" in layer.longName or "Catchment" in layer.longName and layer.visible]
+         "Delopland" in layer.longName or "Catchment" in layer.longName]
         print(ms_Catchment_layer)
         self.ms_Catchment = ms_Catchment_layer[0] if ms_Catchment_layer else None
 
@@ -149,22 +169,22 @@ class TraceUpstreamToolClass16(object):
             muid = points_muid[index_closest]
             return muid
 
-
         target = findClosestNode([x,y])
+        print("Tracing upstream from node %s" % (target))
 
         upstream_nodes = group_layer.graph.find_upstream_nodes([target])[0]
 
         print("MUID IN ('%s')" % ("', '".join(upstream_nodes)))
-        if group_layer.msm_Node:
+        if group_layer.msm_Node and group_layer.msm_Node.visible:
             arcpy.SelectLayerByAttribute_management(group_layer.msm_Node.longName, "ADD_TO_SELECTION", "MUID IN ('%s')" % ("', '".join(upstream_nodes)))
 
-        if group_layer.msm_Link:
+        if group_layer.msm_Link and group_layer.msm_Link.visible:
             links_MUID = [link.MUID for link in group_layer.graph.network.links.values() if
                           link.fromnode in upstream_nodes and link.tonode in upstream_nodes]
             arcpy.SelectLayerByAttribute_management(group_layer.msm_Link.longName, "ADD_TO_SELECTION",
                                                     "MUID IN ('%s')" % ("', '".join(links_MUID)))
 
-        if group_layer.ms_Catchment:
+        if group_layer.ms_Catchment and group_layer.ms_Catchment.visible:
             total_catchments = []
 
             catchments = group_layer.graph.find_connected_catchments(upstream_nodes)
