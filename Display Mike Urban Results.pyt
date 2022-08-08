@@ -7,13 +7,8 @@ from arcpy import env
 arcpy.env.addOutputsToMap = False
 import codecs
 import sys
-functionsPath = [r"K:\Hydrauliske modeller\Makroer & Beregningsark\Functions", r"C:\Dokumenter\Makroer\Functions", os.path.join(os.path.dirname(os.path.dirname(__file__)),"Functions")]
-i = 0
-while not os.path.exists(functionsPath[i]):
-    i += 1
-sys.path.append(functionsPath[i])
-import readERF
-import colebrookWhite
+import mousereader
+import ColebrookWhite
 import networker
 import codecs
 m11extraPath = r"C:\Program Files (x86)\DHI\2016\bin\m11extra.exe"
@@ -268,7 +263,7 @@ class DisplayFloodReturnPeriodFun(object):
                     msm_LinkFromNode[row[0]] = row[1]
                     msm_LinkToNode[row[0]] = row[2]
         arcpy.SetProgressorLabel("Reading ERF-file")
-        dataTables = readERF.readERF(erfFile,"MaxLevel_Ranked",MUIDs)
+        dataTables = mousereader.readERF(erfFile,"MaxLevel_Ranked",MUIDs)
         
         arcpy.SetProgressorLabel("Getting return period of flooding")
         MUIDsTCrit = {}
@@ -719,7 +714,7 @@ class DisplayFlowStatistics(object):
             for link in link_network.values():
                 MUIDs[link.MUID] = "'%s', '%s'" % (link.fromnode, link.tonode)
             
-        dataTables = readERF.readERF(erfFile, "MaxFlow_Ranked", MUIDs.values(), ignore = True)
+        dataTables = mousereader.readERF(erfFile, "MaxFlow_Ranked", MUIDs.values(), ignore = True)
 
         msmLinkNew = arcpy.CopyFeatures_management(geometryFile,exportShape)
         
