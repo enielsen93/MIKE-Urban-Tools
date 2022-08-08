@@ -93,8 +93,17 @@ class DisplayMikeUrban(object):
             parameterType="optional",
             direction="Output")
         show_outlet_boundary_conditions.value = True
+        
+        show_depth = arcpy.Parameter(
+            displayName="Show Depth",
+            name="show_depth",
+            datatype="Boolean",
+            category="Additional Settings",
+            parameterType="optional",
+            direction="Output")
+        show_depth.value = False
                 
-        parameters = [MU_database, join_catchments, show_loss_par, show_outlet_boundary_conditions]
+        parameters = [MU_database, join_catchments, show_loss_par, show_outlet_boundary_conditions, show_depth]
         
         return parameters
 
@@ -113,6 +122,7 @@ class DisplayMikeUrban(object):
         join_catchments = parameters[1].Value
         show_loss_par = parameters[2].Value
         show_outlet_boundary_conditions = parameters[3].Value
+        show_depth = parameters[4].Value
         manholes = MU_database + "\mu_Geometry\msm_Node"
         links = MU_database + "\mu_Geometry\msm_Link"
         catchments = MU_database + "\mu_Geometry\ms_Catchment" if not ".sqlite" in MU_database else MU_database + "\msm_Catchment"
@@ -176,9 +186,15 @@ class DisplayMikeUrban(object):
                     apmapping.AddLayer(df, layer, "BOTTOM")
                 updatelayer = apmapping.ListLayers(mxd, layer.name, df)[0]
                 updatelayer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, unicode(os.path.basename(source)))
+            
+            if "msm_Node" in source and show_depth:
+                for label_class in updatelayer.labelClasses:
+                    label_class.expression = label_class.expression.replace("return labelstr", 'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
         
-        addLayer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"        ),
+        layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"        ),
                 manholes, group = empty_group_layer)
+                
+        
         
         if not is_sqlite_database:
             printStepAndTime("Getting volume of basins")
@@ -637,11 +653,14 @@ class GenerateCatchmentConnections(object):
             for link_i, link in enumerate(links.keys()):
                 catchment, node = links[link]
                 catchment_coordinate = catchments_coordinates[catchment]
-                node_coordinate = nodes_coordinates[node]
-                shape = arcpy.Polyline(arcpy.Array([arcpy.Point(catchment_coordinate[0], catchment_coordinate[1]),
-                                             arcpy.Point(node_coordinate[0], node_coordinate[1])]))
-                row = [shape, link_i, link, shape.length]
-                cursor.insertRow(row)
+                if node not in nodes_coordinates:
+                    arcpy.AddWarning("Could not find node %s for catchment %s" % (node, catchment)) 
+                else:
+                    node_coordinate = nodes_coordinates[node] 
+                    shape = arcpy.Polyline(arcpy.Array([arcpy.Point(catchment_coordinate[0], catchment_coordinate[1]),
+                                                 arcpy.Point(node_coordinate[0], node_coordinate[1])]))
+                    row = [shape, link_i, link, shape.length]
+                    cursor.insertRow(row)
                 arcpy.SetProgressorPosition(link_i)
                 
         return
