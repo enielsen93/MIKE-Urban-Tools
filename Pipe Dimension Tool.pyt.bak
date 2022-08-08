@@ -483,6 +483,7 @@ class PipeDimensionToolTAPro(object):
                                 while QFull is not None and QFull*1e3<peak_discharge[graph.network.links[row[3]].fromnode] and Di+1 < len(D):
                                     Di += 1
                                     QFull = ColebrookWhite.QFull(D[Di]/1e3,slope,row[2])
+                                    arcpy.AddMessage(QFull)
                             diameter = D[Di]/1.0e3
                             
                             material = row[2]
@@ -588,7 +589,7 @@ class PipeDimensionToolTAPro(object):
                         if keep_largest_diameter and diameter/1.0e3 <= row[3]:
                             diameter = row[3]
                         else:
-                            arcpy.AddMessage("Changed %s from %d to %d" % (row[2], row[3]*1e3, D[Di]))
+                            arcpy.AddMessage("Changed %s from %d to %d" % (row[2], row[3]*1e3 if row[3] else 0, D[Di]))
                             row[-1] = D[Di]/1.0e3
                             if change_material:
                                 row[1] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
@@ -681,7 +682,7 @@ class upgradeDimensions(object):
                         if change_material:
                             material = "Concrete (Normal)" if row[1] > 0.45 else "Plastic"
                         update_cursor.execute("UPDATE msm_Link SET Diameter = %1.3f, MaterialID = '%s' WHERE MUID = '%s'" % (diameter, material, row[0]))
-                        arcpy.AddMessage("Upgraded pipe %s from %d to %d" % (row[0], oldDiameter, diameter))
+                        arcpy.AddMessage("Upgraded pipe %s from %d to %d" % (row[0], oldDiameter, diameter*1e3))
         else:
             edit = arcpy.da.Editor(os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)))
             edit.startEditing(False, True)
@@ -892,12 +893,33 @@ class CopyDiameter(object):
         copy_field = parameters[2].ValueAsText
         match_by = parameters[3].ValueAsText
         MU_database = os.path.dirname(os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath))
-        
-        if len([row[0] for row in arcpy.da.SearchCursor(target_feature_layer, ["OBJECTID"])]) == len(
-                [row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(target_feature_layer).CatalogPath, ["MUID"])]):
-            userquery = pythonaddins.MessageBox("Change for %d features?" % (len([row[0] for row in arcpy.da.SearchCursor(target_feature_layer, ["OBJECTID"])])), "Confirm Assignment", 4)
-            if not userquery == "Yes":
+                
+        check_other_layer = True
+        try:
+            if arcpy.Describe(reference_feature_layer).fidSet:
+                count = int(arcpy.GetCount_management(reference_feature_layer).getOutput(0))
+                userquery = pythonaddins.MessageBox("Change for %d features?" % (count), "Confirm Assignment", 4)
+                if not userquery == "Yes":
+                    pass
+                else:
+                    reference_where_clause = "OBJECTID IN (%s)" % (", ".join([str(row[0]) for row in arcpy.da.SearchCursor(reference_feature_layer, ["OBJECTID"])])) 
+                    target_where_clause = ""
+                    check_other_layer = False
+        except Exception as e:
+            pass
+        if arcpy.Describe(target_feature_layer).fidSet:
+            count = int(arcpy.GetCount_management(target_feature_layer).getOutput(0))
+            userquery = pythonaddins.MessageBox("Change for %d features?" % (count), "Confirm Assignment", 4)
+            if not userquery == "Yes": 
                 return
+            else:
+                target_where_clause = "OBJECTID IN (%s)" % (", ".join([str(row[0]) for row in arcpy.da.SearchCursor(target_feature_layer, ["OBJECTID"])]))
+                reference_where_clause = ""
+        else:
+            return
+            
+        arcpy.AddMessage(target_where_clause)
+        arcpy.AddMessage(reference_where_clause)
                 
         class Reference():
             pass
@@ -910,7 +932,7 @@ class CopyDiameter(object):
 
         references = []
         fields = changeShapeFieldname([field.name for field in arcpy.ListFields(reference_feature_layer)])
-        with arcpy.da.SearchCursor(reference_feature_layer, fields) as cursor:
+        with arcpy.da.SearchCursor(reference_feature_layer, fields, where_clause = reference_where_clause) as cursor:
             for row in cursor:
                 reference = Reference()
                 for field_i, field in enumerate(fields):
@@ -930,7 +952,7 @@ class CopyDiameter(object):
         arcpy.AddMessage(fields)
         arcpy.AddMessage(match_by)
         match_by_field_i = [field_i for field_i, field in enumerate(fields) if field == match_by][0]
-        with arcpy.da.UpdateCursor(arcpy.Describe(target_feature_layer).catalogPath, fields) as cursor:
+        with arcpy.da.UpdateCursor(arcpy.Describe(target_feature_layer).catalogPath, fields, where_clause = target_where_clause) as cursor:
             for row in cursor:
                 match = [reference for reference in references if getattr(reference, match_by) == row[match_by_field_i]]
                 if match:
