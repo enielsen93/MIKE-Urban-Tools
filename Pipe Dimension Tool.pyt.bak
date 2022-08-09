@@ -922,7 +922,7 @@ class CopyDiameter(object):
         except Exception as e:
             pass
         try:
-            if arcpy.Describe(target_feature_layer).fidSet:
+            if check_other_layer and arcpy.Describe(target_feature_layer).fidSet:
                 count = int(arcpy.GetCount_management(target_feature_layer).getOutput(0))
                 userquery = pythonaddins.MessageBox("Change for %d features?" % (count), "Confirm Assignment", 4)
                 if not userquery == "Yes": 

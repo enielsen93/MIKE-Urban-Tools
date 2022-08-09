@@ -31,7 +31,7 @@ else:
     from arcpy.mp import ArcGISProject as MapDocument
     from arcpy.mapping import MapDocument as MapDocument
 
-diameters_plastic = [180, 233, 276, 392, 493, 588, 781, 985, 1185, 1385, 1485, 1585, 2000, 2200, 2400, 2600, 2800, 3000]
+diameters_plastic = [188, 235, 297, 377, 493, 588, 781, 985, 1185, 1385, 1485, 1585, 2000, 2200, 2400, 2600, 2800, 3000]
 diameters_concrete = [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1400, 1600, 1800, 2000, 2250, 2500, 3000, 3500]
 
 def getAvailableFilename(filepath, parent = None):
