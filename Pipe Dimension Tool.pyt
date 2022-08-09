@@ -458,6 +458,20 @@ class PipeDimensionToolTAPro(object):
                     # cursor.updateRow(row)
         if debug_output:
             try:
+                result_layer = getAvailableFilename(arcpy.env.scratchGDB + "\Pipe_Dimensions", parent = MU_database)
+                arcpy.CreateFeatureclass_management(arcpy.env.scratchGDB, os.path.basename(result_layer), "POLYLINE")
+                fields = ["muid", "diameter", "materialid", "slope", "nettypeno", "enabled", "ImpArea", "RedArea", "MaxFlow", "CritTime"]
+
+                addField(result_layer, "muid", "TEXT")
+                addField(result_layer, "diameter", "FLOAT")
+                addField(result_layer, "materialid", "TEXT")
+                addField(result_layer, "slope", "FLOAT")
+                addField(result_layer, "nettypeno", "SHORT")
+                addField(result_layer, "enabled", "SHORT")
+                addField(result_layer, "ImpArea", "FLOAT")
+                addField(result_layer, "RedArea", "FLOAT")
+                addField(result_layer, "MaxFlow", "FLOAT")
+                addField(result_layer, "CritTime", "SHORT")
                 with arcpy.da.InsertCursor(result_layer, ["SHAPE@"] + fields) as ins_cursor:
                     with arcpy.da.SearchCursor(msm_Link, ["Slope" if is_sqlite else "Slope_C", "Diameter", "MaterialID", "MUID", "SHAPE@", "NetTypeNo",
                                                           "enabled"], where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
@@ -908,7 +922,7 @@ class CopyDiameter(object):
         except Exception as e:
             pass
         try:
-            if arcpy.Describe(target_feature_layer).fidSet:
+            if check_other_layer and arcpy.Describe(target_feature_layer).fidSet:
                 count = int(arcpy.GetCount_management(target_feature_layer).getOutput(0))
                 userquery = pythonaddins.MessageBox("Change for %d features?" % (count), "Confirm Assignment", 4)
                 if not userquery == "Yes": 
@@ -935,15 +949,15 @@ class CopyDiameter(object):
 
         references = []
         fields = changeShapeFieldname([field.name for field in arcpy.ListFields(reference_feature_layer)])
-        with arcpy.da.SearchCursor(reference_feature_layer, fields, where_clause = reference_where_clause) as cursor:
+        with arcpy.da.SearchCursor(arcpy.Describe(reference_feature_layer).catalogPath, fields, where_clause = reference_where_clause) as cursor:
             for row in cursor:
                 reference = Reference()
                 for field_i, field in enumerate(fields):
                     setattr(reference, field, row[field_i])
-
+                
                 references.append(reference)
-
-        arcpy.AddMessage(os.path.dirname(os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath)))
+        
+        arcpy.AddMessage(references)
         arcpy.AddMessage(target_feature_layer)
 
         edit = arcpy.da.Editor(MU_database)
@@ -1008,7 +1022,9 @@ class InterpolateInvertLevels(object):
 
     def execute(self, parameters, messages):
         pipe_layer = parameters[0].Value
-        MU_database = os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath))
+        MU_database = (os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)) if ".mdb" in arcpy.Describe(pipe_layer).catalogPath else
+                        os.path.dirname(arcpy.Describe(pipe_layer).catalogPath))
+        is_sqlite = True if ".sqlite" in MU_database else False        
         
         links_MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer,["MUID"])]
         msm_Node = os.path.join(MU_database, "msm_Node")
@@ -1074,26 +1090,42 @@ class InterpolateInvertLevels(object):
             raise(e)
         arcpy.AddMessage("Assuming slope %d o/oo" % (slope*1e3))
 
-        edit = arcpy.da.Editor(MU_database)
-        edit.startEditing(False, True)
-        edit.startOperation()
+        if is_sqlite:
+            with sqlite3.connect(
+                    MU_database) as connection:
+                update_cursor = connection.cursor()
+                
+                with arcpy.da.SearchCursor(msm_Node, ["MUID", "InvertLevel", "GroundLevel"],
+                                           where_clause="MUID IN ('%s')" % ("', '".join(path_nodes))) as cursor:
+                    for row in cursor:
+                        if row[0] != end_node:
+                            total_length = nx.bellman_ford_path_length(network, row[0], end_node, weight="weight")
 
-        minimum_ground_slope = None
-        with arcpy.da.UpdateCursor(msm_Node, ["MUID", "InvertLevel", "GroundLevel"],
-                                   where_clause="MUID IN ('%s')" % ("', '".join(path_nodes))) as cursor:
-            for row in cursor:
-                if row[0] != end_node:
-                    total_length = nx.bellman_ford_path_length(network, row[0], end_node, weight="weight")
+                            new_invert_level = round(invert_levels[end_node] + total_length * slope,2)
+                            if new_invert_level != row[1]:
+                                update_cursor.execute("UPDATE msm_Node SET InvertLevel = %1.2f WHERE MUID = '%s'" % (new_invert_level, row[0]))
+                                arcpy.AddMessage(
+                                    "Changed invert level of %s from %1.2f to %1.2f" % (row[0], row[1] if row[1] else 0, new_invert_level))
+        else:
+            edit = arcpy.da.Editor(MU_database)
+            edit.startEditing(False, True)
+            edit.startOperation()
 
-                    new_invert_level = round(invert_levels[end_node] + total_length * slope,2)
-                    if new_invert_level != row[1]:
-                        arcpy.AddMessage(
-                            "Changed invert level of %s from %1.2f to %1.2f" % (row[0], row[1] if row[1] else 0, new_invert_level))
-                        row[1] = new_invert_level
-                        cursor.updateRow(row)
+            with arcpy.da.UpdateCursor(msm_Node, ["MUID", "InvertLevel", "GroundLevel"],
+                                       where_clause="MUID IN ('%s')" % ("', '".join(path_nodes))) as cursor:
+                for row in cursor:
+                    if row[0] != end_node:
+                        total_length = nx.bellman_ford_path_length(network, row[0], end_node, weight="weight")
 
-        edit.stopOperation()
-        edit.stopEditing(True)
+                        new_invert_level = round(invert_levels[end_node] + total_length * slope,2)
+                        if new_invert_level != row[1]:
+                            arcpy.AddMessage(
+                                "Changed invert level of %s from %1.2f to %1.2f" % (row[0], row[1] if row[1] else 0, new_invert_level))
+                            row[1] = new_invert_level
+                            cursor.updateRow(row)
+
+            edit.stopOperation()
+            edit.stopEditing(True)
         return
 
 class GetMinimumSlope(object):
