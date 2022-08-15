@@ -167,7 +167,6 @@ class DisplayMikeUrban(object):
                 layer_source_mike_plus = layer_source.replace("MOUSE", "MIKE+") if "MOUSE" in layer_source and os.path.exists(layer_source.replace("MOUSE", "MIKE+")) else None
                 layer_source = layer_source_mike_plus if layer_source_mike_plus else layer_source
                 layer = apmapping.Layer(layer_source)
-                
                 update_layer.visible = layer.visible
                 update_layer.labelClasses = layer.labelClasses
                 update_layer.showLabels = layer.showLabels
@@ -184,12 +183,13 @@ class DisplayMikeUrban(object):
                     apmapping.AddLayerToGroup(df, group, layer, "BOTTOM")
                 else:
                     apmapping.AddLayer(df, layer, "BOTTOM")
-                updatelayer = apmapping.ListLayers(mxd, layer.name, df)[0]
-                updatelayer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, unicode(os.path.basename(source)))
-            
-            if "msm_Node" in source and :
-                for label_class in updatelayer.labelClasses:
-                    label_class.expression = label_class.expression.replace("return labelstr", 'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
+                update_layer = apmapping.ListLayers(mxd, layer.name, df)[0]
+                update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, unicode(os.path.basename(source)))
+                
+            if "msm_Node" in source::
+                for label_class in update_layer.labelClasses:
+                    if show_depth:
+                        label_class.expression = label_class.expression.replace("return labelstr", 'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
         
         layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"        ),
                 manholes, group = empty_group_layer)
