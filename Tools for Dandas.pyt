@@ -19,6 +19,7 @@ from collections import OrderedDict
 import traceback
 import pythonaddins
 import time
+import sqlite3
 
 def statusUpdate(message,tic):
     arcpy.AddMessage("%d seconds: %s" % (time.time()-tic, message))
@@ -186,7 +187,7 @@ class Dandas2MULinks(object):
                 
                 statuskode = (int(nodes[nodei].find("KnudeKode").text) if nodes[nodei].find("KnudeKode") is not None else 0)                
                 if statuskode == 8:
-                    msm_Node_Table["Description"] = u"Sløjfet"
+                    msm_Node_Table["Description"] = u"Slï¿½jfet"
                 
                 msm_Node_Table["GroundLevel"] = float(nodes[nodei].find("DaekselItems").find("Daeksel").find("Daekselkote").text) if nodes[nodei].find("DaekselItems") is not None and nodes[nodei].find("DaekselItems").find("Daeksel") is not None and nodes[nodei].find("DaekselItems").find("Daeksel").find("Daekselkote") is not None else None
                 if msm_Node_Table["GroundLevel"] is None:
@@ -201,9 +202,9 @@ class Dandas2MULinks(object):
                 
                 if msm_Node_Table["NetTypeNo"] is not None and msm_Node_Table["NetTypeNo"] in range(1,5) and afloebkode[msm_Node_Table["NetTypeNo"]-1] in afloebkodeparameter:
                     if ((nodes[nodei].find("KategoriAfloebKode") is not None and int(nodes[nodei].find("KategoriAfloebKode").text) == 4)  # hvis KategoriAfloebKode er stik
-                    or (nodes[nodei].find("Broend/BroendKode") is not None and int(nodes[nodei].find("Broend/BroendKode").text) == 16) # eller brøndkode er skelbrønd
+                    or (nodes[nodei].find("Broend/BroendKode") is not None and int(nodes[nodei].find("Broend/BroendKode").text) == 16) # eller brï¿½ndkode er skelbrï¿½nd
                     or (nodes[nodei].find("Punkt") is not None and nodes[nodei].find("Punkt").find("PunktKode") is not None and int(nodes[nodei].find("Punkt").find("PunktKode").text) == 8)): # eller punktkode er tilslutningspunkt
-                        if "Stikledning" in afloebkategori: # Tilføj, hvis stikledninger skal tilføjes
+                        if "Stikledning" in afloebkategori: # Tilfï¿½j, hvis stikledninger skal tilfï¿½jes
                             msm_Node_Table["Description"] = "Stikledning" if not msm_Node_Table["Description"] else msm_Node_Table["Description"] + ", Stikledning"
                         else:
                             skip = True
@@ -214,7 +215,7 @@ class Dandas2MULinks(object):
                             msm_Node_Table["Description"] = "Internt" if not msm_Node_Table["Description"] else msm_Node_Table["Description"] + ", Internt"
                         else:
                             skip = True
-                    elif not "Ukendt" in  afloebkategori: # hvis KategoriAfloebKode ikke er stik, skelbrønd, hovedledning eller internt (dvs. ukendt)
+                    elif not "Ukendt" in  afloebkategori: # hvis KategoriAfloebKode ikke er stik, skelbrï¿½nd, hovedledning eller internt (dvs. ukendt)
                         skip = True 
                     else:
                         msm_Node_Table["Description"] = "Ukendt" if not msm_Node_Table["Description"] else msm_Node_Table["Description"] + ", Ukendt"              
@@ -565,11 +566,11 @@ class DDS2Tilbudsliste(object):
         pipes = OrderedDict(sorted(pipes.items(), key = lambda item: item[1].diameter))
         
         for manhole in manholes.values():
-            manhole.formatted_line = u"\t\tBrønd %s, Ø%1.0f mm plast%s\t\t\tsum\t\t\t" % (manhole.muid, manhole.diameter*1e3, manhole.getDepth())
+            manhole.formatted_line = u"\t\tBrï¿½nd %s, ï¿½%1.0f mm plast%s\t\t\tsum\t\t\t" % (manhole.muid, manhole.diameter*1e3, manhole.getDepth())
             
         for pipe in pipes.values():
             if pipe.fromnode in all_manholes and pipe.tonode in all_manholes:
-                pipe.formatted_line = u"\t\tStr. %s, Ø%1.0f mm plast\tlbm\t%1.0f\t\t\t" % (pipe.getPipeName(), pipe.diameter*1e3, pipe.length)
+                pipe.formatted_line = u"\t\tStr. %s, ï¿½%1.0f mm plast\tlbm\t%1.0f\t\t\t" % (pipe.getPipeName(), pipe.diameter*1e3, pipe.length)
         
         # Each manhole and pipe is assigned a lineno, which determines the order that the object should appear in the tender documents
         
@@ -658,7 +659,7 @@ class CopyMikeUrbanFeatures(object):
             datatype="DEWorkspace",
             parameterType="Required",
             direction="Input")
-        MU_database.filter.list = ["mdb"]
+        MU_database.filter.list = ["mdb", "sqlite"]
         
         msm_Node = arcpy.Parameter(
             displayName="Manhole Layers:",
@@ -691,35 +692,41 @@ class CopyMikeUrbanFeatures(object):
     def isLicensed(self):
         return True
 
-    def updateParameters(self, parameters):        
+    def updateParameters(self, parameters):
         # Set the default distance threshold to 1/100 of the larger of the width
-        #  or height of the extent of the input features.  Do not set if there is no 
+        #  or height of the extent of the input features.  Do not set if there is no
         #  input dataset yet, or the user has set a specific distance (Altered is true).
         #
         if not parameters[1].value and not parameters[2].value and not parameters[3].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
-            
+
             nodes = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Point'
                     and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]]
             if nodes:
                 parameters[1].value = nodes
-            
+
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
                     and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]]
             if links:
                 parameters[2].value = links
-            
+
             catchments = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polygon'
                         and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]]
             if catchments:
                 parameters[3].value = catchments
-                
+
         if not parameters[0].valueAsText:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             database = [lyr.dataSource for lyr in arcpy.mapping.ListLayers(mxd) if not lyr.getSelectionSet() and lyr.isFeatureLayer and ".mdb" in lyr.dataSource]
             if database:
                 database = re.findall(r"(.+)(?=\.mdb)", database[0])[0] + ".mdb"
                 parameters[0].value = database
+
+        if parameters[0].valueAsText:
+            MU_database = parameters[0].valueAsText
+            is_sqlite = True if ".sqlite" in MU_database else False
+            if is_sqlite:
+                parameters[3].enabled = False
             
         return
 
@@ -736,6 +743,10 @@ class CopyMikeUrbanFeatures(object):
         msm_Nodes = parameters[1].values
         msm_Links = parameters[2].values
         ms_Catchments = parameters[3].values
+
+        MU_database = parameters[0].valueAsText
+        is_sqlite = True if ".sqlite" in MU_database else False
+
         
         import random
         nodes_count = 0
@@ -765,6 +776,7 @@ class CopyMikeUrbanFeatures(object):
         if pythonaddins.MessageBox("You are copying %d manholes, %d pipes, and %d catchments. Continue?" % (nodes_count, link_count, catchment_count), 
                                                     "Confirm copy?", 1) == "OK":
             if msm_Nodes:
+                reference_MU_database = os.path.dirname(arcpy.Describe(msm_Nodes).catalogPath)
                 nodes_in_database = [row[0] for row in arcpy.da.SearchCursor(MU_database + "\msm_Node", ["MUID"])]
                 for i, msm_Node in enumerate(msm_Nodes):
                     selected = arcpy.Select_analysis(msm_Node, "in_memory\msm_Node_%d" % (i))
@@ -775,19 +787,29 @@ class CopyMikeUrbanFeatures(object):
                                                             + " Would you like to remove the existing manholes first? (No: The tool will add those duplicate manholes anyway."
                                                             + " Cancel: Skip those manholes)", 
                                                             "Remove duplicate features?", 3)
-                        if response == "Yes":
-                            edit = arcpy.da.Editor(MU_database)
-                            edit.startEditing(False, True)
-                            edit.startOperation()
-                            with arcpy.da.UpdateCursor(MU_database + "\msm_Node", ["MUID"], where_clause = "MUID IN ('%s')" % "', '".join(duplicate_nodes)) as cursor:
-                                for row in cursor:
-                                    cursor.deleteRow()
-                            edit.stopOperation()
-                            edit.stopEditing(True)
-                        elif response == "Cancel":
-                            selected = arcpy.Select_analysis(selected, "in_memory\msm_Node_%d_filtered" % (i), where_clause = "MUID NOT IN ('%s')" % "', '".join(duplicate_nodes))
-                    
-                    arcpy.Append_management(selected, MU_database + "\msm_Node")
+                        if is_sqlite:
+                            arcpy.AddError("Function not supported for .sqlite database")
+                            return
+                        else:
+                            if response == "Yes":
+                                edit = arcpy.da.Editor(MU_database)
+                                edit.startEditing(False, True)
+                                edit.startOperation()
+                                with arcpy.da.UpdateCursor(MU_database + "\msm_Node", ["MUID"], where_clause = "MUID IN ('%s')" % "', '".join(duplicate_nodes)) as cursor:
+                                    for row in cursor:
+                                        cursor.deleteRow()
+                                edit.stopOperation()
+                                edit.stopEditing(True)
+                            elif response == "Cancel":
+                                selected = arcpy.Select_analysis(selected, "in_memory\msm_Node_%d_filtered" % (i), where_clause = "MUID NOT IN ('%s')" % "', '".join(duplicate_nodes))
+
+                    if is_sqlite:
+                        MUIDs = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
+                        sql_expression = "ATTACH DATABASE %s AS source; SELECT * INTO main.msm_Node FROM source.msm_Node WHERE MUID IN ('%s')" % (reference_MU_database, "', '".join(MUIDs))
+                        arcpy.AddMessage(sql_expression)
+                        return
+                    else:
+                        arcpy.Append_management(selected, MU_database + "\msm_Node")
             
             if msm_Links:
                 links_in_database = [row[0] for row in arcpy.da.SearchCursor(MU_database + "\msm_Link", ["MUID"])]
@@ -841,6 +863,7 @@ class CopyMikeUrbanFeatures(object):
                         duplicateMUIDs = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"ms_Catchment"),"MUID",where_clause = "MUID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
                         duplicateHModA = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"msm_HModA"),"CatchID",where_clause = "CatchID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
                         duplicateCatchCon = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"msm_CatchCon"),"CatchID",where_clause = "CatchID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
+
                         errorMessage = ""
                         if duplicateMUIDs:
                             errorMessage += "Catchments with MUID ('%s') already exist in Catchment Layer in Mike Urban Database" % ("(', '".join(duplicateMUIDs))
@@ -868,7 +891,7 @@ class CopyMikeUrbanFeatures(object):
                         input_database = arcpy.Describe(ms_Catchment).catalogPath.split(".mdb")[0] + ".mdb"
                         selected = arcpy.Select_analysis(ms_Catchment, "in_memory\ms_Catchment_%d" % (i))
                         MUIDs = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
-                        arcpy.management.Append(selected, MU_database + "\ms_Catchment")
+                        # arcpy.management.Append(selected, MU_database + "\ms_Catchment")
                         arcpy.AddMessage( "MUID IN ('%s')" % "', '".join(MUIDs))
                         selected_HModA = arcpy.TableSelect_analysis(os.path.join(input_database, "msm_HModA"), "in_memory\msm_HModA", where_clause = "CatchID IN ('%s')" % "', '".join(MUIDs))[0]
                         # fields = [field.name for field in arcpy.ListFields(MU_database + "\msm_HModA") if not field.name == "OBJECTID"]
@@ -880,9 +903,9 @@ class CopyMikeUrbanFeatures(object):
                                     # target_cursor.insertRow(("gay",0,"-DEFAULT-",0,7,0.9,0.0006,0,0.33))
                         # # arcpy.AddMessage(selected_HModA)
                         # arcpy.CopyFeatures_management(selected_HModA, "K:\Hydrauliske modeller\Papirkurv\SonsOfKemet")
-                        arcpy.management.Append(selected_HModA, MU_database + "\msm_HModA")
-                        # selected_CatchCon = arcpy.TableSelect_analysis(os.path.join(input_database, "msm_CatchCon"), "in_memory\msm_CatchCon", where_clause = "CatchID IN ('%s')" % "', '".join(MUIDs))[0]
-                        # arcpy.management.Append(selected_CatchCon, MU_database + "\msm_CatchCon")
+                        # arcpy.management.Append(selected_HModA, MU_database + "\msm_HModA")
+                        selected_CatchCon = arcpy.TableSelect_analysis(os.path.join(input_database, "msm_CatchCon"), "in_memory\msm_CatchCon", where_clause = "CatchID IN ('%s')" % "', '".join(MUIDs))[0]
+                        arcpy.management.Append(selected_CatchCon, MU_database + "\msm_CatchCon")
         
         return
 

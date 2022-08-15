@@ -815,7 +815,7 @@ class CopyMikeUrbanFeatures(object):
                         # arcpy.AddMessage([field.name.lower() for field in arcpy.ListFields(MU_database + "\msm_Link")])
                         if not "fromnode" in [field.name.lower() for field in arcpy.ListFields(MU_database + "\msm_Link")]:
                             arcpy.DeleteField_management(selected, ["FROMNODE","TONODE"])
-                        elif "fromnode" in [field.name.lower() for field in arcpy.ListFields(MU_database + "\msm_Link")] and not "fromnode" in [field.name.lower() for field in arcpy.ListFields(selected + "\msm_Link")]:
+                        elif "fromnode" in [field.name.lower() for field in arcpy.ListFields(MU_database + "\msm_Link")] and not "fromnode" in [field.name.lower() for field in arcpy.ListFields(selected)]:
                             for field in ["FROMNODE","TONODE"]:
                                 arcpy.AddField_management(selected, field, "TEXT", field_length = 50, field_is_nullable="NULLABLE")
                             # pythonaddins.MessageBox("Attempting to add FROMNODE and TONODE to %s. Close the Mike Urban model before proceeding." % (MU_database + "\msm_Link"), "Close Mike Urban", 0) 
@@ -834,13 +834,14 @@ class CopyMikeUrbanFeatures(object):
                 for i, ms_Catchment in enumerate(ms_Catchments):
                     # arcpy.AddMessage(type(ms_Catchment))
                     arcpy.AddMessage(arcpy.Describe(ms_Catchment).catalogPath)
-                    if not ".mdb" in arcpy.Describe(ms_Catchment).catalogPath:
+                    if ".mdb" in arcpy.Describe(ms_Catchment).catalogPath:
                         selected = arcpy.Select_analysis(ms_Catchment, "in_memory\ms_Catchment_%d" % (i))
                     
                         ms_CatchmentMUIDs = [row[0] for row in arcpy.da.SearchCursor(selected,"MUID")]
                         duplicateMUIDs = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"ms_Catchment"),"MUID",where_clause = "MUID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
                         duplicateHModA = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"msm_HModA"),"CatchID",where_clause = "CatchID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
                         duplicateCatchCon = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"msm_CatchCon"),"CatchID",where_clause = "CatchID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
+
                         errorMessage = ""
                         if duplicateMUIDs:
                             errorMessage += "Catchments with MUID ('%s') already exist in Catchment Layer in Mike Urban Database" % ("(', '".join(duplicateMUIDs))
@@ -881,8 +882,8 @@ class CopyMikeUrbanFeatures(object):
                         # # arcpy.AddMessage(selected_HModA)
                         # arcpy.CopyFeatures_management(selected_HModA, "K:\Hydrauliske modeller\Papirkurv\SonsOfKemet")
                         arcpy.management.Append(selected_HModA, MU_database + "\msm_HModA")
-                        # selected_CatchCon = arcpy.TableSelect_analysis(os.path.join(input_database, "msm_CatchCon"), "in_memory\msm_CatchCon", where_clause = "CatchID IN ('%s')" % "', '".join(MUIDs))[0]
-                        # arcpy.management.Append(selected_CatchCon, MU_database + "\msm_CatchCon")
+                        selected_CatchCon = arcpy.TableSelect_analysis(os.path.join(input_database, "msm_CatchCon"), "in_memory\msm_CatchCon", where_clause = "CatchID IN ('%s')" % "', '".join(MUIDs))[0]
+                        arcpy.management.Append(selected_CatchCon, MU_database + "\msm_CatchCon")
         
         return
 
