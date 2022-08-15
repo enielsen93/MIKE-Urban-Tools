@@ -93,6 +93,7 @@ class GroupComboBoxClass1(object):
         self.ms_Catchment = ms_Catchment_layer[0] if ms_Catchment_layer else None
 
         import mikegraph
+        print("Graphing %s" % (self.msm_Node.workspacePath)) 
         self.graph = mikegraph.Graph(self.msm_Node.workspacePath)
         self.graph.map_network()
         pass
@@ -171,9 +172,10 @@ class TraceUpstreamToolClass16(object):
 
         target = findClosestNode([x,y])
         print("Tracing upstream from node %s" % (target))
-
+        
         upstream_nodes = group_layer.graph.find_upstream_nodes([target])[0]
-
+        
+        print(upstream_nodes)
         print("MUID IN ('%s')" % ("', '".join(upstream_nodes)))
         if group_layer.msm_Node and group_layer.msm_Node.visible:
             arcpy.SelectLayerByAttribute_management(group_layer.msm_Node.longName, "ADD_TO_SELECTION", "MUID IN ('%s')" % ("', '".join(upstream_nodes)))
