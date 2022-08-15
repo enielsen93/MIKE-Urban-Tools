@@ -31,7 +31,7 @@ else:
     from arcpy.mp import ArcGISProject as MapDocument
     from arcpy.mapping import MapDocument as MapDocument
 
-diameters_plastic = [180, 233, 276, 392, 493, 588, 781, 985, 1185, 1385, 1485, 1585, 2000, 2200, 2400, 2600, 2800, 3000]
+diameters_plastic = [188, 235, 297, 377, 493, 588, 781, 985, 1185, 1385, 1485, 1585, 2000, 2200, 2400, 2600, 2800, 3000]
 diameters_concrete = [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1400, 1600, 1800, 2000, 2250, 2500, 3000, 3500]
 
 def getAvailableFilename(filepath, parent = None):
@@ -881,6 +881,11 @@ class CopyDiameter(object):
         return True
 
     def updateParameters(self, parameters): #optional
+        reference_feature_layer = parameters[0].Value
+        target_feature_layer = parameters[1].Value
+        copy_field = parameters[2].ValueAsText
+        match_by = parameters[3].ValueAsText
+    
         def changeShapeFieldname(fields):
                 for i in range(len(fields)):
                     if fields[i] == "SHAPE":
@@ -895,6 +900,13 @@ class CopyDiameter(object):
             parameters[2].value = "Diameter"
             if "MaterialID" in parameters[2].filter.list:
                 parameters[2].value = ["Diameter", "MaterialID"]
+        
+        if parameters[1].ValueAsText:
+            MU_database = os.path.dirname(os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath))
+            
+            is_sqlite = True if ".sqlite" in MU_database else False
+            if is_sqlite:
+                parameters[3].value = "MUID"
 
         return
 
@@ -906,34 +918,58 @@ class CopyDiameter(object):
         target_feature_layer = parameters[1].Value
         copy_field = parameters[2].ValueAsText
         match_by = parameters[3].ValueAsText
-        MU_database = os.path.dirname(os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath))
-                
+        MU_database = os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath).replace("mu_Geometry","")
+        reference_MU_database = os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath).replace("mu_Geometry","")
+        
+        # arcpy.AddMessage(MU_database)
+        
+        is_sqlite = True if ".sqlite" in MU_database else False
+        if is_sqlite:
+            if "shape" in copy_field.lower():
+                arcpy.AddError("Copy field %s is not supported for sqlite" % (copy_field))
+            if "shape" in match_by.lower():
+                arcpy.AddError("Match field %s is not supported for sqlite" % (match_by))
+        
+        field_for_where_clause = "OBJECTID" if not is_sqlite else "MUID"
         check_other_layer = True
         try:
             if arcpy.Describe(reference_feature_layer).fidSet:
                 count = int(arcpy.GetCount_management(reference_feature_layer).getOutput(0))
-                userquery = pythonaddins.MessageBox("Change for %d features?" % (count), "Confirm Assignment", 4)
+                userquery = pythonaddins.MessageBox("Change for %d features (selected in reference layer)?" % (count), "Confirm Assignment", 4)
                 if not userquery == "Yes":
                     pass
                 else:
-                    reference_where_clause = "OBJECTID IN (%s)" % (", ".join([str(row[0]) for row in arcpy.da.SearchCursor(reference_feature_layer, ["OBJECTID"])])) 
+                    if field_for_where_clause == "MUID":
+                        reference_where_clause = "%s IN ('%s')" % (field_for_where_clause, "', '".join([str(row[0]) for row in arcpy.da.SearchCursor(reference_feature_layer, [field_for_where_clause])])) 
+                    else:
+                        reference_where_clause = "%s IN (%s)" % (field_for_where_clause, ", ".join([str(row[0]) for row in arcpy.da.SearchCursor(reference_feature_layer, [field_for_where_clause])])) 
                     target_where_clause = ""
                     check_other_layer = False
         except Exception as e:
+            arcpy.AddError(e)
             pass
+       
+        # arcpy.AddMessage((check_other_layer and arcpy.Describe(target_feature_layer).fidSet))
         try:
             if check_other_layer and arcpy.Describe(target_feature_layer).fidSet:
                 count = int(arcpy.GetCount_management(target_feature_layer).getOutput(0))
-                userquery = pythonaddins.MessageBox("Change for %d features?" % (count), "Confirm Assignment", 4)
+                userquery = pythonaddins.MessageBox("Change for %d features (selected in target layer)?" % (count), "Confirm Assignment", 4)
                 if not userquery == "Yes": 
+                    arcpy.AddMessage("Cancelled both user queries")
                     return
                 else:
-                    target_where_clause = "OBJECTID IN (%s)" % (", ".join([str(row[0]) for row in arcpy.da.SearchCursor(target_feature_layer, ["OBJECTID"])]))
+                    if field_for_where_clause == "MUID":
+                        target_where_clause = "%s IN ('%s')" % (field_for_where_clause, "', '".join([str(row[0]) for row in arcpy.da.SearchCursor(target_feature_layer, [field_for_where_clause])]))
+                    else:
+                        reference_where_clause = "%s IN (%s)" % (field_for_where_clause, ", ".join([str(row[0]) for row in arcpy.da.SearchCursor(target_feature_layer, [field_for_where_clause])])) 
                     reference_where_clause = ""
             else:
-                return
+                if check_other_layer:
+                    arcpy.AddMessage("Nothing selected")
+                    return
         except Exception as e:
-            return
+            arcpy.AddError(e)
+            return  
             
         arcpy.AddMessage(target_where_clause)
         arcpy.AddMessage(reference_where_clause)
@@ -949,45 +985,75 @@ class CopyDiameter(object):
 
         references = []
         fields = changeShapeFieldname([field.name for field in arcpy.ListFields(reference_feature_layer)])
+        if "ESRI_OID" in fields:
+            fields.remove("ESRI_OID")
+        # arcpy.AddMessage(fields)
+        
         with arcpy.da.SearchCursor(arcpy.Describe(reference_feature_layer).catalogPath, fields, where_clause = reference_where_clause) as cursor:
             for row in cursor:
                 reference = Reference()
                 for field_i, field in enumerate(fields):
-                    setattr(reference, field, row[field_i])
+                    setattr(reference, field.lower(), row[field_i])
                 
                 references.append(reference)
+        arcpy.AddMessage([reference.muid for reference in references])
+        arcpy.AddMessage([reference.diameter for reference in references])
         
-        arcpy.AddMessage(references)
-        arcpy.AddMessage(target_feature_layer)
-
-        edit = arcpy.da.Editor(MU_database)
-        edit.startEditing(False, True)
-        edit.startOperation()
-
         fields = changeShapeFieldname([field.name for field in arcpy.ListFields(target_feature_layer)])
+        if "ESRI_OID" in fields:
+            fields.remove("ESRI_OID")
         
-        arcpy.AddMessage(fields)
-        arcpy.AddMessage(match_by)
-        match_by_field_i = [field_i for field_i, field in enumerate(fields) if field == match_by][0]
-        with arcpy.da.UpdateCursor(arcpy.Describe(target_feature_layer).catalogPath, fields, where_clause = target_where_clause) as cursor:
-            for row in cursor:
-                match = [reference for reference in references if getattr(reference, match_by) == row[match_by_field_i]]
-                if match:
-                    reference = match[0]
-                    for field_i, field in enumerate(fields):
-                        if field in copy_field:
-                            arcpy.AddMessage(
-                                "Changed %s field %s from %s to %s" % (row[match_by_field_i], field, row[field_i], getattr(reference, field)))
-                            row[field_i] = getattr(reference, field)
-                        elif field == "SHAPE":
-                            shape = deepcopy(row[field_i])
-                            row[field_i] = shape
-                    
-                    cursor.updateRow(row)
+        match_by_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == match_by.lower()][0]
+        
+        target_where_clause = target_where_clause if target_where_clause else reference_where_clause
+        
+        if is_sqlite:
+            with sqlite3.connect(
+                        MU_database) as connection:
+                update_cursor = connection.cursor()
+                layer_name = os.path.basename(arcpy.Describe("target").catalogPath).replace("main.","")
+                copy_field = copy_field if type(copy_field) is str else copy_field.split(";")
+                # arcpy.AddMessage(copy_field)
+                # arcpy.AddMessage(target_where_clause)
+                # arcpy.AddMessage([row[0] for row in arcpy.da.SearchCursor(target_feature_layer, ["MUID"], target_where_clause)])
+                
+                for MUID in [row[0] for row in arcpy.da.SearchCursor(target_feature_layer, ["MUID"], target_where_clause)]:
+                    match = [reference for reference in references if getattr(reference, "muid") == MUID][0]
+                    for field in copy_field:
+                        field_value = getattr(match, field.lower())
+                        # arcpy.AddMessage(type(field_value) is str or type(field_value) is unicode)
+                        
+                        old_field_value = update_cursor.execute("SELECT %s FROM %s WHERE MUID = '%s'" % (field, layer_name, MUID)).fetchone()[0]
+                        sql_expression = "UPDATE %s SET %s = %s WHERE MUID = '%s'" % (layer_name, field,
+                                            "'%s'" % (field_value) if type(field_value) is str or type(field_value) is unicode else "%s" % (field_value),
+                                            MUID)
+                        arcpy.AddMessage(sql_expression)
+                        arcpy.AddMessage(
+                                    "Changed %s field %s from %s to %s" % (MUID, field, old_field_value, field_value))
+                        update_cursor.execute(sql_expression)
+        else:
+            edit = arcpy.da.Editor(MU_database)
+            edit.startEditing(False, True)
+            edit.startOperation()
+            with arcpy.da.UpdateCursor(arcpy.Describe(target_feature_layer).catalogPath, fields, where_clause = target_where_clause) as cursor:
+                for row in cursor:
+                    match = [reference for reference in references if getattr(reference, match_by.lower()) == row[match_by_field_i]]
+                    if match:
+                        reference = match[0]
+                        for field_i, field in enumerate(fields):
+                            if field in copy_field:
+                                arcpy.AddMessage(
+                                    "Changed %s field %s from %s to %s" % (row[match_by_field_i], field, row[field_i], getattr(reference, field.lower())))
+                                row[field_i] = getattr(reference, field)
+                            elif field == "SHAPE":
+                                shape = deepcopy(row[field_i])
+                                row[field_i] = shape
+                        
+                        cursor.updateRow(row)
 
 
-        edit.stopOperation()
-        edit.stopEditing(True)
+            edit.stopOperation()
+            edit.stopEditing(True)
         return
 
 class InterpolateInvertLevels(object):
@@ -1005,8 +1071,16 @@ class InterpolateInvertLevels(object):
             datatype="GPFeatureLayer",
             parameterType="Required",
             direction="Input")
+            
+        usePipeElevations = arcpy.Parameter(
+            displayName="Include UpLevel and DwLevel",
+            name="usePipeElevations",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+        
 
-        parameters = [pipe_layer]
+        parameters = [pipe_layer, usePipeElevations]
         return parameters
 
     def isLicensed(self):
@@ -1022,6 +1096,7 @@ class InterpolateInvertLevels(object):
 
     def execute(self, parameters, messages):
         pipe_layer = parameters[0].Value
+        usePipeElevations = parameters[1].Value
         MU_database = (os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)) if ".mdb" in arcpy.Describe(pipe_layer).catalogPath else
                         os.path.dirname(arcpy.Describe(pipe_layer).catalogPath))
         is_sqlite = True if ".sqlite" in MU_database else False        
@@ -1064,8 +1139,17 @@ class InterpolateInvertLevels(object):
                          arcpy.da.SearchCursor(msm_Node,
                                                ["MUID", "InvertLevel"],
                                                where_clause="MUID IN ('%s', '%s')" % (start_node, end_node))}
-
-        end_node_critical = end_node_critical if end_node_critical else invert_levels[end_node]
+        
+        if usePipeElevations:
+            last_link = [MUID for MUID in links_MUIDs if msm_Link_Network.links[MUID].tonode == end_node][0]
+            dwlevel = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["dwlevel"], where_clause = "MUID = '%s'" % (last_link))][0]
+            
+            first_link = [MUID for MUID in links_MUIDs if msm_Link_Network.links[MUID].fromnode == start_node][0]
+            uplevel = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["dwlevel"], where_clause = "MUID = '%s'" % (first_link))][0]
+            if uplevel:
+                invert_levels[start_node] = uplevel
+            if dwlevel:
+                invert_levels[end_node] = dwlevel
 
         network = nx.DiGraph()
         for link in msm_Link_Network.links.values():
