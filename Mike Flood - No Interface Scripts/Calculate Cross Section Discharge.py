@@ -5,10 +5,7 @@ import datetime
 import matplotlib.pyplot as plt
 import os
 
-dfs2_files = [r"C:\Offline\VOR_Status\VOR_Status_CDS20_2dCDS20.m21 - Result Files\VOR_Status_CDS20_2dCDS20_15_Depth_Velocity_Flux.dfs2",
-              r"C:\Offline\VOR_Status\VOR_Status_CDS10_2dCDS10.m21 - Result Files\VOR_Status_CDS10_2dCDS10_13_Depth_Velocity_Flux.dfs2",
-              r"C:\Offline\VOR_Status\VOR_Status_CDS5_2dCDS5.m21 - Result Files\VOR_Status_CDS5_2dCDS5_17_Depth_Velocity_Flux.dfs2",
-              r"C:\Offline\VOR_Status\VOR_Status_CDS100_2dCDS100.m21 - Result Files\VOR_Status_CDS100_2dCDS100_19_Depth_Velocity_Flux.dfs2"]
+dfs2_files = [r"C:\Offline\VOR_Status\VOR_Status_CDS20_2dCDS20.m21 - Result Files\VOR_Status_CDS20_2dCDS20_15_Depth_Velocity_Flux.dfs2"]
 
 plt.figure()
 for dfs2_file in dfs2_files:
@@ -41,8 +38,8 @@ for dfs2_file in dfs2_files:
     #         dfs2_points[x_i, y_i] = arcpy.Point(dfs2_x[x_i,y_i], dfs2_y[x_i,y_i])
 
     arcpy.env.overwriteOutput = True
-    # new_line_feature_class = arcpy.management.CopyFeatures(line_feature_class, os.path.join(
-    #     r"C:\Users\ELNN\OneDrive - Ramboll\Documents\ArcGIS\scratch.gdb", os.path.basename(dfs2_file).replace(".dfs2","")))[0]
+    new_line_feature_class = arcpy.management.CopyFeatures(line_feature_class, os.path.join(
+        r"C:\Users\ELNN\OneDrive - Ramboll\Documents\ArcGIS\scratch.gdb", os.path.basename(dfs2_file).replace(".dfs2","")))[0]
 
     resolution = dfs2.dx/3
 
@@ -79,52 +76,52 @@ for dfs2_file in dfs2_files:
         cross_section_flow_v = -cross_section_flow_v if np.sum(cross_section_flow_v) < 0 else cross_section_flow_v
         plt.step(dfs2_time, (cross_section_flow_u + cross_section_flow_v) * 1e3, label = os.path.basename(dfs2_file))
     dfs2.close()
-    # with arcpy.da.UpdateCursor(new_line_feature_class, ["SHAPE@", "MaxFlow", "TotalFlow"]) as cursor:
-    #     for row in cursor:
-    #         shape = row[0]
-    #         plt.figure()
-    #         indices = np.empty((0,2), dtype = int)
-    #         indices_flow_direction = []
-    #         cross_section_flow_u = np.zeros((data_flux.shape[0]))
-    #         cross_section_flow_v = np.zeros((data_flux.shape[0]))
-    #         for distance in np.arange(0, shape.length, resolution):
-    #             point = shape.positionAlongLine(distance)
-    #             # points.append(point)
-    #             match = [i[0] for i in dfs2.geometry.find_index(point.firstPoint.X, point.firstPoint.Y)]
-    #
-    #             # for timestep in range(data_flux.shape[0]):
-    #             #     # cross_section_flow[timestep] += data_flux[timestep, int(match[0]), int(match[1])]
-    #             #     cross_section_flow[timestep] += ((np.abs(data_v_velocity[timestep, int(match[0]), int(match[1])]*dfs2.dx)
-    #             #                                      + np.abs(data_u_velocity[timestep, int(match[0]), int(match[1])]*dfs2.dx))*
-    #             #                                      data_depth[timestep, int(match[0]), int(match[1])])
-    #             match.reverse()
-    #             if not match in [list(index) for index in indices]:
-    #                 indices = np.append(indices, np.array([match]), axis=0)
-    #         indices_flow_direction = np.ones(indices.shape, dtype=bool)
-    #         for match_i, match in enumerate(indices):
-    #             if list(match+[1,0]) in [list(index) for index in indices]:
-    #                 indices_flow_direction[match_i, 0] = False
-    #             if list(match+[0,1]) in [list(index) for index in indices]:
-    #                 indices_flow_direction[match_i, 1] = False
-    #
-    #         for match, flow_direction in zip(indices, indices_flow_direction):
-    #             if flow_direction[0]:
-    #                 cross_section_flow_u += data_u_velocity[:, match[0], match[1]] * data_depth[:, match[0], match[1]] * dfs2.dx
-    #             if flow_direction[1]:
-    #                 cross_section_flow_v += data_v_velocity[:, match[0], match[1]] * data_depth[:, match[0], match[1]] * dfs2.dx
-    #         # cross_section_flows.append(cross_section_flow)
-    #         # # for timestep in range(data_flux.shape[0]):
-    #         # #     for index in indices:
-    #         # #         print(data_depth[timestep, int(index[0]), int(index[1])])
-    #         # #         values[timestep] += data_flux[timestep, int(index[0]), int(index[1])] * 1e3
-    #         plt.step(dfs2_time, cross_section_flow_u)
-    #         plt.step(dfs2_time, cross_section_flow_v)
-    #         cross_section_flow_u = -cross_section_flow_u if np.sum(cross_section_flow_u)<0 else cross_section_flow_u
-    #         cross_section_flow_v = -cross_section_flow_v if np.sum(cross_section_flow_v) < 0 else cross_section_flow_v
-    #         plt.step(dfs2_time, (cross_section_flow_u+cross_section_flow_v)*1e3)
-    #         row[1] = np.max((cross_section_flow_u+cross_section_flow_v)*1e3)
-    #         row[2] = np.sum((cross_section_flow_u+cross_section_flow_v)*1e3*dfs2.timestep)
-    #         cursor.updateRow(row)
+    with arcpy.da.UpdateCursor(new_line_feature_class, ["SHAPE@", "MaxFlow", "TotalFlow"]) as cursor:
+        for row in cursor:
+            shape = row[0]
+            plt.figure()
+            indices = np.empty((0,2), dtype = int)
+            indices_flow_direction = []
+            cross_section_flow_u = np.zeros((data_v_velocity.shape[0]))
+            cross_section_flow_v = np.zeros((data_v_velocity.shape[0]))
+            for distance in np.arange(0, shape.length, resolution):
+                point = shape.positionAlongLine(distance)
+                # points.append(point)
+                match = [i[0] for i in dfs2.geometry.find_index(point.firstPoint.X, point.firstPoint.Y)]
+
+                # for timestep in range(data_flux.shape[0]):
+                #     # cross_section_flow[timestep] += data_flux[timestep, int(match[0]), int(match[1])]
+                #     cross_section_flow[timestep] += ((np.abs(data_v_velocity[timestep, int(match[0]), int(match[1])]*dfs2.dx)
+                #                                      + np.abs(data_u_velocity[timestep, int(match[0]), int(match[1])]*dfs2.dx))*
+                #                                      data_depth[timestep, int(match[0]), int(match[1])])
+                match.reverse()
+                if not match in [list(index) for index in indices]:
+                    indices = np.append(indices, np.array([match]), axis=0)
+            indices_flow_direction = np.ones(indices.shape, dtype=bool)
+            for match_i, match in enumerate(indices):
+                if list(match+[1,0]) in [list(index) for index in indices]:
+                    indices_flow_direction[match_i, 0] = False
+                if list(match+[0,1]) in [list(index) for index in indices]:
+                    indices_flow_direction[match_i, 1] = False
+
+            for match, flow_direction in zip(indices, indices_flow_direction):
+                if flow_direction[0]:
+                    cross_section_flow_u += data_u_velocity[:, match[0], match[1]] * data_depth[:, match[0], match[1]] * dfs2.dx
+                if flow_direction[1]:
+                    cross_section_flow_v += data_v_velocity[:, match[0], match[1]] * data_depth[:, match[0], match[1]] * dfs2.dx
+            # cross_section_flows.append(cross_section_flow)
+            # # for timestep in range(data_flux.shape[0]):
+            # #     for index in indices:
+            # #         print(data_depth[timestep, int(index[0]), int(index[1])])
+            # #         values[timestep] += data_flux[timestep, int(index[0]), int(index[1])] * 1e3
+            plt.step(dfs2_time, cross_section_flow_u)
+            plt.step(dfs2_time, cross_section_flow_v)
+            cross_section_flow_u = -cross_section_flow_u if np.sum(cross_section_flow_u)<0 else cross_section_flow_u
+            cross_section_flow_v = -cross_section_flow_v if np.sum(cross_section_flow_v) < 0 else cross_section_flow_v
+            plt.step(dfs2_time, (cross_section_flow_u+cross_section_flow_v)*1e3)
+            row[1] = np.max((cross_section_flow_u+cross_section_flow_v)*1e3)
+            row[2] = np.sum((cross_section_flow_u+cross_section_flow_v)*1e3*dfs2.timestep)
+            cursor.updateRow(row)
 
 plt.legend()
 plt.show()
