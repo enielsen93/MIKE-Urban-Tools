@@ -776,9 +776,10 @@ class CopyMikeUrbanFeatures(object):
         if pythonaddins.MessageBox("You are copying %d manholes, %d pipes, and %d catchments. Continue?" % (nodes_count, link_count, catchment_count), 
                                                     "Confirm copy?", 1) == "OK":
             if msm_Nodes:
-                reference_MU_database = os.path.dirname(arcpy.Describe(msm_Nodes).catalogPath)
-                nodes_in_database = [row[0] for row in arcpy.da.SearchCursor(MU_database + "\msm_Node", ["MUID"])]
+               
                 for i, msm_Node in enumerate(msm_Nodes):
+                    reference_MU_database = os.path.dirname(arcpy.Describe(msm_Node).catalogPath)
+                    nodes_in_database = [row[0] for row in arcpy.da.SearchCursor(MU_database + "\msm_Node", ["MUID"])]
                     selected = arcpy.Select_analysis(msm_Node, "in_memory\msm_Node_%d" % (i))
                     nodes_in_msm_Node = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
                     duplicate_nodes = np.intersect1d(nodes_in_database, nodes_in_msm_Node)
@@ -890,6 +891,7 @@ class CopyMikeUrbanFeatures(object):
                     else:
                         input_database = arcpy.Describe(ms_Catchment).catalogPath.split(".mdb")[0] + ".mdb"
                         selected = arcpy.Select_analysis(ms_Catchment, "in_memory\ms_Catchment_%d" % (i))
+                        arcpy.Append_management(selected, os.path.join(MU_database,"ms_Catchment"),"NO_TEST")
                         MUIDs = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
                         # arcpy.management.Append(selected, MU_database + "\ms_Catchment")
                         arcpy.AddMessage( "MUID IN ('%s')" % "', '".join(MUIDs))
@@ -903,8 +905,10 @@ class CopyMikeUrbanFeatures(object):
                                     # target_cursor.insertRow(("gay",0,"-DEFAULT-",0,7,0.9,0.0006,0,0.33))
                         # # arcpy.AddMessage(selected_HModA)
                         # arcpy.CopyFeatures_management(selected_HModA, "K:\Hydrauliske modeller\Papirkurv\SonsOfKemet")
-                        # arcpy.management.Append(selected_HModA, MU_database + "\msm_HModA")
+                        arcpy.management.Append(selected_HModA, MU_database + "\msm_HModA")
                         selected_CatchCon = arcpy.TableSelect_analysis(os.path.join(input_database, "msm_CatchCon"), "in_memory\msm_CatchCon", where_clause = "CatchID IN ('%s')" % "', '".join(MUIDs))[0]
+                        arcpy.AddMessage("CatchID IN ('%s')" % "', '".join(MUIDs))
+                        arcpy.AddMessage([row[0] for row in arcpy.da.SearchCursor(selected_CatchCon, ["CatchID"])])
                         arcpy.management.Append(selected_CatchCon, MU_database + "\msm_CatchCon")
         
         return
