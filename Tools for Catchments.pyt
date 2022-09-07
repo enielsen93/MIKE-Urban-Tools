@@ -26,7 +26,7 @@ class Toolbox(object):
         self.alias  = "Catchments"
 
         # List of tool classes associated with this toolbox
-        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, AlteredCatchments, CheckCatchments, FAS2Deloplande, TransferCatchments, GetImperviousness, GetImperviousnessFlora]
+        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, AlteredCatchments, CheckCatchments, FAS2Deloplande, TransferCatchments, GetImperviousness, GetImperviousnessFlora, DuplicateCatchments]
 
 class CatchmentProcessing(object):
     def __init__(self):
@@ -984,6 +984,7 @@ class TransferCatchments(object):
         edit.stopOperation()
         edit.stopEditing(True)
         return
+        
 class GetImperviousness(object):
     def __init__(self):
         self.label       = "Display imperviousness from Mike Urban database"
@@ -1104,6 +1105,176 @@ class GetImperviousnessFlora(object):
             updatelayer.definitionQuery = 'NetTypeNo = 3'
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
+      
+        
+        return
+ 
+class GetImperviousness(object):
+    def __init__(self):
+        self.label       = "Display imperviousness from Mike Urban database"
+        self.description = "Display imperviousness from Mike Urban database"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        #Define parameter definitions
+
+        # Input Features parameter
+        MU_database = arcpy.Parameter(
+            displayName="Mike Urban database",
+            name="database",
+            datatype="File",
+            parameterType="Required",
+            direction="Input")
+        MU_database.filter.list = ["mdb","sqlite"]
+        
+        includeWasteWater = arcpy.Parameter(
+            displayName="Include wastewater?",
+            name="includeWasteWater",
+            datatype="Boolean",
+            parameterType="Optional",
+            direction="Input")
+        
+        parameters = [MU_database, includeWasteWater]
+        
+        return parameters
+
+    def isLicensed(self): #optional
+        return True
+
+    def updateParameters(self, parameters): #optional
+        return
+
+    def updateMessages(self, parameters): #optional
+       
+        return
+
+    def execute(self, parameters, messages):        
+        includeWasteWater = parameters[1].ValueAsText
+        mxd = arcpy.mapping.MapDocument("CURRENT")
+        df = arcpy.mapping.ListDataFrames(mxd)[0]
+        arcpy.env.addOutputsToMap = False
+        ms_CatchmentImp = arcpy.CopyFeatures_management (parameters[0].ValueAsText + r"\mu_Geometry\ms_Catchment", getAvailableFilename(arcpy.env.scratchGDB + "\ms_CatchmentImp")).getOutput(0)
+        ms_CatchmentImpLayer = arcpy.MakeFeatureLayer_management(ms_CatchmentImp, arcpy.env.scratchGDB + "\ms_CatchmentImpLayer").getOutput(0).name
+        arcpy.JoinField_management(in_data=ms_CatchmentImpLayer, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_HModA", join_field="CatchID", fields="ImpArea")
+        arcpy.JoinField_management(in_data=ms_CatchmentImpLayer, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_CatchCon", join_field="CatchID", fields="NodeID")
+        addLayer = arcpy.mapping.Layer(ms_CatchmentImpLayer)
+        arcpy.mapping.AddLayer(df, addLayer)
+        updatelayer = arcpy.mapping.ListLayers(mxd, ms_CatchmentImpLayer, df)[0]
+        sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments W Imp Area.lyr")
+        arcpy.mapping.UpdateLayer(df,updatelayer,sourcelayer,False)
+        updatelayer.replaceDataSource(str(addLayer.workspacePath), 'FILEGDB_WORKSPACE', str(addLayer.datasetName))
+        if not includeWasteWater:
+            updatelayer.definitionQuery = 'NetTypeNo IS NULL OR NetTypeNo IN (2,3)'
+        else: 
+            updatelayer.definitionQuery = ''
+        #arcpy.ApplySymbologyFromLayer_management (addLayer, "Template.lyr")
+        arcpy.RefreshTOC()
+        arcpy.RefreshActiveView()
+      
+        
+        return
+                
+class DuplicateCatchments(object):
+    def __init__(self):
+        self.label       = "Solve Catchments with identical MUIDs"
+        self.description = "Solve Catchments with identical MUIDs"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        #Define parameter definitions
+
+        # Input Features parameter
+        catchments = arcpy.Parameter(
+            displayName="Catchment Layer",
+            name="catchments",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+        catchments.filter.list = ["Polygon"]
+
+        parameters = [catchments]
+        return parameters
+
+    def isLicensed(self): #optional
+        return True
+
+    def updateParameters(self, parameters): #optional
+        return
+
+    def updateMessages(self, parameters): #optional
+       
+        return
+
+    def execute(self, parameters, messages):        
+        catchments = parameters[1].ValueAsText
+        
+        MU_database = os.path.dirname(arcpy.Describe(catchments).catalogPath).replace("\mu_Geometry","")
+        msm_HModA = os.path.join(MU_database, "msm_HModA")
+        msm_CatchCon = os.path.join(MU_database, "msm_CatchCon")
+        MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchments, ["MUID"])]
+
+        MUIDs_duplicate = set()
+        for MUID in MUIDs:
+            if MUIDs.count(MUID)>1:
+                MUIDs_duplicate.add(MUID)
+
+        MUIDs_reassigned = {MUID:[] for MUID in MUIDs_duplicate}
+        MUIDs_used = MUIDs
+
+        for MUID_duplicate in MUIDs_duplicate:
+            idx_of_duplicates = [i for i,MUID in enumerate(MUIDs) if MUID == MUID_duplicate][1:]
+
+            for idx in idx_of_duplicates:
+                i = 2
+                new_MUID = MUID_duplicate + "s%d" % i
+                while new_MUID in MUIDs_used:
+                    i += 1
+                    new_MUID = MUID_duplicate + "s%d" % i
+
+                MUIDs_reassigned[MUID_duplicate].append(new_MUID)
+                MUIDs_used.append(new_MUID)
+
+        msm_HModA_table = {}
+        with arcpy.da.SearchCursor(msm_HModA, '*' , "CatchID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
+            for row in cursor:
+                msm_HModA_table[row[1]] = row
+
+        msm_CatchCon_table = {}
+        with arcpy.da.SearchCursor(msm_CatchCon, '*' , "CatchID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
+            for row in cursor:
+                msm_CatchCon_table[row[2]] = row
+
+        MUIDs_reassigned_loop = {MUID:0 for MUID in MUIDs_reassigned.keys()}# dictionairy to check how many times the loop has found this MUID
+        with arcpy.da.UpdateCursor(catchments, ['MUID'], "MUID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
+            for row in cursor:
+                MUID = row[0]
+                if row[0] in MUIDs_reassigned:
+                    if MUIDs_reassigned_loop[row[0]] > 0:
+                        print(row)
+                        row[0] = MUIDs_reassigned[row[0]][MUIDs_reassigned_loop[row[0]]-1]
+                        print(row)
+                        cursor.updateRow(row)
+                        print(row)
+                    MUIDs_reassigned_loop[MUID] += 1
+
+        for MUID in MUIDs_reassigned:
+            MUIDs_reassigned[MUID][0] = MUID
+
+        with arcpy.da.InsertCursor(msm_HModA, '*') as cursor:
+            for original_MUID in MUIDs_reassigned.keys():
+                for new_MUID in MUIDs_reassigned[original_MUID]:
+                    row = list(msm_HModA_table[original_MUID])
+                    row[1] = new_MUID
+                    print(row)
+                    cursor.insertRow(row)
+
+        with arcpy.da.InsertCursor(msm_CatchCon, '*') as cursor:
+            for original_MUID in MUIDs_reassigned.keys():
+                for new_MUID in MUIDs_reassigned[original_MUID]:
+                    row = list(msm_CatchCon_table[original_MUID])
+                    row[2] = new_MUID
+                    print(row)
+                    cursor.insertRow(row)
       
         
         return
