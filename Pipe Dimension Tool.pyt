@@ -961,7 +961,7 @@ class CopyDiameter(object):
                     if field_for_where_clause == "MUID":
                         target_where_clause = "%s IN ('%s')" % (field_for_where_clause, "', '".join([str(row[0]) for row in arcpy.da.SearchCursor(target_feature_layer, [field_for_where_clause])]))
                     else:
-                        reference_where_clause = "%s IN (%s)" % (field_for_where_clause, ", ".join([str(row[0]) for row in arcpy.da.SearchCursor(target_feature_layer, [field_for_where_clause])])) 
+                        target_where_clause = "%s IN (%s)" % (field_for_where_clause, ", ".join([str(row[0]) for row in arcpy.da.SearchCursor(target_feature_layer, [field_for_where_clause])])) 
                     reference_where_clause = ""
             else:
                 if check_other_layer:

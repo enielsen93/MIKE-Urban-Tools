@@ -1044,7 +1044,7 @@ class CopyDiameter(object):
                             if field in copy_field:
                                 arcpy.AddMessage(
                                     "Changed %s field %s from %s to %s" % (row[match_by_field_i], field, row[field_i], getattr(reference, field.lower())))
-                                row[field_i] = getattr(reference, field)
+                                row[field_i] = getattr(reference, field.lower())
                             elif field == "SHAPE":
                                 shape = deepcopy(row[field_i])
                                 row[field_i] = shape
