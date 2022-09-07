@@ -9,7 +9,7 @@ import mikeio
 import numpy as np
 import arcpy
 
-dfs2_filepath = r"C:\Offline\VOR_Status\VOR_Status_CDS5_2dCDS5.m21 - Result Files\VOR_Status_CDS20_maxA01.dfs2"
+dfs2_filepath = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\RWA2022N00174\Model\05_RESULTS\VOR_Plan_CDS20_2dCDS20.m21 - Result Files\VOR_Status_CDS20A01.dfs2"
 dfs2 = mikeio.dfs2.Dfs2(dfs2_filepath)
 
 item = dfs2.items[0].name
@@ -24,5 +24,5 @@ raster = arcpy.NumPyArrayToRaster(np.flip(data, axis=1), lower_left_corner = low
                                      y_cell_size = dfs2.dy,
                                      value_to_nodata = -999)
 
-raster.save(dfs2_filepath.replace(".dfs2","1.tif"))
+raster.save(dfs2_filepath.replace(".dfs2",".tif"))
 
