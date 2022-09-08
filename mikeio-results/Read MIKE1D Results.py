@@ -4,7 +4,7 @@ import os
 import numpy as np
 
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_027\KOM_CDS_5_sc3Base.res1d"
-res1d_files = [r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_007\KOM_007_sc1_CDS_5Base.res1d"]
+res1d_files = [r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_008\KOM_008_sc1_CDS_10Base.res1d"]
 
 for res1d_file in res1d_files:
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_017_sc2\KOM_Plan_017_sc2_CDS_5Base.res1d"
@@ -17,7 +17,7 @@ for res1d_file in res1d_files:
     df = Res1D(res1d_file, queries)
     arcpy.env.overwriteOutput = True
     output_folder = r"C:\Papirkurv"# r"C:\Users\ELNN\OneDrive - Ramboll\Documents\ArcGIS\scratch.gdb"
-    new_filename = os.path.basename(res1d_file).replace(".res1d",".shp")
+    new_filename = os.path.basename(res1d_file).replace(".res1d","1.shp")
     try:
         output_filepath = arcpy.CreateFeatureclass_management(output_folder, new_filename, "POINT")[0]
         arcpy.management.AddField(output_filepath, "MUID", "TEXT")

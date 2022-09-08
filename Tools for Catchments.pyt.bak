@@ -1206,7 +1206,8 @@ class DuplicateCatchments(object):
         return
 
     def execute(self, parameters, messages):        
-        catchments = parameters[1].ValueAsText
+        catchments = parameters[0].ValueAsText
+        
         MU_database = os.path.dirname(arcpy.Describe(catchments).catalogPath).replace("\mu_Geometry","")
         msm_HModA = os.path.join(MU_database, "msm_HModA")
         msm_CatchCon = os.path.join(MU_database, "msm_CatchCon")

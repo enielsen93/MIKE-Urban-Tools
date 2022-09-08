@@ -1206,7 +1206,7 @@ class DuplicateCatchments(object):
         return
 
     def execute(self, parameters, messages):        
-        catchments = parameters[1].ValueAsText
+        catchments = parameters[0].ValueAsText
         
         MU_database = os.path.dirname(arcpy.Describe(catchments).catalogPath).replace("\mu_Geometry","")
         msm_HModA = os.path.join(MU_database, "msm_HModA")
@@ -1250,11 +1250,11 @@ class DuplicateCatchments(object):
                 MUID = row[0]
                 if row[0] in MUIDs_reassigned:
                     if MUIDs_reassigned_loop[row[0]] > 0:
-                        print(row)
+                        arcpy.AddMessage(row)
                         row[0] = MUIDs_reassigned[row[0]][MUIDs_reassigned_loop[row[0]]-1]
-                        print(row)
+                        arcpy.AddMessage(row)
                         cursor.updateRow(row)
-                        print(row)
+                        arcpy.AddMessage(row)
                     MUIDs_reassigned_loop[MUID] += 1
 
         for MUID in MUIDs_reassigned:
@@ -1265,7 +1265,7 @@ class DuplicateCatchments(object):
                 for new_MUID in MUIDs_reassigned[original_MUID]:
                     row = list(msm_HModA_table[original_MUID])
                     row[1] = new_MUID
-                    print(row)
+                    arcpy.AddMessage(row)
                     cursor.insertRow(row)
 
         with arcpy.da.InsertCursor(msm_CatchCon, '*') as cursor:
@@ -1273,7 +1273,7 @@ class DuplicateCatchments(object):
                 for new_MUID in MUIDs_reassigned[original_MUID]:
                     row = list(msm_CatchCon_table[original_MUID])
                     row[2] = new_MUID
-                    print(row)
+                    arcpy.AddMessage(row)
                     cursor.insertRow(row)
       
         

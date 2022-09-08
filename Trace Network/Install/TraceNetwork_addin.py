@@ -91,7 +91,14 @@ class GroupComboBoxClass1(object):
          "Delopland" in layer.longName or "Catchment" in layer.longName]
         print(ms_Catchment_layer)
         self.ms_Catchment = ms_Catchment_layer[0] if ms_Catchment_layer else None
-
+        
+        links_MUID = [row[0] for row in arcpy.da.SearchCursor(self.msm_Link, ["MUID"])]
+        print(links_MUID)
+        duplicate_links = [MUID for MUID in links_MUID if links_MUID.count(MUID)>1]
+        print(duplicate_links)
+        if duplicate_links:
+            pythonaddins.MessageBox("Error: Links with identical MUIDs: ('%s')" % ("', '".join(duplicate_links)), "Error: Identical MUIDs", 0)
+        
         import mikegraph
         print("Graphing %s" % (self.msm_Node.workspacePath)) 
         self.graph = mikegraph.Graph(self.msm_Node.workspacePath)

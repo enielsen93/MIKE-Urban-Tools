@@ -592,6 +592,7 @@ class GenerateCatchmentConnections(object):
             datatype="GPFeatureLayer",
             parameterType="Required",
             direction="Input")
+        catchment_layer.filter.list = ["Polygon"]
 
         delete_old_connections = arcpy.Parameter(
             displayName="Delete All Old Catchment Connections",
@@ -638,11 +639,17 @@ class GenerateCatchmentConnections(object):
 
         links = {row[0]:[row[1], row[2]] for row in arcpy.da.SearchCursor(msm_CatchCon, ["MUID", "CatchID", "NodeID"], 
                                     where_clause = where_clause.replace("MUID","CatchID")) if row[1] in MUIDs}
-
-        with arcpy.da.UpdateCursor(msm_CatchConLink, ["MUID"], where_clause = "CatchConID IN (%s)" % ", ".join([str(key) for key in links.keys()])
+        
+        arcpy.AddMessage(links)
+        arcpy.AddMessage("PRINT")
+        arcpy.AddMessage("CatchConID IN (%s)" % ", ".join([str(key) for key in links.keys()])
+                                                                                if not delete_old_connections else "")
+        with arcpy.da.UpdateCursor(msm_CatchConLink, ["CatchConID"], where_clause = "CatchConID IN (%s)" % ", ".join([str(key) for key in links.keys()])
                                                                                 if not delete_old_connections else "") as cursor:
             for row in cursor:
-                cursor.deleteRow()
+                if row[0] in links.keys():
+                    arcpy.AddMessage(row)
+                    cursor.deleteRow()
 
         nodes_MUIDs = [node for catchment, node in links.values()]
         
