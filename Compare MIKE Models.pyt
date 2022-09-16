@@ -83,10 +83,10 @@ class CompareMikeModels(object):
             parameterType="Optional",
             multiValue=True,
             direction="Input")
-        ignore_fields.filter.list = ["SHAPE", "Slope", "UpLevel_C", "DwLevel_C", "UpLevel", "DwLevel", "Diameter", "NetTypeNo", "GroundLevel", "CriticalLevel", "Area"]
-        ignore_fields.value = ["Slope", "UpLevel_C", "DwLevel_C", "CriticalLevel", "Area"]
+        ignore_fields.filter.list = ["OBJECTID", "SHAPE", "Slope", "UpLevel_C", "DwLevel_C", "Length_C", "UpLevel", "DwLevel", "Diameter", "NetTypeNo", "GroundLevel", "CriticalLevel", "Area"]
+        ignore_fields.value = ["OBJECTID", "Slope", "UpLevel_C", "DwLevel_C", "Length_C", "CriticalLevel", "Area"]
         #ignore_fields.value = ["msm_Catchment", "msm_Node", "msm_Link", "msm_Weir", "msm_Orifice"]
-        
+
         parameters = [database1, database2, check_features, ignore_fields]
         return parameters
 
@@ -104,23 +104,23 @@ class CompareMikeModels(object):
         database2 = parameters[1].ValueAsText
         check_features = parameters[2].ValueAsText.split(";")
         ignore_fields = [field.lower() for field in parameters[3].ValueAsText.split(";")]
-        
+
         if "slope" in ignore_fields:
             ignore_fields.append("slope_c")
         if "shape" in ignore_fields:
             ignore_fields.append("shape@")
-        
+
         #arcpy.AddMessage(ignore_fields)
-        
+
         def ignore_field(fieldname):
             if fieldname.lower() in ignore_fields:
                 return True
             else:
                 return False
-        
+
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
-        
+
         def addLayer(layer_source, source, group=None, workspace_type="ACCESS_WORKSPACE"):
             layer = arcpy.mapping.Layer(layer_source)
             if group:
@@ -135,7 +135,7 @@ class CompareMikeModels(object):
         empty_group = arcpy.mapping.AddLayer(df, empty_group_mapped, "TOP")
         empty_group_layer = arcpy.mapping.ListLayers(mxd, "Empty Group", df)[0]
         empty_group_layer.name = "%s vs. %s" % (os.path.basename(database1), os.path.basename(database2))
-        
+
         for feature in check_features:
             arcpy.AddMessage("Checking feature %s" % (feature))
             feature_path_1 = os.path.join(database1, feature)
@@ -144,7 +144,7 @@ class CompareMikeModels(object):
             feature_path_2 = os.path.join(database2, feature)
             if ".mdb" in feature_path_2 and "Catchment" in feature_path_2:
                 feature_path_2 = feature_path_2.replace("msm_Catchment", "ms_Catchment")
-                
+
             result_layer = getAvailableFilename(os.path.join(arcpy.env.scratchGDB, feature))
             arcpy.CreateFeatureclass_management(arcpy.env.scratchGDB, os.path.basename(result_layer),
                                                 template=feature_path_1)
@@ -155,12 +155,13 @@ class CompareMikeModels(object):
             features_2 = {}
             fields = [field.name if field.name != "geometry" else "SHAPE@" for field in arcpy.ListFields(feature_path_1)
                       if not ignore_field(field.name)]
+            arcpy.AddMessage(fields)
 
             MUID_field_i = [i for i, field in enumerate(fields) if field.lower() == "muid"][0]
 
             if "SHAPE@" not in fields:
                 fields.append("SHAPE@")
-                
+
             arcpy.SetProgressor("step","Checking feature %s" % (feature_path_1), 0, len([1 for row in arcpy.da.SearchCursor(feature_path_1, "OID@")]), 1)
             with arcpy.da.SearchCursor(feature_path_1, fields) as cursor:
                 step = 0
@@ -168,7 +169,7 @@ class CompareMikeModels(object):
                     arcpy.SetProgressorPosition(step)
                     step += 1
                     features_1[row[MUID_field_i]] = row
-            
+
             arcpy.SetProgressor("step","Checking feature %s" % (feature_path_2), 0, len([1 for row in arcpy.da.SearchCursor(feature_path_2, "OID@")]), 1)
             with arcpy.da.SearchCursor(feature_path_2, fields) as cursor:
                 step = 0
@@ -177,10 +178,11 @@ class CompareMikeModels(object):
                     step += 1
                     features_2[row[MUID_field_i]] = row
             
+            arcpy.SetProgressor("default", "Getting MUIDs")
             # Check MUIDs
-            MUIDs = [features_1.keys() + features_2.keys()][0]
-            
-            missing_MUIDs = [MUID for MUID in set(MUIDs) if MUIDs.count(MUID) == 1]
+            MUIDs = set([features_1.keys() + features_2.keys()][0])
+
+            missing_MUIDs = set(np.concatenate((np.setdiff1d(features_1.keys(), features_2.keys(), assume_unique = False), np.setdiff1d(features_2.keys(), features_1.keys(), assume_unique = False))))
             MUIDs_to_check = [MUID for MUID in MUIDs if MUID not in missing_MUIDs]
             features_changed = {}
 
@@ -190,7 +192,7 @@ class CompareMikeModels(object):
                     if row1[field_i] != row2[field_i]:
                         fields_diff.append(field_i)
                 return fields_diff
-            
+
             arcpy.SetProgressor("step","Comparing rows for feature %s" % (feature), 0, len(MUIDs_to_check), 1)
             MUIDs_field_changed = {}
             for step, MUID in enumerate(MUIDs_to_check):
@@ -202,7 +204,7 @@ class CompareMikeModels(object):
 
             if feature == "msm_Catchment" and ".mdb" in feature_path_1:
                 msm_HModA_1 = {}
-                msm_HModA_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_HModA"))]
+                msm_HModA_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_HModA")) if not ignore_field(field.name)]
                 catchID_field_i = [i for i, field in enumerate(msm_HModA_fields) if field.lower() == "catchid"][0]
 
                 with arcpy.da.SearchCursor(os.path.join(database1, "msm_HModA"), msm_HModA_fields) as cursor:
@@ -210,14 +212,14 @@ class CompareMikeModels(object):
                         msm_HModA_1[row[catchID_field_i]] = row
 
                 msm_CatchCon_1 = {}
-                msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_CatchCon"))]
+                msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_CatchCon")) if not ignore_field(field.name)]
                 catchID_field_i = [i for i, field in enumerate(msm_CatchCon_fields) if field.lower() == "catchid"][0]
                 with arcpy.da.SearchCursor(os.path.join(database1, "msm_CatchCon"), msm_CatchCon_fields) as cursor:
                     for row in cursor:
                         msm_CatchCon_1[row[catchID_field_i]] = row
 
                 msm_HModA_2 = {}
-                msm_HModA_fields = [field.name for field in arcpy.ListFields(os.path.join(database2, "msm_HModA"))]
+                msm_HModA_fields = [field.name for field in arcpy.ListFields(os.path.join(database2, "msm_HModA")) if not ignore_field(field.name)]
                 catchID_field_i = [i for i, field in enumerate(msm_HModA_fields) if field.lower() == "catchid"][0]
 
                 with arcpy.da.SearchCursor(os.path.join(database2, "msm_HModA"), msm_HModA_fields) as cursor:
@@ -225,7 +227,7 @@ class CompareMikeModels(object):
                         msm_HModA_2[row[catchID_field_i]] = row
 
                 msm_CatchCon_2 = {}
-                msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_CatchCon"))]
+                msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_CatchCon")) if not ignore_field(field.name)]
                 catchID_field_i = [i for i, field in enumerate(msm_CatchCon_fields) if field.lower() == "catchid"][0]
                 with arcpy.da.SearchCursor(os.path.join(database2, "msm_CatchCon"), msm_CatchCon_fields) as cursor:
                     for row in cursor:
@@ -249,7 +251,7 @@ class CompareMikeModels(object):
                         cursor.insertRow(features_1[missing_MUID])
                     else:
                         cursor.insertRow(features_2[missing_MUID])
-            
+
             #arcpy.AddMessage(fields)
             geometry_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == "shape@"][0]
             MUID_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == "muid"][0]

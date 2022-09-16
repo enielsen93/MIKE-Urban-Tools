@@ -639,9 +639,10 @@ class GenerateCatchmentConnections(object):
 
         links = {row[0]:[row[1], row[2]] for row in arcpy.da.SearchCursor(msm_CatchCon, ["MUID", "CatchID", "NodeID"], 
                                     where_clause = where_clause.replace("MUID","CatchID")) if row[1] in MUIDs}
+        arcpy.AddMessage(where_clause.replace("MUID","CatchID"))
+        arcpy.AddMessage(links)
         
-        with arcpy.da.UpdateCursor(msm_CatchConLink, ["CatchConID"], where_clause = "CatchConID IN (%s)" % ", ".join([str(key) for key in links.keys()])
-                                                                                if not delete_old_connections else "") as cursor:
+        with arcpy.da.UpdateCursor(msm_CatchConLink, ["CatchConID"], where_clause = "CatchConID IN (%s)" % ", ".join([str(key) for key in links.keys()])) as cursor:
             for row in cursor:
                 if row[0] in links.keys():
                     arcpy.AddMessage(row)
@@ -656,6 +657,7 @@ class GenerateCatchmentConnections(object):
         arcpy.SetProgressor("step","Generating Catchment Connections", 0, len(links), 1)
         with arcpy.da.InsertCursor(msm_CatchConLink, ["SHAPE@", "MUID", "CatchConID","SHAPE_Length"]) as cursor:
             for link_i, link in enumerate(links.keys()):
+                arcpy.AddMessage(links[link])
                 catchment, node = links[link]
                 catchment_coordinate = catchments_coordinates[catchment]
                 if node not in nodes_coordinates:

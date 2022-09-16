@@ -1250,11 +1250,11 @@ class DuplicateCatchments(object):
                 MUID = row[0]
                 if row[0] in MUIDs_reassigned:
                     if MUIDs_reassigned_loop[row[0]] > 0:
-                        print(row)
+                        arcpy.AddMessage(row)
                         row[0] = MUIDs_reassigned[row[0]][MUIDs_reassigned_loop[row[0]]-1]
-                        print(row)
+                        arcpy.AddMessage(row)
                         cursor.updateRow(row)
-                        print(row)
+                        arcpy.AddMessage(row)
                     MUIDs_reassigned_loop[MUID] += 1
 
         for MUID in MUIDs_reassigned:
@@ -1265,15 +1265,22 @@ class DuplicateCatchments(object):
                 for new_MUID in MUIDs_reassigned[original_MUID]:
                     row = list(msm_HModA_table[original_MUID])
                     row[1] = new_MUID
-                    print(row)
+                    arcpy.AddMessage(row)
                     cursor.insertRow(row)
 
+        new_MUID_i = 0
+        catch_con_max_MUID = np.max([row[0] for row in arcpy.da.SearchCursor(msm_CatchCon, ["MUID"])])
         with arcpy.da.InsertCursor(msm_CatchCon, '*') as cursor:
             for original_MUID in MUIDs_reassigned.keys():
                 for new_MUID in MUIDs_reassigned[original_MUID]:
+                    new_MUID_i += 1
+                    temp_row = list(msm_CatchCon_table[original_MUID])
                     row = list(msm_CatchCon_table[original_MUID])
-                    row[2] = new_MUID
-                    print(row)
+                    temp_row[2] = new_MUID
+                    arcpy.AddMessage((catch_con_max_MUID, new_MUID_i))
+                    temp_row[1] = catch_con_max_MUID + new_MUID_i
+                    arcpy.AddMessage(row)
+                    row = temp_row
                     cursor.insertRow(row)
       
         

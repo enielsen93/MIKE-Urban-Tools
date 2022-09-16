@@ -1268,12 +1268,18 @@ class DuplicateCatchments(object):
                     arcpy.AddMessage(row)
                     cursor.insertRow(row)
 
+        new_MUID_i = 0
+        catch_con_max_MUID = np.max([row[0] for row in arcpy.da.SearchCursor(msm_CatchCon, ["MUID"])])
         with arcpy.da.InsertCursor(msm_CatchCon, '*') as cursor:
             for original_MUID in MUIDs_reassigned.keys():
                 for new_MUID in MUIDs_reassigned[original_MUID]:
-                    row = list(msm_CatchCon_table[original_MUID])
-                    row[2] = new_MUID
+                    new_MUID_i += 1
+                    temp_row = list(msm_CatchCon_table[original_MUID])
+                    temp_row[2] = new_MUID
+                    arcpy.AddMessage((catch_con_max_MUID, new_MUID_i))
+                    temp_row[1] = catch_con_max_MUID + new_MUID_i
                     arcpy.AddMessage(row)
+                    row = temp_row
                     cursor.insertRow(row)
       
         
