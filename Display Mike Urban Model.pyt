@@ -149,6 +149,23 @@ class DisplayMikeUrban(object):
         empty_group_layer = apmapping.ListLayers(mxd, "Empty Group", df)[0]
         empty_group_layer.name = os.path.splitext(os.path.basename(MU_database))[0]
         
+        MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
+        if not os.path.exists(MIKE_folder):
+            os.mkdir(MIKE_folder)
+        MIKE_gdb = os.path.join(MIKE_folder, empty_group_layer.name)
+        no_dir = True
+        dir_ext = 0
+        while no_dir:
+            try:
+                if arcpy.Exists(MIKE_gdb):
+                    os.rmdir(MIKE_gdb)
+                os.mkdir(MIKE_gdb)
+                no_dir = False                
+            except Exception as e:
+                dir_ext += 1
+                MIKE_gdb = os.path.join(MIKE_folder, "%s_%d" % (empty_group_layer.name, dir_ext))
+        arcpy.env.scratchWorkspace = MIKE_gdb        
+        
         printStepAndTime("Adding nodes to map")
         arcpy.SetProgressor("default","Adding nodes to map")
         arcpy.env.addOutputsToMap = False
@@ -255,6 +272,8 @@ class DisplayMikeUrban(object):
         # Create Network Load
         arcpy.SetProgressor("default","Adding network loads to map")
         networkShape = getAvailableFilename(arcpy.env.scratchGDB + r"\NetworkLoads", parent = MU_database)
+        arcpy.AddMessage("Exists?")
+        arcpy.AddMessage(arcpy.Exists(networkShape))
 
         class NetworkLoad():
             Geometry = None
