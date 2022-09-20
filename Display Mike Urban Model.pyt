@@ -272,8 +272,6 @@ class DisplayMikeUrban(object):
         # Create Network Load
         arcpy.SetProgressor("default","Adding network loads to map")
         networkShape = getAvailableFilename(arcpy.env.scratchGDB + r"\NetworkLoads", parent = MU_database)
-        arcpy.AddMessage("Exists?")
-        arcpy.AddMessage(arcpy.Exists(networkShape))
 
         class NetworkLoad():
             Geometry = None

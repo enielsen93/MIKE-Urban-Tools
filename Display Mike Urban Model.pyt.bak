@@ -149,7 +149,7 @@ class DisplayMikeUrban(object):
         empty_group_layer = apmapping.ListLayers(mxd, "Empty Group", df)[0]
         empty_group_layer.name = os.path.splitext(os.path.basename(MU_database))[0]
         
-        MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB))
+        MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
         if not os.path.exists(MIKE_folder):
             os.mkdir(MIKE_folder)
         MIKE_gdb = os.path.join(MIKE_folder, empty_group_layer.name)
