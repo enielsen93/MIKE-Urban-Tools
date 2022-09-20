@@ -135,6 +135,23 @@ class CompareMikeModels(object):
         empty_group = arcpy.mapping.AddLayer(df, empty_group_mapped, "TOP")
         empty_group_layer = arcpy.mapping.ListLayers(mxd, "Empty Group", df)[0]
         empty_group_layer.name = "%s vs. %s" % (os.path.basename(database1), os.path.basename(database2))
+        
+        MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
+        if not os.path.exists(MIKE_folder):
+            os.mkdir(MIKE_folder)
+        MIKE_gdb = os.path.join(MIKE_folder, empty_group_layer.name)
+        no_dir = True
+        dir_ext = 0
+        while no_dir:
+            try:
+                if arcpy.Exists(MIKE_gdb):
+                    os.rmdir(MIKE_gdb)
+                os.mkdir(MIKE_gdb)
+                no_dir = False                
+            except Exception as e:
+                dir_ext += 1
+                MIKE_gdb = os.path.join(MIKE_folder, "%s_%d" % (empty_group_layer.name, dir_ext))
+        arcpy.env.scratchWorkspace = MIKE_gdb        
 
         for feature in check_features:
             arcpy.AddMessage("Checking feature %s" % (feature))
@@ -155,7 +172,6 @@ class CompareMikeModels(object):
             features_2 = {}
             fields = [field.name if field.name != "geometry" else "SHAPE@" for field in arcpy.ListFields(feature_path_1)
                       if not ignore_field(field.name)]
-            arcpy.AddMessage(fields)
 
             MUID_field_i = [i for i, field in enumerate(fields) if field.lower() == "muid"][0]
 
@@ -212,7 +228,7 @@ class CompareMikeModels(object):
                         msm_HModA_1[row[catchID_field_i]] = row
 
                 msm_CatchCon_1 = {}
-                msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_CatchCon")) if not ignore_field(field.name)]
+                msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_CatchCon")) if not ignore_field(field.name) and not field.name == "MUID"]
                 catchID_field_i = [i for i, field in enumerate(msm_CatchCon_fields) if field.lower() == "catchid"][0]
                 with arcpy.da.SearchCursor(os.path.join(database1, "msm_CatchCon"), msm_CatchCon_fields) as cursor:
                     for row in cursor:
@@ -227,7 +243,7 @@ class CompareMikeModels(object):
                         msm_HModA_2[row[catchID_field_i]] = row
 
                 msm_CatchCon_2 = {}
-                msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_CatchCon")) if not ignore_field(field.name)]
+                msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database2, "msm_CatchCon")) if not ignore_field(field.name) and not field.name == "MUID"]
                 catchID_field_i = [i for i, field in enumerate(msm_CatchCon_fields) if field.lower() == "catchid"][0]
                 with arcpy.da.SearchCursor(os.path.join(database2, "msm_CatchCon"), msm_CatchCon_fields) as cursor:
                     for row in cursor:
@@ -245,12 +261,14 @@ class CompareMikeModels(object):
                         if idx:
                             MUIDs_field_changed[MUID] = [msm_CatchCon_fields[i] for i in idx]
 
-            with arcpy.da.InsertCursor(result_layer, fields) as cursor:
+            with arcpy.da.InsertCursor(result_layer, fields + ["fields"]) as cursor:
                 for missing_MUID in missing_MUIDs:
                     if missing_MUID in features_1.keys():
-                        cursor.insertRow(features_1[missing_MUID])
+                        row = list(features_1[missing_MUID]) + ["Not in DB2"]
+                        cursor.insertRow(row)
                     else:
-                        cursor.insertRow(features_2[missing_MUID])
+                        row= list(features_2[missing_MUID]) + ["Not in DB1"]
+                        cursor.insertRow(row)
 
             #arcpy.AddMessage(fields)
             geometry_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == "shape@"][0]
