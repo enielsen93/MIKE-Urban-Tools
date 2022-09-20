@@ -102,8 +102,17 @@ class DisplayMikeUrban(object):
             parameterType="optional",
             direction="Output")
         show_depth.value = False
+        
+        show_annotations = arcpy.Parameter(
+            displayName="Show Annotations",
+            name="show_annotations",
+            datatype="Boolean",
+            category="Additional Settings",
+            parameterType="optional",
+            direction="Output")
+        show_annotations.value = True
                 
-        parameters = [MU_database, join_catchments, show_loss_par, show_outlet_boundary_conditions, show_depth]
+        parameters = [MU_database, join_catchments, show_loss_par, show_outlet_boundary_conditions, show_depth, show_annotations]
         
         return parameters
 
@@ -123,6 +132,7 @@ class DisplayMikeUrban(object):
         show_loss_par = parameters[2].Value
         show_outlet_boundary_conditions = parameters[3].Value
         show_depth = parameters[4].Value
+        show_annotations = parameters[5].Value
         manholes = MU_database + "\mu_Geometry\msm_Node"
         links = MU_database + "\mu_Geometry\msm_Link"
         catchments = MU_database + "\mu_Geometry\ms_Catchment" if not ".sqlite" in MU_database else MU_database + "\msm_Catchment"
@@ -450,6 +460,20 @@ class DisplayMikeUrban(object):
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments WO Imp Area.lyr",
                     catchments, group = empty_group_layer)
         
+        old_workspace = arcpy.env.workspace
+        if show_annotations and not is_sqlite_database:
+            arcpy.env.workspace = os.path.join(MU_database, "mu_Geometry")
+            annotation_classes = [os.path.join(MU_database, fc) for fc in arcpy.ListFeatureClasses(feature_type = "Annotation")]
+            for annotation_class in annotation_classes:
+                try:
+                    #apmapping.AddLayerToGroup(df, empty_group_layer, apmapping.Layer(annotation_class), "BOTTOM")
+                    addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Annotation.lyr", 
+                            annotation_class, group = empty_group_layer)
+                except Exception as e:
+                    arcpy.AddWarning(e)
+            arcpy.env.workspace = old_workspace
+            
+            
         printStepAndTime("Refreshing Map")
         arcpy.SetProgressor("default","Refreshing map")
         arcpy.RefreshTOC()
