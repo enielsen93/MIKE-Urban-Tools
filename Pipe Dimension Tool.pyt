@@ -250,6 +250,23 @@ class PipeDimensionToolTAPro(object):
         change_material = parameters[10].Value
         debug_output = parameters[11].Value
         
+        MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
+        if not os.path.exists(MIKE_folder):
+            os.mkdir(MIKE_folder)
+        MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
+        no_dir = True
+        dir_ext = 0
+        while no_dir:
+            try:
+                if arcpy.Exists(MIKE_gdb):
+                    os.rmdir(MIKE_gdb)
+                os.mkdir(MIKE_gdb)
+                no_dir = False                
+            except Exception as e:
+                dir_ext += 1
+                MIKE_gdb = os.path.join(MIKE_folder, "%s_%d" % (os.path.splitext(os.path.basename(MU_database))[0], dir_ext))
+        arcpy.env.scratchWorkspace = MIKE_gdb   
+        
         arcpy.SetProgressorLabel("Preparing")
         selected_pipes = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["muid"])]
 
