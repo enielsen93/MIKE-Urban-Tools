@@ -181,7 +181,7 @@ class DisplayMikeUrban(object):
         arcpy.env.addOutputsToMap = False
         # addLayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"))        
         
-        def addLayer(layer_source, source, group = None, workspace_type = "ACCESS_WORKSPACE"):
+        def addLayer(layer_source, source, group = None, workspace_type = "ACCESS_WORKSPACE", new_name = None):
             if ".sqlite" in source:
                 source_layer = apmapping.Layer(source)
                 
@@ -211,6 +211,8 @@ class DisplayMikeUrban(object):
                 else:
                     apmapping.AddLayer(df, layer, "BOTTOM")
                 update_layer = apmapping.ListLayers(mxd, layer.name, df)[0]
+                if new_name:
+                    update_layer.name = new_name
                 update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, unicode(os.path.basename(source)))
                 
             if "msm_Node" in source:
@@ -332,7 +334,8 @@ class DisplayMikeUrban(object):
                                 network_load.Geometry = xyrow[1]
                     else:
                         arcpy.AddError("Unknown error")
-
+        
+        
         if networkLoadInProject:
             arcpy.CreateFeatureclass_management(os.path.dirname(networkShape), os.path.basename(networkShape), "POINT")
             arcpy.AddField_management(networkShape, "MUID", "TEXT")
@@ -392,9 +395,16 @@ class DisplayMikeUrban(object):
                 boundary_item_MUID = None
                 boundary_water_level = None
                 geometry = None
+                TSConnection = None
+                TimeseriesName = None
 
                 def __init__(self, nodeID):
                     self.nodeID = nodeID
+                
+                @property
+                def title(self):
+                    t = os.path.basename(self.TSConnection) + " " + self.TimeseriesName if self.TSConnection else None
+                    return t
 
             outlets = {}
             with arcpy.da.SearchCursor(networkLoad, ["MUID", "NodeID"], where_clause = "ApplyBoundaryNo = 1 AND TypeNo = 12") as cursor:
@@ -403,13 +413,17 @@ class DisplayMikeUrban(object):
                     outlets[row[1]].boundary_MUID = row[0]
 
             if not is_sqlite_database:
-                with arcpy.da.SearchCursor(boundaryItem, ["MUID", "BoundaryID", "ConstantValue"],
-                                            where_clause = "BoundaryType = 12 AND TypeNo = 1 AND VariationNo = 1 AND ConstantValue IS NOT NULL") as cursor:
+                with arcpy.da.SearchCursor(boundaryItem, ["MUID", "BoundaryID", "ConstantValue", "VariationNo", "TSConnection", "TimeseriesName"],
+                                            where_clause = "BoundaryType = 12 AND TypeNo = 1") as cursor:
                     for row in cursor:
                         nodeIDs = [outlet.nodeID for outlet in outlets.values() if outlet.boundary_MUID == row[1]]
                         if nodeIDs:
                             outlets[nodeIDs[0]].boundary_item_MUID = row[0]
-                            outlets[nodeIDs[0]].boundary_water_level = row[2]
+                            if row[3] == 1:
+                                outlets[nodeIDs[0]].boundary_water_level = row[2]
+                            elif row[3] == 3:
+                                outlets[nodeIDs[0]].TSConnection = row[4]
+                                outlets[nodeIDs[0]].TimeseriesName = row[5]
             else:
                 with arcpy.da.SearchCursor(networkLoad, ["NodeID", "ConstantValue"],
                                            where_clause="ApplyBoundaryNo = 1 AND TypeNo = 12 AND ConnectionTypeNo = 3") as cursor:
@@ -420,9 +434,8 @@ class DisplayMikeUrban(object):
             with arcpy.da.SearchCursor(manholes, ["SHAPE@", "MUID"], where_clause = "TypeNo = 3 AND MUID IN ('%s')" % ("', '".join(outlets.keys()))) as cursor:
                 for row in cursor:
                     outlets[row[1]].geometry = row[0]
-
-
-            if len([outlet for outlet in outlets.values() if outlet.boundary_water_level is not None])>0: # if any outlets with water level exist
+            
+            if len([outlet for outlet in outlets.values()])>0: # if any outlets with water level exist
                 boundariesShape = getAvailableFilename(arcpy.env.scratchGDB + r"\BoundaryWaterLevel", parent = MU_database)
                 try:
                     arcpy.CreateFeatureclass_management(os.path.dirname(boundariesShape), os.path.basename(boundariesShape), "POINT")
@@ -430,11 +443,11 @@ class DisplayMikeUrban(object):
                     arcpy.AddField_management(boundariesShape, "B_MUID", "TEXT")
                     arcpy.AddField_management(boundariesShape, "BI_MUID", "TEXT")
                     arcpy.AddField_management(boundariesShape, "Wat_Lev", "FLOAT")
+                    arcpy.AddField_management(boundariesShape, "Title", "TEXT")
 
-                    with arcpy.da.InsertCursor(boundariesShape, ["SHAPE@", "NodeID", "B_MUID", "BI_MUID", "Wat_Lev"]) as cursor:
+                    with arcpy.da.InsertCursor(boundariesShape, ["SHAPE@", "NodeID", "B_MUID", "BI_MUID", "Wat_Lev", "Title"]) as cursor:
                         for outlet in outlets.values():
-                            if outlet.boundary_water_level is not None:
-                                cursor.insertRow([outlet.geometry, outlet.nodeID, outlet.boundary_MUID, outlet.boundary_item_MUID, outlet.boundary_water_level])
+                            cursor.insertRow([outlet.geometry, outlet.nodeID, outlet.boundary_MUID, outlet.boundary_item_MUID, outlet.boundary_water_level, outlet.title])
                     addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Boundary Water Level.lyr",
                         boundariesShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
                 except Exception as e:
@@ -468,7 +481,7 @@ class DisplayMikeUrban(object):
                 try:
                     #apmapping.AddLayerToGroup(df, empty_group_layer, apmapping.Layer(annotation_class), "BOTTOM")
                     addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Annotation.lyr", 
-                            annotation_class, group = empty_group_layer, workspace_type = )
+                            annotation_class, group = empty_group_layer, new_name = empty_group_layer.name + " " + os.path.basename(annotation_class))
                 except Exception as e:
                     arcpy.AddWarning(e)
             arcpy.env.workspace = old_workspace
