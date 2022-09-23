@@ -224,11 +224,30 @@ class DisplayMikeUrban(object):
                 manholes, group = empty_group_layer)
                 
         
+        class Basin:
+            def __init__(self, geometryID):
+                self.geometryID = geometryID
+                self.value1 = []
+                self.value3 = []
         
+        
+        basins = {}
+        ms_TabD = []
+       
         if not is_sqlite_database:
-            printStepAndTime("Getting volume of basins")
+            printStepAndTime("Calculating volume of basins")
             # Import basins
-            if len([row[0] for row in arcpy.da.SearchCursor(manholes, ["MUID"], where_clause = "TypeNo = 2")])>0:
+            with arcpy.da.SearchCursor(manholes, ["MUID", "GeometryID"], where_clause = "TypeNo = 2") as cursor:
+                for row in cursor:
+                    basins[row[0]] = Basin(row[1])
+                    
+            if len(basins)>0:
+                
+                
+                with arcpy.da.SearchCursor(MU_database + r"ms_TabD", ["TabID", "Value1", "Value3"], 
+                                            where_clause = "TabID IN ('%s')" % ("', '".join([basin.geometryID for basin in basins]))):
+                    
+                    
                 arcpy.SetProgressor("default","Getting volume of basins")
                 exportBasins = getAvailableFilename(arcpy.env.scratchGDB + r"\basins", parent = MU_database)
                 arcpy.Select_analysis(manholes, exportBasins, where_clause = "TypeNo = 2")

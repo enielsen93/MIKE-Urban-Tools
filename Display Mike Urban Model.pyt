@@ -224,37 +224,57 @@ class DisplayMikeUrban(object):
                 manholes, group = empty_group_layer)
                 
         
-        
+        class Basin:
+            def __init__(self, geometryID):
+                self.geometryID = geometryID
+                self.value1 = []
+                self.value3 = []
+
+            @property
+            def critical_level(self): # overwritten if critical level in msm_Node
+                return np.max(self.value1)
+
+            @property
+            def terrain_elevation(self):
+                return [elevation for elevation in self.value1 if elevation<self.critical_level] + [self.critical_level]
+
+            @property
+            def max_volume(self):
+                idxSort = np.argsort(self.value1)
+                elevations = np.array(self.value1)[idxSort]
+                surface_areas = np.array(self.value3)[idxSort]
+                elevations = [elevation for elevation in elevations if elevation < self.critical_level] + [self.critical_level]
+                surface_areas = np.interp(elevations, np.sort(self.value1), surface_areas)
+                return np.trapz(surface_areas, elevations)
+
+
+        basins = {}
         if not is_sqlite_database:
-            printStepAndTime("Getting volume of basins")
+            arcpy.SetProgressor("default", "Calculating volume of basins")
+            printStepAndTime("Calculating volume of basins")
             # Import basins
-            if len([row[0] for row in arcpy.da.SearchCursor(manholes, ["MUID"], where_clause = "TypeNo = 2")])>0:
-                arcpy.SetProgressor("default","Getting volume of basins")
+            with arcpy.da.SearchCursor(manholes, ["MUID", "GeometryID"], where_clause = "TypeNo = 2") as cursor:
+                for row in cursor:
+                    basins[row[0]] = Basin(row[1])
+
+            if len(basins)>0:
+                with arcpy.da.SearchCursor(os.path.join(MU_database, r"ms_TabD"), ["TabID", "Value1", "Value3"],
+                                            where_clause = "TabID IN ('%s')" % ("', '".join(
+                                                [basin.geometryID for basin in basins.values()]))) as cursor:
+                    for row in cursor:
+                        basin = [basin for basin in basins.values() if basin.geometryID == row[0]][0]
+                        basin.value1.append(row[1])
+                        basin.value3.append(row[2])
+
                 exportBasins = getAvailableFilename(arcpy.env.scratchGDB + r"\basins", parent = MU_database)
                 arcpy.Select_analysis(manholes, exportBasins, where_clause = "TypeNo = 2")
                 with arcpy.da.UpdateCursor(exportBasins, ["MUID","Freeboard_2D", "CriticalLevel","GeometryID"]) as cursor:
                     for row in cursor:
+                        basin = basins[row[0]]
+                        if row[2]:
+                            basin.critical_level = row[2]
                         try:
-                            with arcpy.da.SearchCursor(MU_database + r"\ms_TabD", ["Value1","Value3"], where_clause = "TabID = '%s'" % (row[3])) as msTabCursor:
-                                basinH = []
-                                basinA = []
-                                for msTabRow in msTabCursor:
-                                    basinH.append(msTabRow[0])
-                                    basinA.append(msTabRow[1])
-                                    
-                            idxSort = np.argsort(basinH)
-                            basinH = np.array(basinH)
-                            basinA = np.array(basinA)
-                            basinH = basinH[idxSort]
-                            basinA = basinA[idxSort]
-                            if not row[2]:
-                                row[2] = np.max(basinH)
-                            basinHCrit = [a for a in basinH if a<row[2]] + [row[2]]
-                            basinACrit = np.interp([a for a in basinH if a<row[2]] + [row[2]],basinH,basinA)
-                            row[1] = np.trapz(basinACrit,basinHCrit)
-                            if row[0] == "Bassin_B021_Ny":
-                                arcpy.AddMessage(basinACrit)
-                                arcpy.AddMessage(basinHCrit)
+                            row[1] = basin.max_volume
                             cursor.updateRow(row)
                         except Exception as e:
                             arcpy.AddWarning("Error: Could not calculate volume of basin %s" % (row[0]))
