@@ -64,7 +64,7 @@ class Toolbox(object):
         self.alias  = "Pipe Dimension Tool"
         self.canRunInBackground = True
         # List of tool classes associated with this toolbox
-        self.tools = [PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope, CopyDiameter]
+        self.tools = [PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope, CopyDiameter, CalculateSlopeOfPipe]
 
 class PipeDimensionToolTAPro(object):
     def __init__(self):
@@ -1095,17 +1095,54 @@ class InterpolateInvertLevels(object):
             datatype="Boolean",
             parameterType="optional",
             direction="Input")
+            
+        fixed_slope = arcpy.Parameter(
+            displayName="Use Fixed Slope instead of Interpolation:",
+            name="fixed_slope",
+            datatype="double",
+            parameterType="optional",
+            direction="Input")
+        fixed_slope.category = "Use Fixed Slope"
         
+        use_slope_from_upstream = arcpy.Parameter(
+            displayName="Use Upstream Node as Fix Point for setting Fixed Slope",
+            name="use_slope_from_upstream",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+        use_slope_from_upstream.enabled = False
+        use_slope_from_upstream.category = "Use Fixed Slope"
+        use_slope_from_upstream.value = True
+            
+        use_slope_from_downstream = arcpy.Parameter(
+            displayName="Use Downstream Node as Fix Point for setting Fixed Slope",
+            name="use_slope_from_downstream",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+        use_slope_from_downstream.enabled = False
+        use_slope_from_downstream.category = "Use Fixed Slope"
 
-        parameters = [pipe_layer, usePipeElevations]
+        parameters = [pipe_layer, usePipeElevations, fixed_slope, use_slope_from_upstream, use_slope_from_downstream]
         return parameters
 
     def isLicensed(self):
         return True
 
     def updateParameters(self, parameters):
-
-
+        if parameters[2].value is not None:
+            parameters[3].enabled = True
+            parameters[4].enabled = True
+        else:
+            parameters[3].enabled = False
+            parameters[4].enabled = False
+        
+        if not parameters[0].value:
+            mxd = arcpy.mapping.MapDocument("CURRENT")
+            links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+            if links:
+                parameters[0].value = links
         return
 
     def updateMessages(self, parameters): #optional
@@ -1114,6 +1151,10 @@ class InterpolateInvertLevels(object):
     def execute(self, parameters, messages):
         pipe_layer = parameters[0].Value
         usePipeElevations = parameters[1].Value
+        fixed_slope = parameters[2].Value
+        use_slope_from_upstream = parameters[3].Value
+        use_slope_from_downstream = parameters[4].Value
+        
         MU_database = (os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)) if ".mdb" in arcpy.Describe(pipe_layer).catalogPath else
                         os.path.dirname(arcpy.Describe(pipe_layer).catalogPath))
         is_sqlite = True if ".sqlite" in MU_database else False        
@@ -1179,7 +1220,11 @@ class InterpolateInvertLevels(object):
             lengths[i - 1] = network.edges[path_nodes[i - 1], path_nodes[i]]["weight"]
 
         try:
-            slope = (invert_levels[start_node] - invert_levels[end_node]) / np.sum(lengths)
+            if fixed_slope is not None:
+                slope = fixed_slope
+                invert_levels[end_node] = invert_levels[start_node] - fixed_slope * np.sum(lengths) if use_slope_from_upstream else invert_levels[end_node]
+            else:
+                slope = (invert_levels[start_node] - invert_levels[end_node]) / np.sum(lengths)
         except Exception as e:
             arcpy.AddError(("start_node", start_node))
             arcpy.AddError(("end_node", end_node))
@@ -1199,9 +1244,11 @@ class InterpolateInvertLevels(object):
                 with arcpy.da.SearchCursor(msm_Node, ["MUID", "InvertLevel", "GroundLevel"],
                                            where_clause="MUID IN ('%s')" % ("', '".join(path_nodes))) as cursor:
                     for row in cursor:
-                        if row[0] != end_node:
+                        if (row[0] != end_node 
+                            or (fixed_slope is not None and use_slope_from_downstream and row[0] != end_node)
+                            or (fixed_slope is not None and use_slope_from_upstream and row[0] != start_node)):
                             total_length = nx.bellman_ford_path_length(network, row[0], end_node, weight="weight")
-
+                            
                             new_invert_level = round(invert_levels[end_node] + total_length * slope,2)
                             if new_invert_level != row[1]:
                                 update_cursor.execute("UPDATE msm_Node SET InvertLevel = %1.2f WHERE MUID = '%s'" % (new_invert_level, row[0]))
@@ -1215,7 +1262,7 @@ class InterpolateInvertLevels(object):
             with arcpy.da.UpdateCursor(msm_Node, ["MUID", "InvertLevel", "GroundLevel"],
                                        where_clause="MUID IN ('%s')" % ("', '".join(path_nodes))) as cursor:
                 for row in cursor:
-                    if row[0] != end_node:
+                    if row[0] != end_node or (fixed_slope is not None and use_slope_from_downstream and row[0] != end_node) or (fixed_slope is not None and use_slope_from_upstream and row[0] != start_node):
                         total_length = nx.bellman_ford_path_length(network, row[0], end_node, weight="weight")
 
                         new_invert_level = round(invert_levels[end_node] + total_length * slope,2)
@@ -1259,7 +1306,12 @@ class GetMinimumSlope(object):
         return True
 
     def updateParameters(self, parameters):
-
+        if not parameters[0].value:
+            mxd = arcpy.mapping.MapDocument("CURRENT")
+            links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+            if links:
+                parameters[0].value = links
         return
 
     def updateMessages(self, parameters):  # optional
@@ -1567,6 +1619,75 @@ class reverseChange(object):
                 arcpy.AddMessage("Changing pipe %s from %d to %d" % (row[1], pipe_dimension_dictionairy[row[0]]))
                 row[1] = pipe_dimension_dictionairy[row[0]]
                 cursor.updateRow(row)
+        edit.stopOperation()
+        edit.stopEditing(True)
+        return
+        
+
+class CalculateSlopeOfPipe(object):
+    def __init__(self):
+        self.label       = "Calculate Slope of Pipe"
+        self.description = "Calculate Slope of Pipe"
+        self.canRunInBackground = True
+
+    def getParameterInfo(self):
+        #Define parameter definitions
+
+        pipe_layer = arcpy.Parameter(
+            displayName="Pipe feature layer",
+            name="pipe_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+
+        parameters = [pipe_layer]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters): #optional
+        if not parameters[0].value:
+            mxd = arcpy.mapping.MapDocument("CURRENT")
+            links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+            if links:
+                parameters[0].value = links
+        return
+
+    def updateMessages(self, parameters): #optional
+        return
+
+    def execute(self, parameters, messages):
+        pipe_layer = parameters[0].Value
+        
+        links_OID = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["OID@"])]
+        OID_fieldname = arcpy.Describe(pipe_layer).OIDFieldName
+        
+        MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry","")
+        
+        msm_Node = os.path.join(MU_database, "msm_Node")
+        
+        nodes_invert_level = {row[0]: row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "InvertLevel"])}
+               
+        network = networker.NetworkLinks(MU_database, map_only = "link")
+        
+        edit = arcpy.da.Editor(MU_database)
+        edit.startEditing(False, True)
+        edit.startOperation()
+        
+        with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath, ["MUID", "Slope_C", "UpLevel", "DwLevel"], where_clause = "%s IN (%s)" % (OID_fieldname, ', '.join([str(OID) for OID in links_OID]))) as cursor:
+            for row in cursor:
+                try:
+                    uplevel = nodes_invert_level[network.links[row[0]].fromnode] if not row[2] else row[2]
+                    dwlevel = nodes_invert_level[network.links[row[0]].tonode] if not row[3] else row[3]
+                    length = network.links[row[0]].length
+                    slope = (uplevel-dwlevel)/length*1e2
+                    row[1] = slope
+                    cursor.updateRow(row)
+                except Exception as e:
+                    arcpy.AddError(traceback.format_exc())
+                    arcpy.AddError(row)
         edit.stopOperation()
         edit.stopEditing(True)
         return
