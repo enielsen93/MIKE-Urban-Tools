@@ -10,7 +10,7 @@
     <Extensions>
         </Extensions>
     <Toolbars>
-        <Toolbar caption="Trace Network" category="Trace Network" id="TraceNetwork_addin.toolbar" showInitially="true"><Items><ComboBox refID="TraceNetwork_addin.group_layer" /><Tool refID="TraceNetwork_addin.tool" /><Tool refID="TraceNetwork_addin.tool_1" /><Button refID="TraceNetwork_addin.find_all_connected_catchments" /><Button refID="TraceNetwork_addin.find_all_unconnected_catchments" /></Items></Toolbar>
+        <Toolbar caption="Trace Network" category="Trace Network" id="TraceNetwork_addin.toolbar" showInitially="true"><Items><ComboBox refID="TraceNetwork_addin.group_layer" /><Tool refID="TraceNetwork_addin.tool" /><Tool refID="TraceNetwork_addin.tool_1" /><Button refID="TraceNetwork_addin.find_all_connected_catchments" /><Button refID="TraceNetwork_addin.find_all_unconnected_catchments" /><Button refID="TraceNetwork_addin.trace_between_selected_nodes" /></Items></Toolbar>
         </Toolbars>
     <Menus>
         </Menus>
