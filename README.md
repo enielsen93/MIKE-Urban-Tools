@@ -5,7 +5,7 @@ Tools for DHI MIKE Urban through ArcGIS
 <ul>
   <li>Click green "Code" Button.</li>
   <li>Download ZIP and export to a local folder.</li>
-  <li>Open ArcMap or ArcGIS PRO.</li>
+  <li>Open ArcMap or ArcGIS Pro.</li>
   <li>Browse to folder in the catalog and the tools will now be available.</li>
 </ul>
 
