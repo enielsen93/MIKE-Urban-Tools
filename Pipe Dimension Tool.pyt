@@ -64,7 +64,7 @@ class Toolbox(object):
         self.alias  = "Pipe Dimension Tool"
         self.canRunInBackground = True
         # List of tool classes associated with this toolbox
-        self.tools = [PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope, CopyDiameter, CalculateSlopeOfPipe]
+        self.tools = [PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope, CopyDiameter, CalculateSlopeOfPipe, ResetUpLevelDwlevel]
 
 class PipeDimensionToolTAPro(object):
     def __init__(self):
@@ -1688,6 +1688,91 @@ class CalculateSlopeOfPipe(object):
                 except Exception as e:
                     arcpy.AddError(traceback.format_exc())
                     arcpy.AddError(row)
+        edit.stopOperation()
+        edit.stopEditing(True)
+        return
+
+
+class ResetUpLevelDwlevel(object):
+    def __init__(self):
+        self.label = "Set Uplevel and Dwlevel to NULL if equal to invert level"
+        self.description = "Set Uplevel and Dwlevel to NULL if equal to invert level"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        pipe_layer = arcpy.Parameter(
+            displayName="Pipe feature layer",
+            name="pipe_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+
+        parameters = [pipe_layer]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):  # optional
+        if not parameters[0].value:
+            mxd = arcpy.mapping.MapDocument("CURRENT")
+            links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if
+                     lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
+                     and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+            if links:
+                parameters[0].value = links
+        return
+
+    def updateMessages(self, parameters):  # optional
+        return
+
+    def execute(self, parameters, messages):
+        pipe_layer = parameters[0].Value
+
+        links_OID = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["OID@"])]
+        if len(links_OID) == 0:
+            links_OID = [row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).catalogPath, ["OID@"])]
+        OID_fieldname = arcpy.Describe(pipe_layer).OIDFieldName
+
+        MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry", "")
+
+        msm_Node = os.path.join(MU_database, "msm_Node")
+
+        nodes_invert_level = {row[0]: row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "InvertLevel"])}
+
+        network = networker.NetworkLinks(MU_database, map_only="link")
+
+        edit = arcpy.da.Editor(MU_database)
+        edit.startEditing(False, True)
+        edit.startOperation()
+
+
+        where_clause = "%s IN (%s) AND (UpLevel IS NOT NULL OR DwLevel IS NOT NULL)" % (
+                                   OID_fieldname, ', '.join([str(OID) for OID in links_OID]))
+
+        links_count = np.sum([1 for row in arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).catalogPath, ["MUID"],
+                                                               where_clause = where_clause)])
+        arcpy.SetProgressor("step", "Setting UpLevel and DwLevel", 0, links_count, 1)
+        with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath, ["MUID", "UpLevel", "DwLevel"],
+                                   where_clause=where_clause) as cursor:
+            for row_i, row in enumerate(cursor):
+                arcpy.SetProgressorPosition(row_i)
+                try:
+                    uplevel = row[1]
+                    dwlevel = row[2]
+                    if row[1] == nodes_invert_level[network.links[row[0]].fromnode]:
+                        row[1] = None
+                        arcpy.AddMessage("Set UpLevel for %s to Null" % (row[0]))
+                    if row[2] == nodes_invert_level[network.links[row[0]].tonode]:
+                        row[2] = None
+                        arcpy.AddMessage("Set DwLevel for %s to Null" % (row[0]))
+                    cursor.updateRow(row)
+                except Exception as e:
+                    arcpy.AddError(traceback.format_exc())
+                    arcpy.AddError(row)
+                    raise(e)
         edit.stopOperation()
         edit.stopEditing(True)
         return
