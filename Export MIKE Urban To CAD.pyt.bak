@@ -162,7 +162,7 @@ class ExportToCAD(object):
             datatype="File",
             parameterType="Required",
             direction="Output")
-        dgn_file.filter.list = ["dwg"]
+        dgn_file.filter.list = ["dwg", "dgn"]
 
         parameters = [MU_database, dgn_file]
 
