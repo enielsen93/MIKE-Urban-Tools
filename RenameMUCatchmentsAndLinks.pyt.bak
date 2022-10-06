@@ -133,7 +133,8 @@ class RenameMUFeatures(object):
                     arcpy.SetProgressorPosition(i)
                     oldname = row[0]
                     if row[0] not in linksNewNames:
-                        arcpy.AddError("Error: Link %s not in linksNewNames")  
+                        arcpy.AddError("Error: Link %s not in linksNewNames")
+                        
                     elif row[0] != linksNewNames[row[0]]:
                         row[0] = linksNewNames[row[0]]
                         try:
