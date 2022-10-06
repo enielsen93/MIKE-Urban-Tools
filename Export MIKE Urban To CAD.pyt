@@ -56,8 +56,16 @@ class DisplayMikeUrbanAsCAD(object):
             datatype="DEWorkspace",
             parameterType="Required",
             direction="Input")
+            
+        label_scale = arcpy.Parameter(
+            displayName="Label Scale",
+            name="label_scale",
+            datatype="GPLong",
+            parameterType="Required",
+            direction="Output")
+        label_scale.value = 500
 
-        parameters = [MU_database]
+        parameters = [MU_database, label_scale]
 
         return parameters
 
@@ -73,10 +81,11 @@ class DisplayMikeUrbanAsCAD(object):
 
     def execute(self, parameters, messages):
         MU_database = parameters[0].ValueAsText
+        label_scale = parameters[0].Value
 
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
-        df.scale = 500
+        df.label_scale = label_scale
 
         empty_group_mapped = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\EmptyGroup.lyr")
         empty_group = arcpy.mapping.AddLayer(df, empty_group_mapped, "TOP")
@@ -127,9 +136,16 @@ class DisplayMikeUrbanAsCAD(object):
                     if show_depth:
                         label_class.expression = label_class.expression.replace("return labelstr",
                                                                                 'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
+            
 
         msm_Node = os.path.join(MU_database, "msm_Node")
         msm_Link = os.path.join(MU_database, "msm_Link")
+        # net_types = {"Regnvand":2, "Spildvand":1, u"Fællesvand":3}
+        
+        # for net_type in net_types.keys():
+            # addLayer(os.path.dirname(os.path.realpath(__file__)) + ur"\Data\ExportToCAD\",
+                     # msm_Node, group=empty_group_layer)
+        
         for manhole_layer in [u"Wastewater Manhole.lyr", u"Rainwater Manhole.lyr", u"Combined Manhole.lyr"]:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + ur"\Data\ExportToCAD\%s" % manhole_layer,
                      msm_Node, group=empty_group_layer)
@@ -163,8 +179,18 @@ class ExportToCAD(object):
             parameterType="Required",
             direction="Output")
         dgn_file.filter.list = ["dwg"]
+        
+        label_scale = arcpy.Parameter(
+            displayName="Label Scale",
+            name="label_scale",
+            datatype="GPLong",
+            parameterType="Required",
+            direction="Output")
+        label_scale.value = 500
+        
+        
 
-        parameters = [MU_database, dgn_file]
+        parameters = [MU_database, dgn_file, label_scale]
 
         return parameters
 
@@ -181,6 +207,7 @@ class ExportToCAD(object):
     def execute(self, parameters, messages):
         MU_database = parameters[0].ValueAsText
         dgn_file = parameters[1].ValueAsText
+        label_scale = parameters[2].Value
 
         msm_Node = os.path.join(MU_database, "msm_Node")
 
@@ -188,7 +215,7 @@ class ExportToCAD(object):
 
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
-        df.scale = 500
+        df.scale = label_scale
 
         MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
         if not os.path.exists(MIKE_folder):
