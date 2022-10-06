@@ -315,7 +315,7 @@ class PipeDimensionToolTAPro(object):
 
         series = pd.read_csv(runoff_file, delimiter = delimiter, skiprows=3, names = ["Intensity"])
         series.index = pd.to_datetime(series.index)
-        series = series.resample("60S").backfill()
+        series = series.resample("60S").ffill()
 
         rain_event = np.concatenate((series.values[:,0], np.zeros(60)))
 
@@ -358,7 +358,6 @@ class PipeDimensionToolTAPro(object):
 
         hydrographs = {}
         total_catchments = []
-        arcpy.AddMessage(graph.graph.edges)
         for target_i, target_manhole in enumerate(target_manholes):
             arcpy.SetProgressorPosition(target_i)
             time_delays = {}
@@ -623,7 +622,7 @@ class PipeDimensionToolTAPro(object):
                             arcpy.AddMessage("Changed %s from %d to %d" % (row[2], row[3]*1e3 if row[3] else 0, D[Di]))
                             row[-1] = D[Di]/1.0e3
                             if change_material:
-                                row[1] = "Concrete (Normal)" if row[1]>0.45 else "Plastic"
+                                row[1] = "Concrete (Normal)" if row[-1]>0.45 else "Plastic"
                             # if diameter_old != row[1]:
                                 # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
                         try:
@@ -1684,6 +1683,7 @@ class CalculateSlopeOfPipe(object):
                     length = network.links[row[0]].length
                     slope = (uplevel-dwlevel)/length*1e2
                     row[1] = slope
+                    arcpy.AddMessage((uplevel, dwlevel, length, slope))
                     cursor.updateRow(row)
                 except Exception as e:
                     arcpy.AddError(traceback.format_exc())
