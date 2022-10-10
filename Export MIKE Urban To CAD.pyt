@@ -66,7 +66,15 @@ class DisplayMikeUrbanAsCAD(object):
             direction="Output")
         label_scale.value = 500
 
-        parameters = [MU_database, label_scale]
+        draw_3d = arcpy.Parameter(
+            displayName="Draw in 3D",
+            name="draw_3d",
+            datatype="Boolean",
+            parameterType="Optional",
+            direction="Input")
+        draw_3d.value = True
+
+        parameters = [MU_database, label_scale, draw_3d]
 
         return parameters
 
@@ -82,7 +90,8 @@ class DisplayMikeUrbanAsCAD(object):
 
     def execute(self, parameters, messages):
         MU_database = parameters[0].ValueAsText
-        label_scale = parameters[0].Value
+        label_scale = parameters[1].Value
+        draw_3d = parameters[2].Value
 
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
@@ -166,71 +175,76 @@ class DisplayMikeUrbanAsCAD(object):
         msm_Weir = MU_database + "\mu_Geometry\msm_Weir"
         msm_Pump = MU_database + "\msm_Pump"
         # net_types = {"Regnvand":2, "Spildvand":1, u"Fællesvand":3}
-        
+
         # for net_type in net_types.keys():
             # addLayer(os.path.dirname(os.path.realpath(__file__)) + ur"\Data\ExportToCAD\",
                      # msm_Node, group=empty_group_layer)
-        arcpy.SetProgressorLabel("Copying msm_Node")
-        msm_Node_z = arcpy.CreateFeatureclass_management(arcpy.env.scratchWorkspace,
-                                                         os.path.basename(arcpy.Describe(msm_Node).catalogPath),
-                                                         "POINT", template=msm_Node, has_z="ENABLED")[0]
+        if draw_3d:
+            arcpy.SetProgressorLabel("Copying msm_Node")
+            msm_Node_z = arcpy.CreateFeatureclass_management(arcpy.env.scratchWorkspace,
+                                                             os.path.basename(arcpy.Describe(msm_Node).catalogPath),
+                                                             "POINT", template=msm_Node, has_z="ENABLED")[0]
 
-        arcpy.management.Append(msm_Node, msm_Node_z)
+            arcpy.management.Append(msm_Node, msm_Node_z)
 
-        arcpy.SetProgressor("step", "Setting Z Coordinate of msm_Node", 0, int(arcpy.GetCount_management(msm_Node).getOutput(0)), 1)
-        with arcpy.da.UpdateCursor(msm_Node_z, ["SHAPE@Z", "InvertLevel"],
-                                   where_clause="InvertLevel IS NOT NULL") as cursor:
-            for row_i, row in enumerate(cursor):
-                arcpy.SetProgressorPosition(row_i)
-                row[0] = row[1]
-                cursor.updateRow(row)
-
-        arcpy.SetProgressorLabel("Copying msm_Link")
-        msm_Link_z = arcpy.CreateFeatureclass_management(arcpy.env.scratchWorkspace,
-                                                         os.path.basename(arcpy.Describe(msm_Link).catalogPath),
-                                                         "POLYLINE", template=msm_Link, has_z="ENABLED")[0]
-
-        arcpy.management.Append(msm_Link, msm_Link_z)
-
-        arcpy.SetProgressorLabel("Reading Invert Levels")
-        nodes_invert_level = {row[0]: row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "InvertLevel"])}
-
-        arcpy.SetProgressorLabel("Networking MIKE Urban Database")
-        network = networker.NetworkLinks(MU_database)
-
-        arcpy.SetProgressor("step", "Setting Z Coordinate of msm_Link", 0, int(arcpy.GetCount_management(msm_Link).getOutput(0)), 1)
-        with arcpy.da.UpdateCursor(msm_Link_z, ["SHAPE@", "MUID", "UpLevel", "DwLevel", "length"]) as cursor:
-            for row_i, row in enumerate(cursor):
-                try:
+            arcpy.SetProgressor("step", "Setting Z Coordinate of msm_Node", 0, int(arcpy.GetCount_management(msm_Node).getOutput(0)), 1)
+            with arcpy.da.UpdateCursor(msm_Node_z, ["SHAPE@Z", "InvertLevel"],
+                                       where_clause="InvertLevel IS NOT NULL") as cursor:
+                for row_i, row in enumerate(cursor):
                     arcpy.SetProgressorPosition(row_i)
-                    uplevel = nodes_invert_level[network.links[row[1]].fromnode] if not row[2] else row[2]
-                    dwlevel = nodes_invert_level[network.links[row[1]].tonode] if not row[3] else row[3]
-                    length = network.links[row[1]].length
-                    slope = (uplevel - dwlevel) / length
+                    row[0] = row[1]
+                    cursor.updateRow(row)
 
-                    linelist = []
-                    for part in row[0]:
-                        parts = []
-                        for part_i, point in enumerate(part):
-                            if part_i == 0:
-                                z = uplevel
-                            elif part_i == len(part):
-                                z = dwlevel
-                            else:
-                                total_distance = 0
-                                point_geometries = [arcpy.PointGeometry(p) for p in part]
-                                for i in range(1, part_i + 1):
-                                    total_distance += point_geometries[i - 1].distanceTo(point_geometries[i])
-                                z = uplevel - total_distance * slope
+            arcpy.SetProgressorLabel("Copying msm_Link")
+            msm_Link_z = arcpy.CreateFeatureclass_management(arcpy.env.scratchWorkspace,
+                                                             os.path.basename(arcpy.Describe(msm_Link).catalogPath),
+                                                             "POLYLINE", template=msm_Link, has_z="ENABLED")[0]
 
-                            parts.append(arcpy.Point(point.X, point.Y, z))
-                        linelist.append(parts)
+            arcpy.management.Append(msm_Link, msm_Link_z)
 
-                    row[0] = arcpy.Polyline(arcpy.Array(linelist), arcpy.Describe(msm_Link_z).spatialReference, True)
-                except Exception as e:
-                    arcpy.AddError(traceback.format_exc())
-                    arcpy.AddError(row)
-                    raise(e)
+            arcpy.SetProgressorLabel("Reading Invert Levels")
+            nodes_invert_level = {row[0]: row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "InvertLevel"])}
+
+            arcpy.SetProgressorLabel("Networking MIKE Urban Database")
+            network = networker.NetworkLinks(MU_database)
+
+            arcpy.SetProgressor("step", "Setting Z Coordinate of msm_Link", 0, int(arcpy.GetCount_management(msm_Link).getOutput(0)), 1)
+            with arcpy.da.UpdateCursor(msm_Link_z, ["SHAPE@", "MUID", "UpLevel", "DwLevel", "length"]) as cursor:
+                for row_i, row in enumerate(cursor):
+                    try:
+                        arcpy.SetProgressorPosition(row_i)
+                        uplevel = nodes_invert_level[network.links[row[1]].fromnode] if not row[2] else row[2]
+                        dwlevel = nodes_invert_level[network.links[row[1]].tonode] if not row[3] else row[3]
+                        length = network.links[row[1]].length
+                        slope = (uplevel - dwlevel) / length
+
+                        linelist = []
+                        for part in row[0]:
+                            parts = []
+                            for part_i, point in enumerate(part):
+                                if part_i == 0:
+                                    z = uplevel
+                                elif part_i == len(part)-1:
+                                    z = dwlevel
+                                else:
+                                    total_distance = 0
+                                    point_geometries = [arcpy.PointGeometry(p) for p in part]
+                                    for i in range(1, part_i + 1):
+                                        total_distance += point_geometries[i - 1].distanceTo(point_geometries[i])
+                                    z = uplevel - total_distance * slope
+
+                                parts.append(arcpy.Point(point.X, point.Y, z))
+                            linelist.append(parts)
+
+                        row[0] = arcpy.Polyline(arcpy.Array(linelist), arcpy.Describe(msm_Link_z).spatialReference, True)
+                        cursor.updateRow(row)
+                    except Exception as e:
+                        arcpy.AddError(traceback.format_exc())
+                        arcpy.AddError(row)
+                        raise(e)
+        else:
+            msm_Node_z = msm_Node
+            msm_Link_z = msm_Link
 
         arcpy.SetProgressorLabel("Adding Layers")
         for manhole_layer in [u"Wastewater Manhole.lyr", u"Rainwater Manhole.lyr", u"Combined Manhole.lyr"]:
@@ -278,7 +292,7 @@ class ExportToCAD(object):
             datatype="File",
             parameterType="Required",
             direction="Output")
-        dgn_file.filter.list = ["dwg"]
+        dgn_file.filter.list = ["dwg", "dgn"]
         
         label_scale = arcpy.Parameter(
             displayName="Label Scale",
