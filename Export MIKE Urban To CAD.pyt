@@ -5,6 +5,7 @@
 import arcpy
 import os
 import traceback
+import networker
 
 
 def getAvailableFilename(filepath, parent = None):
@@ -136,23 +137,122 @@ class DisplayMikeUrbanAsCAD(object):
                     if show_depth:
                         label_class.expression = label_class.expression.replace("return labelstr",
                                                                                 'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
-            
+
+        arcpy.SetProgressorLabel("Creating Workspace")
+        MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
+        if not os.path.exists(MIKE_folder):
+            os.mkdir(MIKE_folder)
+        MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
+        arcpy.AddMessage(MIKE_gdb)
+        no_dir = True
+        dir_ext = 0
+        while no_dir:
+            try:
+                if arcpy.Exists(MIKE_gdb):
+                    os.rmdir(MIKE_gdb)
+                os.mkdir(MIKE_gdb)
+                no_dir = False
+            except Exception as e:
+                dir_ext += 1
+                MIKE_gdb = os.path.join(MIKE_folder,
+                                        "%s_%d" % (os.path.splitext(os.path.basename(MU_database))[0], dir_ext))
+
+        arcpy.CreateFileGDB_management(MIKE_gdb, "scratch.gdb")
+        arcpy.AddMessage(MIKE_gdb)
+        arcpy.env.scratchWorkspace = os.path.join(MIKE_gdb, "scratch.gdb")
 
         msm_Node = os.path.join(MU_database, "msm_Node")
         msm_Link = os.path.join(MU_database, "msm_Link")
+        msm_Weir = MU_database + "\mu_Geometry\msm_Weir"
+        msm_Pump = MU_database + "\msm_Pump"
         # net_types = {"Regnvand":2, "Spildvand":1, u"Fællesvand":3}
         
         # for net_type in net_types.keys():
             # addLayer(os.path.dirname(os.path.realpath(__file__)) + ur"\Data\ExportToCAD\",
                      # msm_Node, group=empty_group_layer)
-        
+        arcpy.SetProgressorLabel("Copying msm_Node")
+        msm_Node_z = arcpy.CreateFeatureclass_management(arcpy.env.scratchWorkspace,
+                                                         os.path.basename(arcpy.Describe(msm_Node).catalogPath),
+                                                         "POINT", template=msm_Node, has_z="ENABLED")[0]
+
+        arcpy.management.Append(msm_Node, msm_Node_z)
+
+        arcpy.SetProgressor("step", "Setting Z Coordinate of msm_Node", 0, int(arcpy.GetCount_management(msm_Node).getOutput(0)), 1)
+        with arcpy.da.UpdateCursor(msm_Node_z, ["SHAPE@Z", "InvertLevel"],
+                                   where_clause="InvertLevel IS NOT NULL") as cursor:
+            for row_i, row in enumerate(cursor):
+                arcpy.SetProgressorPosition(row_i)
+                row[0] = row[1]
+                cursor.updateRow(row)
+
+        arcpy.SetProgressorLabel("Copying msm_Link")
+        msm_Link_z = arcpy.CreateFeatureclass_management(arcpy.env.scratchWorkspace,
+                                                         os.path.basename(arcpy.Describe(msm_Link).catalogPath),
+                                                         "POLYLINE", template=msm_Link, has_z="ENABLED")[0]
+
+        arcpy.management.Append(msm_Link, msm_Link_z)
+
+        arcpy.SetProgressorLabel("Reading Invert Levels")
+        nodes_invert_level = {row[0]: row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "InvertLevel"])}
+
+        arcpy.SetProgressorLabel("Networking MIKE Urban Database")
+        network = networker.NetworkLinks(MU_database)
+
+        arcpy.SetProgressor("step", "Setting Z Coordinate of msm_Link", 0, int(arcpy.GetCount_management(msm_Link).getOutput(0)), 1)
+        with arcpy.da.UpdateCursor(msm_Link_z, ["SHAPE@", "MUID", "UpLevel", "DwLevel", "length"]) as cursor:
+            for row_i, row in enumerate(cursor):
+                try:
+                    arcpy.SetProgressorPosition(row_i)
+                    uplevel = nodes_invert_level[network.links[row[1]].fromnode] if not row[2] else row[2]
+                    dwlevel = nodes_invert_level[network.links[row[1]].tonode] if not row[3] else row[3]
+                    length = network.links[row[1]].length
+                    slope = (uplevel - dwlevel) / length
+
+                    linelist = []
+                    for part in row[0]:
+                        parts = []
+                        for part_i, point in enumerate(part):
+                            if part_i == 0:
+                                z = uplevel
+                            elif part_i == len(part):
+                                z = dwlevel
+                            else:
+                                total_distance = 0
+                                point_geometries = [arcpy.PointGeometry(p) for p in part]
+                                for i in range(1, part_i + 1):
+                                    total_distance += point_geometries[i - 1].distanceTo(point_geometries[i])
+                                z = uplevel - total_distance * slope
+
+                            parts.append(arcpy.Point(point.X, point.Y, z))
+                        linelist.append(parts)
+
+                    row[0] = arcpy.Polyline(arcpy.Array(linelist), arcpy.Describe(msm_Link_z).spatialReference, True)
+                except Exception as e:
+                    arcpy.AddError(traceback.format_exc())
+                    arcpy.AddError(row)
+                    raise(e)
+
+        arcpy.SetProgressorLabel("Adding Layers")
         for manhole_layer in [u"Wastewater Manhole.lyr", u"Rainwater Manhole.lyr", u"Combined Manhole.lyr"]:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + ur"\Data\ExportToCAD\%s" % manhole_layer,
-                     msm_Node, group=empty_group_layer)
+                     msm_Node_z, group=empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
 
         for pipe_layer in [u"Wastewater Pipe.lyr", "Rainwater Pipe.lyr", "Combined Pipe.lyr"]:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\ExportToCAD\%s" % pipe_layer,
-                     msm_Link, group=empty_group_layer)
+                     msm_Link_z, group=empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
+
+        # for pipe_layer in [u"Wastewater Pipe.lyr", "Rainwater Pipe.lyr", "Combined Pipe.lyr"]:
+        #     addLayer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\ExportToCAD\%s" % pipe_layer,
+        #              msm_Link, group=empty_group_layer)
+
+        addLayer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\ExportToCAD\Pump.lyr",
+                 msm_Pump, group=empty_group_layer)
+        addLayer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\ExportToCAD\CSO.lyr",
+                 msm_Weir, group=empty_group_layer)
+
+        # for link in arcpy.da.SearchCursor(msm_Link, ["MUID", "UpLevel", "DwLevel", "SHAPE@"], where_clause = "UpLevel IS NOT NULL OR DwLevel IS NOT NULL"):
+        #     for row in cursor:
+        #         if row[1] is not None:
 
 
 class ExportToCAD(object):
@@ -251,7 +351,7 @@ class ExportToCAD(object):
 
         arcpy.TiledLabelsToAnnotation_cartography(
             os.path.join(MIKE_gdb, "CAD.mxd"), "Layers", inPolygonIndexLayer, arcpy.env.scratchWorkspace,
-            "anno", "_", 500, generate_unplaced_annotation="NOT_GENERATE_UNPLACED_ANNOTATION")
+            "anno", "_", label_scale, generate_unplaced_annotation="NOT_GENERATE_UNPLACED_ANNOTATION")
 
         arcpy.env.workspace = arcpy.env.scratchWorkspace
         anno_classes = [os.path.join(arcpy.env.scratchWorkspace, fc) for fc in arcpy.ListFeatureClasses(feature_type = "Annotation")]
