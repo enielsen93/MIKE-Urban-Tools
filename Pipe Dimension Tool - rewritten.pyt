@@ -320,15 +320,12 @@ class PipeDimensionToolTAPro(object):
         total_catchments = []
         for target_i, target_manhole in enumerate(target_manholes):
             arcpy.SetProgressorPosition(target_i)
-            arcpy.AddMessage(graph.find_upstream_nodes([target_manhole))
             timearea_curves[target_manhole] = rainseries.timeareaCurve(target_manhole, graph)
-
 
             if debug_output:
                 gr = arcpy.Graph()
                 graph_template = os.path.dirname(os.path.realpath(__file__)) + "\Data\PipeDimensionTool\graph_template.lyr"
-                
-                
+
             peak_discharge[target_manhole] = np.max(timearea_curves[target_manhole])
             peak_discharge_time[target_manhole] = np.argmax(timearea_curves[target_manhole])
 
@@ -393,6 +390,7 @@ class PipeDimensionToolTAPro(object):
                     # row[2] = peak_discharge[msm_Link_Network.links[row[0]].fromnode]
                     # row[3] = peak_discharge_time[msm_Link_Network.links[row[0]].fromnode]
                     # cursor.updateRow(row)
+        arcpy.AddMessage(debug_output)
         if debug_output:
             try:
                 result_layer = getAvailableFilename(arcpy.env.scratchGDB + "\Pipe_Dimensions", parent = MU_database)
@@ -444,9 +442,13 @@ class PipeDimensionToolTAPro(object):
                                 if change_material:
                                     material ="Concrete (Normal)" if diameter>0.45 else "Plastic"
                                 arcpy.AddMessage("Changed %s from %d to %d" % (row[3], row[1]*1e3, D[Di]))
+
+                            upstream_nodes = graph.find_upstream_nodes(graph.network.links[row[3]].fromnode)
+                            catchments = [graph.find_connected_catchments(node) for node in upstream_nodes][0]
+
                             ins_row = (row[4], row[3], diameter, material, row[0], row[5], row[6],
-                                       total_imp_opl[graph.network.links[row[3]].fromnode],
-                                       total_red_opl[graph.network.links[row[3]].fromnode],
+                                       np.sum([catchment.impervious_area for catchment in catchments]),
+                                       np.sum([catchment.reduced_area for catchment in catchments]),
                                        peak_discharge[graph.network.links[row[3]].fromnode],
                                        peak_discharge_time[graph.network.links[row[3]].fromnode])
                             ins_cursor.insertRow(ins_row)
@@ -461,9 +463,6 @@ class PipeDimensionToolTAPro(object):
                 arcpy.AddError(traceback.format_exc())
                 raise(e)
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links Dimensioned.lyr", result_layer, workspace_type = "FILEGDB_WORKSPACE")
-            
-            
-
         elif is_sqlite:
             with sqlite3.connect(
                     MU_database) as connection:
@@ -514,7 +513,7 @@ class PipeDimensionToolTAPro(object):
                 edit.startOperation()
                 
                 fields = ["Slope_C","MaterialID","MUID", "Diameter"]
-                if result_field not in fields:
+                if result_field and result_field not in fields:
                     result_field_index = len(fields)-1
                     fields.append(result_field)
                 
