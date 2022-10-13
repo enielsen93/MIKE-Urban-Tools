@@ -48,7 +48,7 @@ class Toolbox(object):
         self.alias  = "Display Mike Urban Model"
 
         # List of tool classes associated with this toolbox
-        self.tools = [DisplayMikeUrban, DimensionAnalysis, DisplayPipeElevation] 
+        self.tools = [DisplayMikeUrban, DimensionAnalysis, DisplayPipeElevation]
 
 class DisplayMikeUrban(object):
     def __init__(self):
@@ -111,8 +111,16 @@ class DisplayMikeUrban(object):
             parameterType="optional",
             direction="Output")
         show_annotations.value = True
+        
+        sql_query = arcpy.Parameter(
+            displayName="Set as Definition Query for layers",
+            name="sql_query",
+            datatype="GPString",
+            category="Additional Settings",
+            parameterType="optional",
+            direction="Output")
                 
-        parameters = [MU_database, join_catchments, show_loss_par, show_outlet_boundary_conditions, show_depth, show_annotations]
+        parameters = [MU_database, join_catchments, show_loss_par, show_outlet_boundary_conditions, show_depth, show_annotations, sql_query]
         
         return parameters
 
@@ -133,6 +141,7 @@ class DisplayMikeUrban(object):
         show_outlet_boundary_conditions = parameters[3].Value
         show_depth = parameters[4].Value
         show_annotations = parameters[5].Value
+        sql_query = parameters[6].Value
         manholes = MU_database + "\mu_Geometry\msm_Node"
         links = MU_database + "\mu_Geometry\msm_Link"
         catchments = MU_database + "\mu_Geometry\ms_Catchment" if not ".sqlite" in MU_database else MU_database + "\msm_Catchment"
@@ -181,7 +190,7 @@ class DisplayMikeUrban(object):
         arcpy.env.addOutputsToMap = False
         # addLayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"))        
         
-        def addLayer(layer_source, source, group = None, workspace_type = "ACCESS_WORKSPACE", new_name = None):
+        def addLayer(layer_source, source, group = None, workspace_type = "ACCESS_WORKSPACE", new_name = None, definition_query = None):
             if ".sqlite" in source:
                 source_layer = apmapping.Layer(source)
                 
@@ -211,6 +220,8 @@ class DisplayMikeUrban(object):
                 else:
                     apmapping.AddLayer(df, layer, "BOTTOM")
                 update_layer = apmapping.ListLayers(mxd, layer.name, df)[0]
+                if definition_query:
+                    update_layer.definitionQuery = definition_query
                 if new_name:
                     update_layer.name = new_name
                 update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, unicode(os.path.basename(source)))
@@ -221,7 +232,7 @@ class DisplayMikeUrban(object):
                         label_class.expression = label_class.expression.replace("return labelstr", 'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
         
         layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"        ),
-                manholes, group = empty_group_layer)
+                manholes, group = empty_group_layer, definition_query = sql_query)
                 
         
         class Basin:
@@ -283,21 +294,21 @@ class DisplayMikeUrban(object):
                 printStepAndTime("Adding basins to map")
                 arcpy.SetProgressor("default","Adding basins to map")
                 addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Basins.lyr",
-                    exportBasins, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
+                    exportBasins, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE", definition_query = sql_query)
         
         printStepAndTime("Adding links, weirs and pumps to map")
         arcpy.SetProgressor("default","Adding links, weirs and pumps to map")
         
         addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links.lyr",
-                links, group = empty_group_layer)
+                links, group = empty_group_layer, definition_query = sql_query)
         
         if len([row[0] for row in arcpy.da.SearchCursor(weirs,["MUID"])])>0:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Weir.lyr",
-                    weirs, group = empty_group_layer)
+                    weirs, group = empty_group_layer, definition_query = sql_query)
         
         if len([row[0] for row in arcpy.da.SearchCursor(msm_Pump,["MUID"])])>0:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Pumps.lyr",
-                    msm_Pump, group = empty_group_layer)
+                    msm_Pump, group = empty_group_layer, definition_query = sql_query)
         
 
         printStepAndTime("Adding network loads to map")
@@ -618,9 +629,9 @@ class DisplayPipeElevation(object):
             datatype="DEWorkspace",
             parameterType="Required",
             direction="Input")
-        
+
         parameters = [MU_database]
-        
+
         return parameters
 
     def isLicensed(self): #optional
@@ -630,10 +641,10 @@ class DisplayPipeElevation(object):
         return
 
     def updateMessages(self, parameters): #optional
-       
+
         return
 
-    def execute(self, parameters, messages):        
+    def execute(self, parameters, messages):
         MU_database = parameters[0].ValueAsText
         links = MU_database + "\mu_Geometry\msm_Link"
         mxd = MapDocument("CURRENT")
@@ -645,9 +656,9 @@ class DisplayPipeElevation(object):
         #arcpy.AddMessage(groupLayer)
         for layer in groupLayer:
             arcpy.AddMessage(layer.datasetName)
-            layer.replaceDataSource(unicode(MU_database), 'ACCESS_WORKSPACE', unicode(layer.datasetName))     
-        
+            layer.replaceDataSource(unicode(MU_database), 'ACCESS_WORKSPACE', unicode(layer.datasetName))
+
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
         return
-        
+

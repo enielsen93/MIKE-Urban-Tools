@@ -4,7 +4,7 @@ import os
 import numpy as np
 
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_027\KOM_CDS_5_sc3Base.res1d"
-res1d_files = [r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_012\KOM_12_CDS_20Base.res1d",
+res1d_files = [r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_013\KOM_13_CDS_20Base.res1d",
                r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_STATUS_001\KOM_STATUS_CDS20Base.res1d"]
 
 flood_depths_status = {}
@@ -37,6 +37,9 @@ try:
     output_filepath = arcpy.CreateFeatureclass_management(output_folder, new_filename, "POINT")[0]
     arcpy.management.AddField(output_filepath, "MUID", "TEXT")
     arcpy.management.AddField(output_filepath, "FloodDiff", "FLOAT", 6, 3)
+    arcpy.management.AddField(output_filepath, "FloodVol1", "FLOAT", 6, 3)
+    arcpy.management.AddField(output_filepath, "FloodVol2", "FLOAT", 6, 3)
+
 except Exception as e:
     print(e)
     output_filepath = os.path.join(output_folder, new_filename)
@@ -44,9 +47,10 @@ except Exception as e:
         for row in cursor:
             cursor.deleteRow()
 
-with arcpy.da.InsertCursor(output_filepath, ["SHAPE@", "MUID", "FloodDiff"]) as cursor:
+with arcpy.da.InsertCursor(output_filepath, ["SHAPE@", "MUID", "FloodDiff", "FloodVol1", "FloodVol2"]) as cursor:
     for node in intersecting_nodes:
         muid = node
         flood_diff = flood_depths_status[node] - flood_depths_plan[node]
-
-        cursor.insertRow([nodes_geometry[node], muid, flood_diff])
+        flood_depth_1 = flood_depths_status[node]
+        flood_depth_2 = flood_depths_plan[node]
+        cursor.insertRow([nodes_geometry[node], muid, flood_diff, flood_depth_1, flood_depth_2])

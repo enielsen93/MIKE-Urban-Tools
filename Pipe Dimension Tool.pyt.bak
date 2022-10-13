@@ -987,8 +987,8 @@ class CopyDiameter(object):
             arcpy.AddError(e)
             return  
             
-        arcpy.AddMessage(target_where_clause)
-        arcpy.AddMessage(reference_where_clause)
+        # arcpy.AddMessage(target_where_clause)
+        # arcpy.AddMessage(reference_where_clause)
                 
         class Reference():
             pass
@@ -1012,16 +1012,19 @@ class CopyDiameter(object):
                     setattr(reference, field.lower(), row[field_i])
                 
                 references.append(reference)
-        arcpy.AddMessage([reference.muid for reference in references])
-        arcpy.AddMessage([reference.diameter for reference in references])
+        # arcpy.AddMessage([reference.muid for reference in references])
+        # arcpy.AddMessage([reference.diameter for reference in references])
         
         fields = changeShapeFieldname([field.name for field in arcpy.ListFields(target_feature_layer)])
         if "ESRI_OID" in fields:
             fields.remove("ESRI_OID")
         
         match_by_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == match_by.lower()][0]
+        # arcpy.AddMessage(fields)
+        # arcpy.AddMessage(match_by_field_i)
         
-        target_where_clause = target_where_clause if target_where_clause else reference_where_clause
+        # target_where_clause = target_where_clause if target_where_clause else reference_where_clause
+        arcpy.AddMessage(target_where_clause)
         
         if is_sqlite:
             with sqlite3.connect(
@@ -1053,7 +1056,11 @@ class CopyDiameter(object):
             edit.startOperation()
             with arcpy.da.UpdateCursor(arcpy.Describe(target_feature_layer).catalogPath, fields, where_clause = target_where_clause) as cursor:
                 for row in cursor:
+                    
                     match = [reference for reference in references if getattr(reference, match_by.lower()) == row[match_by_field_i]]
+                    arcpy.AddMessage(match)
+                    arcpy.AddMessage(row[match_by_field_i])
+                    
                     if match:
                         reference = match[0]
                         for field_i, field in enumerate(fields):
@@ -1627,7 +1634,7 @@ class CalculateSlopeOfPipe(object):
     def __init__(self):
         self.label       = "Calculate Slope of Pipe"
         self.description = "Calculate Slope of Pipe"
-        self.canRunInBackground = True
+        self.canRunInBackground = False
 
     def getParameterInfo(self):
         #Define parameter definitions
@@ -1674,15 +1681,18 @@ class CalculateSlopeOfPipe(object):
         edit = arcpy.da.Editor(MU_database)
         edit.startEditing(False, True)
         edit.startOperation()
-        
+
+        arcpy.SetProgressor("step", "Calculating slope of pipes", 0, len(links_OID), 1)
         with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath, ["MUID", "Slope_C", "UpLevel", "DwLevel"], where_clause = "%s IN (%s)" % (OID_fieldname, ', '.join([str(OID) for OID in links_OID]))) as cursor:
-            for row in cursor:
+            for row_i, row in enumerate(cursor):
                 try:
+                    arcpy.SetProgressorPosition(row_i)
                     uplevel = nodes_invert_level[network.links[row[0]].fromnode] if not row[2] else row[2]
                     dwlevel = nodes_invert_level[network.links[row[0]].tonode] if not row[3] else row[3]
                     length = network.links[row[0]].length
                     slope = (uplevel-dwlevel)/length*1e2
                     row[1] = slope
+                    #arcpy.AddMessage((uplevel, dwlevel, length, slope))
                     cursor.updateRow(row)
                 except Exception as e:
                     arcpy.AddError(traceback.format_exc())

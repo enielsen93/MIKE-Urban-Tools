@@ -20,6 +20,7 @@ import datetime
 import pythonaddins
 import mikegraph
 import sqlite3
+import timearea
 from copy import deepcopy
 
 if "mapping" in dir(arcpy):
@@ -305,125 +306,44 @@ class PipeDimensionToolTAPro(object):
                 arcpy.AddMessage("Removed edge %s-%s because %s is included in list of nodes to end trace at" % (edge[0],edge[1]))
         
         arcpy.SetProgressorLabel("Reading Rain Series")
-        with open(runoff_file, 'r') as f:
-            txt = f.read()
-        delimiter = r"  " if "  " in txt else r"\t"
-
-        if "," in txt:
-            from io import StringIO
-            runoff_file = StringIO(unicode(txt.replace(r",",r".")))
-
-        series = pd.read_csv(runoff_file, delimiter = delimiter, skiprows=3, names = ["Intensity"])
-        series.index = pd.to_datetime(series.index)
-        series = series.resample("60S").ffill()
-
-        rain_event = np.concatenate((series.values[:,0], np.zeros(60)))
-
-        arcpy.SetProgressorLabel("Calculating full velocity of pipe")
-        msm_Link_TravelTime = {}
-        msm_Link_distance = {}
-        velocities = []
-        with arcpy.da.SearchCursor(msm_Link, ["MUID", "Slope" if is_sqlite else "Slope_C", "Diameter", "SHAPE@LENGTH", "Length"]) as cursor:
-            for row in cursor:
-                try:
-                    VFull = ColebrookWhite.QFull(row[2], row[1]/1e2 if row[1]/1e2>1e-3 else 1e-3, "PL")/((row[2]/2)**2*3.1415)
-                except Exception as e:
-                    VFull = 1
-
-                length = row[4] if row[4] else row[3]
-                length = 10 if not length else length
-                msm_Link_TravelTime["%s-%s" % (graph.network.links[row[0]].fromnode, graph.network.links[row[0]].tonode)] = length/VFull
-                msm_Link_distance["%s-%s" % (graph.network.links[row[0]].fromnode, graph.network.links[row[0]].tonode)] = length
-
-        arcpy.SetProgressorLabel("Tracing")
-        peak_discharge = {}
-        peak_discharge_time = {}
-        total_red_opl = {}
-        total_imp_opl = {}
+        rainseries = timearea.TimeAreaCurve(runoff_file)
 
         target_manholes = [graph.network.links[link].fromnode for link in selected_pipes]
-
-        def time_area(rain_event, conc_time, travel_time):
-            runoff = np.zeros(len(rain_event))
-            for time_i , rain_intensity in enumerate(rain_event):
-                time_i_adjusted = time_i - travel_time
-                rain = rain_event[max(int(time_i_adjusted-conc_time),0):max(0,int(time_i_adjusted))]
-                runoff[time_i] = np.sum(rain)/conc_time if rain.any() else 0
-            return runoff
-
         connected_sources = []
         arcpy.SetProgressor("step","Tracing to every pipe selected", 0, len(target_manholes), 1)
 
         # critical_node = {'MUID': None, 'Slope': None, 'Elevation Difference': None, 'Distance': None}
 
-        hydrographs = {}
+        timearea_curves = {}
+        peak_discharge = {}
+        peak_discharge_time = {}
         total_catchments = []
         for target_i, target_manhole in enumerate(target_manholes):
             arcpy.SetProgressorPosition(target_i)
-            time_delays = {}
-            runoffs = []
-            total_red_opl[target_manhole] = 0
-            total_imp_opl[target_manhole] = 0
+            timearea_curves[target_manhole] = rainseries.timeareaCurve(target_manhole, graph)
+            arcpy.AddMessage(rainseries.timeareaCurve(target_manhole, graph))
             
-            for source in graph.graph.nodes:
-                if nx.has_path(graph.graph, source, target_manhole):
-                    connected_sources.append(source)
-                    path = nx.shortest_path(graph.graph, source, target_manhole)
-                    time_delay = 0
-                    distance = 0
-                    for path_i in range(1, len(path)):
-                        try:
-                            time_delay += msm_Link_TravelTime["%s-%s" % (path[path_i-1], path[path_i])]/60.0
-                            distance += msm_Link_distance["%s-%s" % (path[path_i-1], path[path_i])]
-                        except Exception as e:
-                            arcpy.AddWarning(e)
-                            arcpy.AddWarning(path)
-                            arcpy.AddWarning((path[path_i-1], path[path_i]))
-
-                    time_delays[source] = time_delay
-
-                    # if distance > 0:
-                        # source_to_target_slope = (msm_Node_ground_level[source]- msm_Node_invert_level[target])/distance# o/oo
-                        # if critical_node["Slope"] is None or source_to_target_slope < critical_node["Slope"]:
-                            # critical_node["MUID"] = source
-                            # critical_node["Slope"] = source_to_target_slope
-                            # critical_node["Elevation Difference"] = msm_Node_ground_level[source]- msm_Node_invert_level[target]
-                            # critical_node["Distance"] = distance
-
-
-            for MUID, time_delay in time_delays.items():
-                runoff = np.zeros(len(rain_event))
-                for catchment in graph.find_connected_catchments(MUID):
-                    total_red_opl[target_manhole] += catchment.reduced_area
-                    total_imp_opl[target_manhole] += catchment.impervious_area
-                    try:
-                        runoff += time_area(rain_event, catchment.concentration_time, time_delay)/1e6*catchment.reduced_area*1e3*scaling_factor
-                    except Exception as e:
-                        arcpy.AddError((rain_event, catchment.concentration_time, time_delay))
-                        arcpy.AddError((catchment.reduced_area*1e3*scaling_factor))
-                        raise(e)
-
-                if useMaxInflow and MUID in graph.maxInflow:
-                    runoff += time_area(np.ones(len(rain_event))*graph.maxInflow[MUID], 1, time_delay)*1e3
-                runoffs.append(runoff)
-
-            hydrographs[target_manhole] = np.sum(np.array(runoffs), axis=0)
-            peak_discharge[target_manhole] = np.max(np.sum(np.array(runoffs), axis=0))
-            peak_discharge_time[target_manhole] = np.argmax(np.sum(np.array(runoffs), axis=0))
+            if debug_output:
+                gr = arcpy.Graph()
+                graph_template = os.path.dirname(os.path.realpath(__file__)) + "\Data\PipeDimensionTool\graph_template.lyr"
+                
+                
+            peak_discharge[target_manhole] = np.max(timearea_curves[target_manhole])
+            peak_discharge_time[target_manhole] = np.argmax(timearea_curves[target_manhole])
 
         # arcpy.AddMessage(("total catchments", total_catchments))
         # arcpy.AddMessage(("total_red_opl", total_red_opl))
 
         if writeDFS0:
-            dfs0_text = np.empty((2+len(hydrographs[hydrographs.keys()[0]])), dtype = object)
-            dfs0_text[0] = "\t".join(["Discharge[meter^3/sec]:Instantaneous"]*len(hydrographs.keys()))
+            dfs0_text = np.empty((2+len(timearea_curves[timearea_curves.keys()[0]])), dtype = object)
+            dfs0_text[0] = "\t".join(["Discharge[meter^3/sec]:Instantaneous"]*len(timearea_curves.keys()))
             dfs0_text[1] = "Time"
             for i in range(len(dfs0_text)-2):
                 dfs0_text[i+2] = str(series.index[0] + datetime.timedelta(minutes=i))
 
-            for target_manhole in sorted(hydrographs.keys()):
+            for target_manhole in sorted(timearea_curves.keys()):
                 dfs0_text[1] += "\t" + target_manhole
-                for discharge_i, discharge in enumerate(hydrographs[target_manhole]/1e3):
+                for discharge_i, discharge in enumerate(timearea_curves[target_manhole]/1e3):
                     dfs0_text[discharge_i+2] += "\t%1.6f" % (discharge)
             filepath = writeDFS0
             with open(filepath,'w') as f:
@@ -540,6 +460,9 @@ class PipeDimensionToolTAPro(object):
                 arcpy.AddError(traceback.format_exc())
                 raise(e)
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links Dimensioned.lyr", result_layer, workspace_type = "FILEGDB_WORKSPACE")
+            
+            
+
         elif is_sqlite:
             with sqlite3.connect(
                     MU_database) as connection:
@@ -593,7 +516,8 @@ class PipeDimensionToolTAPro(object):
                 if result_field not in fields:
                     result_field_index = len(fields)-1
                     fields.append(result_field)
-                    
+                
+                arcpy.AddMessage(fields)
                 with arcpy.da.UpdateCursor(msm_Link, fields, where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
                     for row_i, row in enumerate(cursor):
                         # diameter_old = row[4]
@@ -987,8 +911,8 @@ class CopyDiameter(object):
             arcpy.AddError(e)
             return  
             
-        # arcpy.AddMessage(target_where_clause)
-        # arcpy.AddMessage(reference_where_clause)
+        arcpy.AddMessage(target_where_clause)
+        arcpy.AddMessage(reference_where_clause)
                 
         class Reference():
             pass
@@ -1012,19 +936,16 @@ class CopyDiameter(object):
                     setattr(reference, field.lower(), row[field_i])
                 
                 references.append(reference)
-        # arcpy.AddMessage([reference.muid for reference in references])
-        # arcpy.AddMessage([reference.diameter for reference in references])
+        arcpy.AddMessage([reference.muid for reference in references])
+        arcpy.AddMessage([reference.diameter for reference in references])
         
         fields = changeShapeFieldname([field.name for field in arcpy.ListFields(target_feature_layer)])
         if "ESRI_OID" in fields:
             fields.remove("ESRI_OID")
         
         match_by_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == match_by.lower()][0]
-        # arcpy.AddMessage(fields)
-        # arcpy.AddMessage(match_by_field_i)
         
-        # target_where_clause = target_where_clause if target_where_clause else reference_where_clause
-        arcpy.AddMessage(target_where_clause)
+        target_where_clause = target_where_clause if target_where_clause else reference_where_clause
         
         if is_sqlite:
             with sqlite3.connect(
@@ -1046,7 +967,7 @@ class CopyDiameter(object):
                         sql_expression = "UPDATE %s SET %s = %s WHERE MUID = '%s'" % (layer_name, field,
                                             "'%s'" % (field_value) if type(field_value) is str or type(field_value) is unicode else "%s" % (field_value),
                                             MUID)
-                        # arcpy.AddMessage(sql_expression)
+                        arcpy.AddMessage(sql_expression)
                         arcpy.AddMessage(
                                     "Changed %s field %s from %s to %s" % (MUID, field, old_field_value, field_value))
                         update_cursor.execute(sql_expression)
@@ -1056,11 +977,7 @@ class CopyDiameter(object):
             edit.startOperation()
             with arcpy.da.UpdateCursor(arcpy.Describe(target_feature_layer).catalogPath, fields, where_clause = target_where_clause) as cursor:
                 for row in cursor:
-                    
                     match = [reference for reference in references if getattr(reference, match_by.lower()) == row[match_by_field_i]]
-                    arcpy.AddMessage(match)
-                    arcpy.AddMessage(row[match_by_field_i])
-                    
                     if match:
                         reference = match[0]
                         for field_i, field in enumerate(fields):
@@ -1634,7 +1551,7 @@ class CalculateSlopeOfPipe(object):
     def __init__(self):
         self.label       = "Calculate Slope of Pipe"
         self.description = "Calculate Slope of Pipe"
-        self.canRunInBackground = False
+        self.canRunInBackground = True
 
     def getParameterInfo(self):
         #Define parameter definitions
@@ -1681,18 +1598,16 @@ class CalculateSlopeOfPipe(object):
         edit = arcpy.da.Editor(MU_database)
         edit.startEditing(False, True)
         edit.startOperation()
-
-        arcpy.SetProgressor("step", "Calculating slope of pipes", 0, len(links_OID), 1)
+        
         with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath, ["MUID", "Slope_C", "UpLevel", "DwLevel"], where_clause = "%s IN (%s)" % (OID_fieldname, ', '.join([str(OID) for OID in links_OID]))) as cursor:
-            for row_i, row in enumerate(cursor):
+            for row in cursor:
                 try:
-                    arcpy.SetProgressorPosition(row_i)
                     uplevel = nodes_invert_level[network.links[row[0]].fromnode] if not row[2] else row[2]
                     dwlevel = nodes_invert_level[network.links[row[0]].tonode] if not row[3] else row[3]
                     length = network.links[row[0]].length
                     slope = (uplevel-dwlevel)/length*1e2
                     row[1] = slope
-                    #arcpy.AddMessage((uplevel, dwlevel, length, slope))
+                    arcpy.AddMessage((uplevel, dwlevel, length, slope))
                     cursor.updateRow(row)
                 except Exception as e:
                     arcpy.AddError(traceback.format_exc())
