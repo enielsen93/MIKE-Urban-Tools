@@ -327,14 +327,34 @@ class PipeDimensionToolTAPro(object):
             arcpy.SetProgressorPosition(target_i)
             timearea_curves[target_manhole] = rainseries.timeareaCurve(target_manhole, graph)
 
+
             if debug_output:
+                old_setting = arcpy.env.addOutputsToMap
+                arcpy.env.addOutputsToMap = False
+                table = arcpy.management.CreateTable(r"in_memory", target_manhole, os.path.dirname(
+                    os.path.realpath(__file__)) + "\Data\PipeDimensionTool\Template.dbf")[0]
+
+                with arcpy.da.InsertCursor(table, ["Discharge"]) as cursor:
+                    for discharge in timearea_curves[target_manhole]:
+                        cursor.insertRow([discharge])
+
+                table_view = arcpy.MakeTableView_management(table, r"%s_tv" % os.path.basename(table))
+
+                arcpy.env.addOutputsToMap = True
                 gr = arcpy.Graph()
+
+                gr.addSeriesAreaVertical(table_view, 'Discharge', "OID")
+                gr.graphPropsGeneral.title = target_manhole
+
                 graph_template = os.path.dirname(
-                    os.path.realpath(__file__)) + "\Data\PipeDimensionTool\graph_template.lyr"
+                    os.path.realpath(__file__)) + "\Data\PipeDimensionTool\graph_template.grf"
+                arcpy.MakeGraph_management(graph_template, gr, target_manhole)
+                arcpy.env.addOutputsToMap = old_setting
 
             peak_discharge[target_manhole] = np.max(timearea_curves[target_manhole])
             peak_discharge_time[target_manhole] = np.argmax(timearea_curves[target_manhole])
 
+        return
         # arcpy.AddMessage(("total catchments", total_catchments))
         # arcpy.AddMessage(("total_red_opl", total_red_opl))
 
