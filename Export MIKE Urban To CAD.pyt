@@ -476,8 +476,8 @@ class ExportToCAD(object):
         
 class ExportToDUModelBuilder(object):
     def __init__(self):
-        self.label = "Export MIKE Urban Model to D&U Model Builder Excel Sheet"
-        self.description = "Export MIKE Urban Model to D&U Model Builder Excel Sheet"
+        self.label = "Export MIKE Urban Model to D&U Model Builder"
+        self.description = "Export MIKE Urban Model to D&U Model Builder"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -630,7 +630,7 @@ class ExportToDUModelBuilder(object):
                 for row in cursor:
                     touches = False
                     for extent_shape in extent_shapes:
-                        if row[0].within(extent_shape):
+                        if row[0].intersect(extent_shape, 2):
                             touches = True
                     if not touches:
                         cursor.deleteRow()
@@ -638,6 +638,75 @@ class ExportToDUModelBuilder(object):
         arcpy.management.AddField(msm_Node, "Label", "TEXT")
         arcpy.management.AddField(msm_Node, "X_Coordinate", "TEXT")
         arcpy.management.AddField(msm_Node, "Y_Coordinate", "TEXT")
+
+        draw_3d = True
+        if draw_3d:
+            arcpy.SetProgressorLabel("Copying msm_Node")
+            msm_Node_z = arcpy.CreateFeatureclass_management(arcpy.env.scratchWorkspace,
+                                                             os.path.basename(arcpy.Describe(msm_Node).catalogPath) + "_z",
+                                                             "POINT", template=msm_Node, has_z="ENABLED")[0]
+
+            arcpy.management.Append(msm_Node, msm_Node_z)
+
+            arcpy.SetProgressor("step", "Setting Z Coordinate of msm_Node", 0, int(arcpy.GetCount_management(msm_Node).getOutput(0)), 1)
+            with arcpy.da.UpdateCursor(msm_Node_z, ["SHAPE@Z", "InvertLevel"],
+                                       where_clause="InvertLevel IS NOT NULL") as cursor:
+                for row_i, row in enumerate(cursor):
+                    arcpy.SetProgressorPosition(row_i)
+                    row[0] = row[1]
+                    cursor.updateRow(row)
+
+            arcpy.SetProgressorLabel("Copying msm_Link")
+            msm_Link_z = arcpy.CreateFeatureclass_management(arcpy.env.scratchWorkspace,
+                                                             os.path.basename(arcpy.Describe(msm_Link).catalogPath) + "_z",
+                                                             "POLYLINE", template=msm_Link, has_z="ENABLED")[0]
+
+            arcpy.management.Append(msm_Link, msm_Link_z)
+
+            arcpy.SetProgressorLabel("Reading Invert Levels")
+            nodes_invert_level = {row[0]: row[1] for row in arcpy.da.SearchCursor(os.path.join(MU_database, "msm_Node"), ["MUID", "InvertLevel"])}
+
+            arcpy.SetProgressorLabel("Networking MIKE Urban Database")
+            network = networker.NetworkLinks(MU_database)
+
+            arcpy.SetProgressor("step", "Setting Z Coordinate of msm_Link", 0, int(arcpy.GetCount_management(msm_Link).getOutput(0)), 1)
+            with arcpy.da.UpdateCursor(msm_Link_z, ["SHAPE@", "MUID", "UpLevel", "DwLevel", "length"]) as cursor:
+                for row_i, row in enumerate(cursor):
+                    try:
+                        arcpy.SetProgressorPosition(row_i)
+                        uplevel = nodes_invert_level[network.links[row[1]].fromnode] if not row[2] else row[2]
+                        dwlevel = nodes_invert_level[network.links[row[1]].tonode] if not row[3] else row[3]
+                        length = network.links[row[1]].length
+                        slope = (uplevel - dwlevel) / length
+
+                        linelist = []
+                        for part in row[0]:
+                            parts = []
+                            for part_i, point in enumerate(part):
+                                if part_i == 0:
+                                    z = uplevel
+                                elif part_i == len(part)-1:
+                                    z = dwlevel
+                                else:
+                                    total_distance = 0
+                                    point_geometries = [arcpy.PointGeometry(p) for p in part]
+                                    for i in range(1, part_i + 1):
+                                        total_distance += point_geometries[i - 1].distanceTo(point_geometries[i])
+                                    z = uplevel - total_distance * slope
+
+                                parts.append(arcpy.Point(point.X, point.Y, z))
+                            linelist.append(parts)
+
+                        row[0] = arcpy.Polyline(arcpy.Array(linelist), arcpy.Describe(msm_Link_z).spatialReference, True)
+                        cursor.updateRow(row)
+                    except Exception as e:
+                        arcpy.AddError(traceback.format_exc())
+                        arcpy.AddError(row)
+                        raise(e)
+
+            msm_Node = msm_Node_z
+            msm_Link = msm_Link_z
+
         
         with arcpy.da.UpdateCursor(msm_Node, ["Label", "X_Coordinate", "Y_Coordinate", "MUID", "SHAPE@X", "SHAPE@Y"]) as cursor:
             for row in cursor:
@@ -647,11 +716,12 @@ class ExportToDUModelBuilder(object):
                 cursor.updateRow(row)
         
         arcpy.management.AddField(msm_Link, "Label", "TEXT")
-        arcpy.management.AddField(msm_Link, "Description", "TEXT")
+        arcpy.management.AddField(msm_Link, "Descript", "TEXT")
         arcpy.management.AddField(msm_Link, "Start_Node", "TEXT")
         arcpy.management.AddField(msm_Link, "Stop_Node", "TEXT")
         arcpy.management.AddField(msm_Link, "Invert_Start_m", "TEXT")
         arcpy.management.AddField(msm_Link, "Invert_Stop_m", "TEXT")
+        arcpy.management.AddField(msm_Link, "WallThick", "DOUBLE", 8, 4)
 
         diameters = {0.1024: 0.11, 0.149: 0.16, 0.188: 0.2, 0.233: 0.25, 0.276: 0.3, 0.392: 0.4, 0.493: 0.5,
                      0.588: 0.6,
@@ -661,7 +731,7 @@ class ExportToDUModelBuilder(object):
         diameters_by_index = [outer_diameter for outer_diameter in diameters.values()]
 
         def pipe_layer(diameter, materialid, typeno, width, height):
-            label = ""
+            label = u""
             diameter = float(diameter) if diameter else 0
             material = materialid.lower() if materialid else ""
             if "concrete" in material or "beton" in material:
@@ -686,11 +756,27 @@ class ExportToDUModelBuilder(object):
             label += materialAbb
             return label
 
-        with arcpy.da.UpdateCursor(msm_Link, ["MUID", "Diameter", "MaterialID", "Description", "TypeNo", "Width", "Height", "Label"]) as cursor:
+        class Pipe_type:
+            def __init__(self, diameter, wallthickness):
+                self.diameter = diameter
+                self.wallthickness = wallthickness
+
+        pipe_catalogue = {}
+        with arcpy.da.SearchCursor(os.path.dirname(os.path.realpath(__file__)) + ur"\Data\ExportToCAD\Pipe Catalogue.dbf", ["Pipe_type", "Diameter", "WallThi"]) as cursor:
+            for row in cursor:
+                pipe_catalogue[row[0]] = Pipe_type(row[1], row[2])
+
+
+        with arcpy.da.UpdateCursor(msm_Link, ["MUID", "Diameter", "MaterialID", "Descript", "TypeNo", "Width", "Height", "Label", "WallThick"]) as cursor:
             for row_i, row in enumerate(cursor):
                 arcpy.SetProgressorPosition(row_i)
                 row[3] = pipe_layer(row[1], row[2], row[4], row[5], row[6])
                 row[7] = "l" + row[0]
+                if row[3] in pipe_catalogue:
+                    row[1] = pipe_catalogue[row[3]].diameter
+                    row[8] = pipe_catalogue[row[3]].wallthickness
+                else:
+                    row[1] = row[1]*1000
                 cursor.updateRow(row)
 
         arcpy.SetProgressorLabel("Reading Invert Levels")
@@ -712,7 +798,7 @@ class ExportToDUModelBuilder(object):
         msm_Node_req_fields = ["Label", "X_Coordinate", "Y_Coordinate", "Diameter", "InvertLevel", "GroundLevel", "NetTypeNo", "Length", "SHAPE", "OBJECTID", "SHAPE_Length"]
         arcpy.DeleteField_management(msm_Node, [field.name for field in arcpy.ListFields(msm_Node) if field.name not in msm_Node_req_fields])
         
-        msm_Link_req_fields = ["Label", "Start_Node", "Stop_Node", "Diameter", "Description", "NetTypeNo", "Invert_Start_m", "Length", "Invert_Stop_m", "SHAPE", "OBJECTID", "SHAPE_Length"]
+        msm_Link_req_fields = ["Label", "Start_Node", "Stop_Node", "Diameter", "Descript", "NetTypeNo", "Invert_Start_m", "Length", "Invert_Stop_m", "WallThick", "SHAPE", "OBJECTID", "SHAPE_Length"]
         arcpy.DeleteField_management(msm_Link, [field.name for field in arcpy.ListFields(msm_Link) if field.name not in msm_Link_req_fields])
 
         arcpy.SetProgressorLabel("Adding Layers")
@@ -726,8 +812,6 @@ class ExportToDUModelBuilder(object):
                      msm_Node, group=empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
 
         for pipe_layer in [u"Wastewater Pipe.lyr", "Rainwater Pipe.lyr", "Combined Pipe.lyr"]:
-            arcpy.AddMessage((os.path.dirname(os.path.realpath(__file__)) + r"\Data\ExportToCAD\%s" % pipe_layer,
-                     msm_Link, empty_group_layer))
             addLayer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\ExportToCAD\%s" % pipe_layer,
                      msm_Link, group=empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
 

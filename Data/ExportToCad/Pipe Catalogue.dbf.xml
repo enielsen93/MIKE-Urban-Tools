@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metadata xml:lang="da"><Esri><CreaDate>20221013</CreaDate><CreaTime>12040600</CreaTime><ArcGISFormat>1.0</ArcGISFormat><SyncOnce>TRUE</SyncOnce><DataProperties><lineage><Process ToolSource="c:\program files (x86)\arcgis\desktop10.7\ArcToolbox\Toolboxes\Data Management Tools.tbx\CalculateField" Date="20221013" Time="120406">CalculateField "Pipe Catalogue" Pipe_type !Pipe_type![1:] PYTHON_9.3 #</Process></lineage></DataProperties></Esri></metadata>
