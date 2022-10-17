@@ -189,6 +189,14 @@ class PipeDimensionToolTAPro(object):
             datatype="Boolean",
             parameterType="optional",
             direction="Input")
+
+        show_graphs = arcpy.Parameter(
+            displayName="Show Discharge Graphs",
+            name="show_graphs",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+        show_graphs.category = "Additional settings"
         # get_start_time = arcpy.Parameter(
             # displayName="Copy start time from dfs0 file:",
             # name="get_start_time",
@@ -199,7 +207,7 @@ class PipeDimensionToolTAPro(object):
         # get_start_time.category = "Additional settings"
         # get_start_time.enabled = False
 
-        parameters = [pipe_layer, reaches, result_field, runoff_file, scaling_factor, breakChainOnNodes, useMaxInflow, slopeOverwrite, writeDFS0, keep_largest_diameter, change_material, debug_output]
+        parameters = [pipe_layer, reaches, result_field, runoff_file, scaling_factor, breakChainOnNodes, useMaxInflow, slopeOverwrite, writeDFS0, keep_largest_diameter, change_material, debug_output, show_graphs]
         return parameters
 
     def isLicensed(self):
@@ -250,6 +258,7 @@ class PipeDimensionToolTAPro(object):
         keep_largest_diameter = parameters[9].Value
         change_material = parameters[10].Value
         debug_output = parameters[11].Value
+        show_graph = parameters[12].Value
 
         MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
         if not os.path.exists(MIKE_folder):
@@ -323,15 +332,21 @@ class PipeDimensionToolTAPro(object):
         peak_discharge = {}
         peak_discharge_time = {}
         total_catchments = []
+
+        graphs_count = 0
+
         for target_i, target_manhole in enumerate(target_manholes):
             arcpy.SetProgressorPosition(target_i)
-            timearea_curves[target_manhole] = rainseries.timeareaCurve(target_manhole, graph)
+            timearea_curves[target_manhole] = rainseries.timeareaCurve(target_manhole, graph)*scaling_factor
 
 
-            if debug_output:
+            if show_graph and graphs_count < 15:
+                if graphs_count:
+                    arcpy.AddMessage("Displaying no more than 15 graphs!")
+                graphs_count += 1
                 old_setting = arcpy.env.addOutputsToMap
                 arcpy.env.addOutputsToMap = False
-                table = arcpy.management.CreateTable(r"in_memory", target_manhole, os.path.dirname(
+                table = arcpy.management.CreateTable(r"in_memory", "Tab" + target_manhole, os.path.dirname(
                     os.path.realpath(__file__)) + "\Data\PipeDimensionTool\Template.dbf")[0]
 
                 with arcpy.da.InsertCursor(table, ["Discharge"]) as cursor:
@@ -354,7 +369,7 @@ class PipeDimensionToolTAPro(object):
             peak_discharge[target_manhole] = np.max(timearea_curves[target_manhole])
             peak_discharge_time[target_manhole] = np.argmax(timearea_curves[target_manhole])
 
-        return
+
         # arcpy.AddMessage(("total catchments", total_catchments))
         # arcpy.AddMessage(("total_red_opl", total_red_opl))
 
