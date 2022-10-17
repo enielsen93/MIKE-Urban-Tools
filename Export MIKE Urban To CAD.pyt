@@ -614,24 +614,38 @@ class ExportToDUModelBuilder(object):
         msm_Link = os.path.join(arcpy.env.scratchWorkspace, os.path.join(os.path.basename(
                                                                             arcpy.Describe(msm_Link).catalogPath)))
 
+        arcpy.SetProgressorLabel("Networking MIKE Urban Database")
+        network = networker.NetworkLinks(MU_database)
+
         if extent_feature:
             arcpy.SetProgressorLabel("Clipping Features")
             extent_shapes = [row[0] for row in arcpy.da.SearchCursor(extent_feature, ["SHAPE@"])]
-            with arcpy.da.UpdateCursor(msm_Node, "SHAPE@") as cursor:
-                for row in cursor:
-                    touches = False
-                    for extent_shape in extent_shapes:
-                        if row[0].within(extent_shape):
-                            touches = True
-                    if not touches:
-                        cursor.deleteRow()
 
-            with arcpy.da.UpdateCursor(msm_Link, "SHAPE@") as cursor:
+            links = set()
+            with arcpy.da.UpdateCursor(msm_Link, ["SHAPE@", "MUID"]) as cursor:
                 for row in cursor:
                     touches = False
                     for extent_shape in extent_shapes:
                         if row[0].intersect(extent_shape, 2):
                             touches = True
+                            links.add(row[1])
+                    if not touches:
+                        cursor.deleteRow()
+
+            nodes_in_links = set()
+            for link in [network.links[MUID] for MUID in links]:
+                nodes_in_links.add(link.fromnode)
+                nodes_in_links.add(link.tonode)
+
+            with arcpy.da.UpdateCursor(msm_Node, ["SHAPE@", "MUID"]) as cursor:
+                for row in cursor:
+                    touches = False
+                    if row[1] in nodes_in_links:
+                        touches = True
+                    else:
+                        for extent_shape in extent_shapes:
+                            if row[0].within(extent_shape):
+                                touches = True
                     if not touches:
                         cursor.deleteRow()
         
@@ -665,9 +679,6 @@ class ExportToDUModelBuilder(object):
 
             arcpy.SetProgressorLabel("Reading Invert Levels")
             nodes_invert_level = {row[0]: row[1] for row in arcpy.da.SearchCursor(os.path.join(MU_database, "msm_Node"), ["MUID", "InvertLevel"])}
-
-            arcpy.SetProgressorLabel("Networking MIKE Urban Database")
-            network = networker.NetworkLinks(MU_database)
 
             arcpy.SetProgressor("step", "Setting Z Coordinate of msm_Link", 0, int(arcpy.GetCount_management(msm_Link).getOutput(0)), 1)
             with arcpy.da.UpdateCursor(msm_Link_z, ["SHAPE@", "MUID", "UpLevel", "DwLevel", "length"]) as cursor:
@@ -781,9 +792,6 @@ class ExportToDUModelBuilder(object):
 
         arcpy.SetProgressorLabel("Reading Invert Levels")
         nodes_invert_level = {row[0]: row[1] for row in arcpy.da.SearchCursor(os.path.join(MU_database, "msm_Node"), ["MUID", "InvertLevel"])}
-
-        arcpy.SetProgressorLabel("Networking MIKE Urban Database")
-        network = networker.NetworkLinks(MU_database)
 
         with arcpy.da.UpdateCursor(msm_Link, ["MUID", "UpLevel", "DwLevel", "length", "Start_Node", "Stop_Node", "Invert_Start_m", "Invert_Stop_m"]) as cursor:
             for row_i, row in enumerate(cursor):
