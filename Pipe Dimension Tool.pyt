@@ -1162,7 +1162,7 @@ class InterpolateInvertLevels(object):
                     duplicates.append(MUID)
             raise(Exception("Cancelling toolbox"))
         
-        msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link")
+        msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link", filter_sql_query = "MUID IN ('')" % ("', '".join(links_MUIDs)))
         
         tonodes = [msm_Link_Network.links[MUID].tonode for MUID in links_MUIDs]
         fromnodes = [msm_Link_Network.links[MUID].fromnode for MUID in links_MUIDs]
@@ -1320,9 +1320,9 @@ class GetMinimumSlope(object):
             updatelayer = apmapping.ListLayers(mxd, layer.name, df)[0]
             updatelayer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, unicode(os.path.basename(source)))
 
-        msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link")
+        links_MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["MUID"])]
+        msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link", filter_sql_query = "MUID IN ('')" % ("', '".join(links_MUIDs)))
 
-        links_MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer,["MUID"])]
         tonodes = [msm_Link_Network.links[MUID].tonode for MUID in links_MUIDs]
         fromnodes = [msm_Link_Network.links[MUID].fromnode for MUID in links_MUIDs]
         start_nodes = [fromnode for fromnode in fromnodes if fromnode not in tonodes]
@@ -1653,7 +1653,8 @@ class CalculateSlopeOfPipe(object):
         
         nodes_invert_level = {row[0]: row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "InvertLevel"])}
                
-        network = networker.NetworkLinks(MU_database, map_only = "link")
+        arcpy.SetProgressorLabel("Networking Database")
+        network = networker.NetworkLinks(MU_database, map_only = "link", filter_sql_query = "%s IN (%s)" % (OID_fieldname, ', '.join([str(OID) for OID in links_OID])))
         
         edit = arcpy.da.Editor(MU_database)
         edit.startEditing(False, True)
@@ -1728,15 +1729,14 @@ class ResetUpLevelDwlevel(object):
 
         nodes_invert_level = {row[0]: row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "InvertLevel"])}
 
-        network = networker.NetworkLinks(MU_database, map_only="link")
+        where_clause = "%s IN (%s) AND (UpLevel IS NOT NULL OR DwLevel IS NOT NULL)" % (
+            OID_fieldname, ', '.join([str(OID) for OID in links_OID]))
+
+        network = networker.NetworkLinks(MU_database, map_only="link", filter_sql_query = where_clause)
 
         edit = arcpy.da.Editor(MU_database)
         edit.startEditing(False, True)
         edit.startOperation()
-
-
-        where_clause = "%s IN (%s) AND (UpLevel IS NOT NULL OR DwLevel IS NOT NULL)" % (
-                                   OID_fieldname, ', '.join([str(OID) for OID in links_OID]))
 
         links_count = np.sum([1 for row in arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).catalogPath, ["MUID"],
                                                                where_clause = where_clause)])
