@@ -172,7 +172,7 @@ class DisplayMikeUrbanAsCAD(object):
         if not os.path.exists(MIKE_folder):
             os.mkdir(MIKE_folder)
         MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
-        arcpy.AddMessage(MIKE_gdb)
+
         no_dir = True
         dir_ext = 0
         while no_dir:
@@ -434,7 +434,7 @@ class ExportToCAD(object):
         if not os.path.exists(MIKE_folder):
             os.mkdir(MIKE_folder)
         MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
-        arcpy.AddMessage(MIKE_gdb)
+
         no_dir = True
         dir_ext = 0
         while no_dir:
@@ -574,7 +574,7 @@ class ExportToDUModelBuilder(object):
         if not os.path.exists(MIKE_folder):
             os.mkdir(MIKE_folder)
         MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
-        arcpy.AddMessage(MIKE_gdb)
+
         no_dir = True
         dir_ext = 0
         while no_dir:
@@ -613,10 +613,6 @@ class ExportToDUModelBuilder(object):
                                                                             arcpy.Describe(msm_Link).catalogPath)))[0]
         msm_Link = os.path.join(arcpy.env.scratchWorkspace, os.path.join(os.path.basename(
                                                                             arcpy.Describe(msm_Link).catalogPath)))
-
-        arcpy.SetProgressorLabel("Networking MIKE Urban Database")
-        network = networker.NetworkLinks(MU_database)
-
         if extent_feature:
             arcpy.SetProgressorLabel("Clipping Features")
             extent_shapes = [row[0] for row in arcpy.da.SearchCursor(extent_feature, ["SHAPE@"])]
@@ -631,6 +627,10 @@ class ExportToDUModelBuilder(object):
                             links.add(row[1])
                     if not touches:
                         cursor.deleteRow()
+
+            arcpy.SetProgressorLabel("Networking MIKE Urban Database")
+            network = networker.NetworkLinks(MU_database, filter_sql_query = "MUID IN ('%s')" % ("', '".join(links)))
+            arcpy.SetProgressorLabel("Clipping Features")
 
             nodes_in_links = set()
             for link in [network.links[MUID] for MUID in links]:
@@ -648,7 +648,11 @@ class ExportToDUModelBuilder(object):
                                 touches = True
                     if not touches:
                         cursor.deleteRow()
-        
+        else:
+            arcpy.SetProgressorLabel("Networking MIKE Urban Database")
+            network = networker.NetworkLinks(MU_database)
+
+        arcpy.SetProgressorLabel("...")
         arcpy.management.AddField(msm_Node, "Label", "TEXT")
         arcpy.management.AddField(msm_Node, "X_Coordinate", "TEXT")
         arcpy.management.AddField(msm_Node, "Y_Coordinate", "TEXT")
