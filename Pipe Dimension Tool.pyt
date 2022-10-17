@@ -1321,7 +1321,8 @@ class GetMinimumSlope(object):
             updatelayer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, unicode(os.path.basename(source)))
 
         links_MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["MUID"])]
-        msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link", filter_sql_query = "MUID IN ('')" % ("', '".join(links_MUIDs)))
+        where_clause = "MUID IN ('%s')" % ("', '".join(links_MUIDs))
+        msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link", filter_sql_query = where_clause)
 
         tonodes = [msm_Link_Network.links[MUID].tonode for MUID in links_MUIDs]
         fromnodes = [msm_Link_Network.links[MUID].fromnode for MUID in links_MUIDs]
@@ -1333,7 +1334,7 @@ class GetMinimumSlope(object):
                                         ["MUID", "InvertLevel", "GroundLevel"],
                                         where_clause="MUID IN ('%s')" % ("', '".join(set(fromnodes + tonodes))))}
 
-        with arcpy.da.SearchCursor(msm_Link, ["MUID", "Diameter"]) as cursor:
+        with arcpy.da.SearchCursor(msm_Link, ["MUID", "Diameter"], where_clause = where_clause) as cursor:
             for row in cursor:
                 msm_Link_Network.links[row[0]].diameter = row[1]
 
