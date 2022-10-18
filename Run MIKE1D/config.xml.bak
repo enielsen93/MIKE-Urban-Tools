@@ -1,0 +1,14 @@
+<ESRI.Configuration xmlns="http://schemas.esri.com/Desktop/AddIns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><Name>Run MIKE1D</Name><AddInID>{1ca47447-c512-454d-88b5-7271561848b4}</AddInID><Description>Run MIKE1D</Description><Version>0.1</Version><Image /><Author>Emil Nielsen</Author><Company /><Date>18-10-2022</Date><Targets><Target name="Desktop" version="10.1" /></Targets><AddIn language="PYTHON" library="run_mike1d_addin.py" namespace="run_mike1d_addin"><ArcMap>
+    <Commands>
+        <ComboBox caption="MIKE1D Model" category="Run MIKE1D" class="GroupComboBoxClass1" id="run_mike1d_addin.mikemodel" itemSizeString="WWWWWW" message="MIKE Urban Model" rows="8" sizeString="WWWWWW" tip="Pick the MIKE Urban Model"><Help heading="" /></ComboBox>
+		<ComboBox caption="Simulation ID" category="Run MIKE1D" class="GroupComboBoxClass2" id="run_mike1d_addin.simulation_id" itemSizeString="WWWWWW" message="Simulation ID" rows="8" sizeString="WWWWWW" tip="Pick the Simulation ID"><Help heading="" /></ComboBox>
+        <Tool caption="Run Simulation" category="Run MIKE1D" class="RunMike1D" id="run_mike1d_addin.tool" image="Images\Run Simulation.png" message="Trace Upstream" tip=""><Help heading="" /></Tool>
+        </Commands>
+    <Extensions>
+        </Extensions>
+    <Toolbars>
+        <Toolbar caption="Run MIKE1D" category="Run MIKE1D" id="run_mike1d_addin.toolbar" showInitially="true"><Items><ComboBox refID="run_mike1d_addin.mikemodel" /><ComboBox refID="run_mike1d_addin.simulation_id" /><Button refID="run_mike1d_addin.tool" /><Tool refID="TraceNetwork_addin.tool_1" /><Button refID="TraceNetwork_addin.find_all_connected_catchments" /><Button refID="TraceNetwork_addin.find_all_unconnected_catchments" /><Button refID="TraceNetwork_addin.trace_between_selected_nodes" /></Items></Toolbar>
+        </Toolbars>
+    <Menus>
+        </Menus>
+    </ArcMap></AddIn></ESRI.Configuration>

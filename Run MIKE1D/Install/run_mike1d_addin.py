@@ -1,0 +1,114 @@
+# -*- coding: utf-8 -*-     
+import arcpy
+import pythonaddins
+import numpy as np
+import os
+import subprocess
+
+class GroupComboBoxClass1(object):
+    def __init__(self):
+        self.items = ["item1", "item2", "item1", "item2", "item1", "item2"]
+        self.editable = True
+        self.enabled = True
+        self.dropdownWidth = 'WWWWWWWWWWWWWWWWWW'
+        self.width = 'WWWWWWWWWWWWWWWWWW'
+        self.mike_urban_model = None
+    def onClick(self):
+        pass
+
+    def onSelChange(self, selection):
+        self.mike_urban_model = selection
+
+
+    def onFocus(self, focused):
+        if focused:
+            mxd = arcpy.mapping.MapDocument("CURRENT")
+            mike_urban_models = set()
+            for layer in arcpy.mapping.ListLayers(mxd):
+                if not layer.isGroupLayer:
+                    try:
+                        if ".mdb" in layer.workspacePath:
+                            mike_urban_models.add(layer.workspacePath)
+                    except Exception as e:
+                        pass
+            self.items = []
+            for mike_urban_model in mike_urban_models:
+                self.items.append(mike_urban_model)
+
+class GroupComboBoxClass2(object):
+    def __init__(self):
+        self.items = ["item1", "item2", "item1", "item2", "item1", "item2"]
+        self.editable = True
+        self.enabled = True
+        self.dropdownWidth = 'WWWWWWWWWWWWWWWWWW'
+        self.width = 'WWWWWWWWWWWWWWWWWW'
+        self.simulation_id = None
+    def onClick(self):
+
+        pass
+
+    def onSelChange(self, selection):
+        self.simulation_id = selection
+
+    def onFocus(self, focused):
+        if focused and mikemodel.mike_urban_model:
+            msm_Project = os.path.join(mikemodel.mike_urban_model, "msm_Project")
+            simulation_ids = [row[0] for row in arcpy.da.SearchCursor(msm_Project, ["MUID"])]
+            self.items = []
+            for simulation_id in simulation_ids:
+                self.items.append(simulation_id)
+
+
+class RunMike1D(object):
+    def __init__(self):
+        self.enabled = True
+        self.checked = False
+    def onClick(self):
+        msm_Project = os.path.join(mikemodel.mike_urban_model, "msm_Project")
+        computation_engine, computation_type_no = [row for row in arcpy.da.SearchCursor(msm_Project, ["ComputationEngine", "ComputationTypeNo"], where_clause = "MUID = '%s'" % (simulation_id.simulation_id))][0]
+
+        mouse_sim_launch_paths = [r"C:\Program Files (x86)\DHI\2020\bin\x64\MOUSESimLaunch.exe"]
+        for path in mouse_sim_launch_paths:
+            for year in reversed(range(2010, 2030)):
+                if os.path.exists(path.replace("2020", str(year))):
+                    mouse_sim_launch = path.replace("2020", str(year))
+                    break
+
+        mu_export_paths = [r"C:\Program Files (x86)\DHI\2020\bin\DHI.Mike1D.MUExport.exe"]
+        for path in mu_export_paths:
+            for year in reversed(range(2010, 2030)):
+                if os.path.exists(path.replace("2020", str(year))):
+                    mu_export = path.replace("2020", str(year))
+                    break
+
+        "C:\Program Files (x86)\DHI\2020\bin\x64\DHI.Mike1D.Application.exe"
+
+        mike1d_paths = [r"C:\Program Files (x86)\DHI\2020\bin\x64\DHI.Mike1D.Application.exe"]
+        for path in mike1d_paths:
+            for year in reversed(range(2010, 2030)):
+                if os.path.exists(path.replace("2020", str(year))):
+                    mike1d_app = path.replace("2020", str(year))
+                    break
+
+        if computation_engine == 1:
+            print("Feature not yet available for MOUSE")
+        else:
+            run_cmd = '"%s" -mdbm1dxrun "%s" -simulationid="%s"' % (mu_export, mikemodel.mike_urban_model, simulation_id.simulation_id)
+            # print(run_cmd)
+            # subprocess.call(run_cmd)
+            process = subprocess.Popen(
+                run_cmd,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            run_cmd = '"%s" "%s"' % (mike1d_app, os.path.join(os.path.dirname(mikemodel.mike_urban_model),
+                                                                  os.path.basename(
+                                                                      mikemodel.mike_urban_model.replace(".mdb",
+                                                                                                         "")) + "-" + simulation_id.simulation_id + ".m1dx"))
+            process.stdin.write(
+                run_cmd)
+            process.stdin.flush()
+            print(run_cmd)
+            subprocess.call(run_cmd)
+            # if computation_type_no == 1:
+            #     run_cmd = r'"%s" "%s" "HD" "Run" "Close" "NoPrompt" "-wait"' % (mouse_sim_launch, mex_file)
+        print((mikemodel.mike_urban_model, simulation_id.simulation_id))
+        pass
