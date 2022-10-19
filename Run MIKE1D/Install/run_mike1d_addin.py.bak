@@ -138,6 +138,7 @@ class RunMike1D(object):
                                                                       mikemodel.mike_urban_model.replace(".mdb",
                                                                                                          "")) + "-" + simulation_id.simulation_id + ".m1dx"))
             subprocess.Popen(run_cmd)
+            
             # if computation_type_no == 1:
             #     run_cmd = r'"%s" "%s" "HD" "Run" "Close" "NoPrompt" "-wait"' % (mouse_sim_launch, mex_file)
         print((mikemodel.mike_urban_model, simulation_id.simulation_id))
