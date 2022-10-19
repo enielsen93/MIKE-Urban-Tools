@@ -26,7 +26,7 @@ class Toolbox(object):
         self.alias  = "Catchments"
 
         # List of tool classes associated with this toolbox
-        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, AlteredCatchments, CheckCatchments, FAS2Deloplande, TransferCatchments, GetImperviousness, GetImperviousnessFlora, DuplicateCatchments]
+        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, AlteredCatchments, CheckCatchments, FAS2Deloplande, TransferCatchments, GetImperviousness, GetImperviousnessFlora, DuplicateCatchments, GenerateCatchmentConnections]
 
 class CatchmentProcessing(object):
     def __init__(self):
