@@ -10,6 +10,7 @@ from arcpy import env
 import requests
 import pythonaddins
 import json
+import sqlite3
 callname = "QJXABWSWHV"
 hallpass = "Singapore77!"
 
@@ -116,8 +117,11 @@ class GetTerrainElevation(object):
         user = parameters[3].ValueAsText
         passw = parameters[4].ValueAsText
         coordinate_system = arcpy.SpatialReference(text = parameters[5].Value)
+        is_sqlite_database = True if ".sqlite" in arcpy.Describe(point_layer).catalogPath else False
+
+        MU_database = os.path.dirname(arcpy.Describe(point_layer).catalogPath).replace("\mu_Geometry", "")
         
-        OID_field = arcpy.Describe(point_layer).OIDFieldName
+        OID_field = arcpy.Describe(point_layer).OIDFieldName if not is_sqlite_database else "muid"
         point_layer_OIDs = [row[0] for row in arcpy.da.SearchCursor(point_layer, OID_field)]
         
         edit = arcpy.da.Editor(os.path.dirname(os.path.dirname(arcpy.Describe(point_layer).catalogPath)))
@@ -126,44 +130,59 @@ class GetTerrainElevation(object):
         
         point_layer_shapes = {}
         points_elevation = {}
-        with arcpy.da.SearchCursor(point_layer, [OID_field,"SHAPE@XY"]) as cursor:
+        with arcpy.da.SearchCursor(point_layer, [OID_field, "SHAPE@XY"]) as cursor:
             for row in cursor:
                 point_layer_shapes[row[0]] = row[1]
-        
+
+        def getTerrainElevation(x,y):
+            if DHM_file:
+                arcpy.AddMessage(str(arcpy.GetCellValue_management(DHM_file, "%1.2f %1.2f" % (
+                x, y), "1").getOutput(0).replace(".", ",")))
+                row[1] = str(arcpy.GetCellValue_management(DHM_file, "%1.2f %1.2f" % (x, y), "1").getOutput(0).replace(".", ","))
+            else:
+                if not coordinate_system.PCSCode == 25832:
+                    point_reprojected = arcpy.PointGeometry(
+                        arcpy.Point(x,y),
+                        coordinate_system).projectAs(arcpy.SpatialReference("ETRS 1989 UTM Zone 32N"))
+                    x, y = [point_reprojected.firstPoint.X, point_reprojected.firstPoint.Y]
+                url = (
+                            r"https://services.datafordeler.dk/DHMTerraen/DHMKoter/1.0.0/GEOREST/HentKoter?format=json&username=%s&password=%s&geop=POINT(%1.2f%s%1.2f)" %
+                            (user, passw, x, " ", y))
+                try:
+                    return json.loads(requests.get(url, verify=False).text)['HentKoterRespons']["data"][0]["kote"]
+                except Exception as e:
+                    arcpy.AddError(row[0])
+                    arcpy.AddError(url)
+                    arcpy.AddError(requests.get(url).text)
+                    arcpy.AddError(e.message)
+
         arcpy.SetProgressor("step","Answer messagebox (might be hidden behind window)", 0, len(point_layer_shapes), 1)        
         userquery = pythonaddins.MessageBox("Assign terrain elevation to %d points?" % (len(point_layer_shapes)), "Confirm Assignment", 4)
         if userquery == "Yes":  
-            arcpy.SetProgressor("step","Getting terrain elevation of points", 0, len(point_layer_shapes), 1)        
-            with arcpy.da.UpdateCursor(arcpy.Describe(point_layer).catalogPath, [OID_field, field], where_clause = "%s IN (%s)" % (OID_field, ", ".join(map(str,point_layer_OIDs)))) as pointcursor:#'SHAPE@XY'
-                for i, row in enumerate(pointcursor):
-                    arcpy.SetProgressorPosition(i)
-                    
-                    if DHM_file:
-                        arcpy.AddMessage(str(arcpy.GetCellValue_management(DHM_file, "%1.2f %1.2f" % (point_layer_shapes[row[0]][0],point_layer_shapes[row[0]][1]), "1").getOutput(0).replace(".",",")))
-                        row[1] = str(arcpy.GetCellValue_management(DHM_file, "%1.2f %1.2f" % (point_layer_shapes[row[0]][0],point_layer_shapes[row[0]][1]), "1").getOutput(0).replace(".",","))
-                    else:
-                        if not coordinate_system.PCSCode == 25832:
-                            point_reprojected = arcpy.PointGeometry(arcpy.Point(point_layer_shapes[row[0]][0], point_layer_shapes[row[0]][1]), coordinate_system).projectAs(arcpy.SpatialReference("ETRS 1989 UTM Zone 32N"))
-                            x,y = [point_reprojected.firstPoint.X, point_reprojected.firstPoint.Y]
-                        else:
-                            x,y = [point_layer_shapes[row[0]][0], point_layer_shapes[row[0]][1]]
-                        url = (r"https://services.datafordeler.dk/DHMTerraen/DHMKoter/1.0.0/GEOREST/HentKoter?format=json&username=%s&password=%s&geop=POINT(%1.2f%s%1.2f)" %
-								(user, passw, x, " ", y))
+            arcpy.SetProgressor("step","Getting terrain elevation of points", 0, len(point_layer_shapes), 1)
+            if is_sqlite_database and 'msm_Node'.lower() in arcpy.Describe(point_layer).catalogPath.lower():
+                with sqlite3.connect(
+                        MU_database) as connection:
+                    update_cursor = connection.cursor()
+                    for muid in point_layer_shapes.keys():
+                        x, y = point_layer_shapes[muid][0], point_layer_shapes[muid][1]
+                        update_cursor.execute(
+                            "UPDATE msm_Node SET %s = %1.3f WHERE MUID = '%s'" % (field, getTerrainElevation(x,y), muid))
+
+            else:
+                with arcpy.da.UpdateCursor(arcpy.Describe(point_layer).catalogPath, [OID_field, field], where_clause = "%s IN (%s)" % (OID_field, ", ".join(map(str,point_layer_OIDs)))) as pointcursor:#'SHAPE@XY'
+                    for i, row in enumerate(pointcursor):
+                        arcpy.SetProgressorPosition(i)
+                        x, y = point_layer_shapes[row[0]][0], point_layer_shapes[row[0]][1]
+                        terrain_elevation = getTerrainElevation(x, y)
                         try:
-                            row[1] = json.loads(requests.get(url, verify = False).text)['HentKoterRespons']["data"][0]["kote"]
+                            if terrain_elevation == "NoData":
+                                arcpy.AddWarning("Warning: Found NoData on location %s" % ("%1.2f %1.2f" % (x, y)))
+                            else:
+                                pointcursor.updateRow((terrain_elevation))
                         except Exception as e:
-                            arcpy.AddError(row[0])
-                            arcpy.AddError(url)
-                            arcpy.AddError(requests.get(url).text)
-                            arcpy.AddError(e.message)                    
-                    try:
-                        if row[1] == 'NoData':
-                            arcpy.AddWarning("Warning: Found NoData on location %s" % ("%1.2f %1.2f" % (point_layer_shapes[row[0]][0],point_layer_shapes[row[0]][1])))
-                        else:
-                            pointcursor.updateRow(row)
-                    except Exception as e:
-                        arcpy.AddError("Error on row %s" % row[1])
-                        arcpy.AddError(e.message)
+                            arcpy.AddError("Error on row %s" % row[1])
+                            arcpy.AddError(e.message)
         edit.stopOperation()
         try:
             edit.stopEditing(True)
