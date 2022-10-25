@@ -791,7 +791,10 @@ class ExportToDUModelBuilder(object):
                     row[1] = pipe_catalogue[row[3]].diameter
                     row[8] = pipe_catalogue[row[3]].wallthickness
                 else:
-                    row[1] = row[1]*1000
+                    try:
+                        row[1] = row[1]*1000 if row[1] else 0
+                    except Exception as e:
+                        pass
                 cursor.updateRow(row)
 
         arcpy.SetProgressorLabel("Reading Invert Levels")
