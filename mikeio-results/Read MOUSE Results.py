@@ -15,7 +15,8 @@ msm_Node = os.path.join(MU_model, "msm_Node")
 
 nodes = {}
 class Node:
-    def __init__(self):
+    def __init__(self, muid):
+        self.muid = muid
         self.diameter = None
         self.net_type_no = 0
         self.ground_level = 0
@@ -32,7 +33,7 @@ class Node:
 
 with arcpy.da.SearchCursor(msm_Node, ["SHAPE@", "MUID", "GroundLevel", "Diameter", "NetTypeNo"]) as cursor:
     for row in cursor:
-        nodes[row[1]] = Node()
+        nodes[row[1]] = Node(row[1])
         nodes[row[1]].shape = row[0]
         nodes[row[1]].ground_level = row[2]
         nodes[row[1]].diameter = row[3]
@@ -41,7 +42,7 @@ with arcpy.da.SearchCursor(msm_Node, ["SHAPE@", "MUID", "GroundLevel", "Diameter
 
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_017_sc2\KOM_Plan_017_sc2_CDS_5Base.res1d"
 print(result_file)
-mouse_result = mousereader.MouseResult(result_file, list(nodes.keys()), "Node_WL")
+mouse_result = mousereader.MouseResult(result_file, ["ALL"], "Node_WL")
 
 arcpy.env.overwriteOutput = True
 output_folder = r"C:\Papirkurv\Resultater"# r"C:\Users\ELNN\OneDrive - Ramboll\Documents\ArcGIS\scratch.gdb"
@@ -60,7 +61,7 @@ except Exception as e:
             cursor.deleteRow()
 
 with arcpy.da.InsertCursor(output_filepath, ["SHAPE@", "MUID", "Flood_dep", "Flood_vol", "NetTypeNo"]) as cursor:
-    for node in nodes.keys():
+    for node in nodes.values():
         muid = node
         if muid in nodes or not MU_model:
             nodes[muid].max_level = np.max(mouse_result.query(row[1]))
