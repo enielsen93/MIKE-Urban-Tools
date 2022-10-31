@@ -175,11 +175,13 @@ class GetTerrainElevation(object):
                         arcpy.SetProgressorPosition(i)
                         x, y = point_layer_shapes[row[0]][0], point_layer_shapes[row[0]][1]
                         terrain_elevation = getTerrainElevation(x, y)
+                        # arcpy.AddMessage(terrain_elevation)
+                        row[1] = terrain_elevation
                         try:
                             if terrain_elevation == "NoData":
                                 arcpy.AddWarning("Warning: Found NoData on location %s" % ("%1.2f %1.2f" % (x, y)))
                             else:
-                                pointcursor.updateRow((terrain_elevation))
+                                pointcursor.updateRow(row)
                         except Exception as e:
                             arcpy.AddError("Error on row %s" % row[1])
                             arcpy.AddError(e.message)
