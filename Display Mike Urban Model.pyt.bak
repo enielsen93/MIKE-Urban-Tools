@@ -16,6 +16,7 @@ import csv
 import os
 import traceback
 import re
+import scipy.integrate
 
 def getAvailableFilename(filepath, parent = None):
     parent = "F%s" % (parent) if parent and parent[0].isdigit() else None
@@ -142,11 +143,12 @@ class DisplayMikeUrban(object):
         show_depth = parameters[4].Value
         show_annotations = parameters[5].Value
         sql_query = parameters[6].Value
-        manholes = MU_database + "\mu_Geometry\msm_Node"
+        manholes = MU_database + "\msm_Node"
         links = MU_database + "\mu_Geometry\msm_Link"
         catchments = MU_database + "\mu_Geometry\ms_Catchment" if not ".sqlite" in MU_database else MU_database + "\msm_Catchment"
         catchcons = MU_database + "\mu_Geometry\msm_CatchConLink" if not ".sqlite" in MU_database else MU_database + "\msm_CatchCon"
         weirs = MU_database + "\mu_Geometry\msm_Weir"
+        orifices = MU_database + "\msm_Orifice"
         networkLoad = MU_database + "\msm_BBoundary"
         msm_Pump = MU_database + "\msm_Pump"
         boundaryItem = MU_database + "\msm_BItem"
@@ -240,10 +242,22 @@ class DisplayMikeUrban(object):
                 self.geometryID = geometryID
                 self.value1 = []
                 self.value3 = []
+                self.edges = []
+
+            class Edge:
+                def __init__(self, name, uplevel):
+                    self.name = name
+                    self.uplevel = uplevel
 
             @property
             def critical_level(self): # overwritten if critical level in msm_Node
                 return np.max(self.value1)
+
+            @property
+            def edges_sort(self):
+                idx_sort = np.argsort([edge.uplevel for edge in self.edges])
+
+                return [self.edges[i] for i in idx_sort]
 
             @property
             def terrain_elevation(self):
@@ -258,6 +272,14 @@ class DisplayMikeUrban(object):
                 surface_areas = np.interp(elevations, np.sort(self.value1), surface_areas)
                 return np.trapz(surface_areas, elevations)
 
+            def get_volume(self, level):
+                idxSort = np.argsort(self.value1)
+                elevations = np.array(self.value1)[idxSort]
+                surface_areas = np.array(self.value3)[idxSort]
+                elevations = [elevation for elevation in elevations if elevation < self.critical_level] + [
+                    self.critical_level]
+                surface_areas = np.interp(elevations, np.sort(self.value1), surface_areas)
+                return np.interp(level, elevations, [0] + list(scipy.integrate.cumtrapz(surface_areas, elevations)))
 
         basins = {}
         if not is_sqlite_database:
@@ -269,6 +291,17 @@ class DisplayMikeUrban(object):
                     basins[row[0]] = Basin(row[1])
 
             if len(basins)>0:
+                outlet_feature_classes = {links: "UpLevel", orifices: "InvertLevel", weirs: "CrestLevel"}
+                for feature_class, uplevel_fieldname in zip(outlet_feature_classes.keys(),
+                                                            outlet_feature_classes.values()):
+                    if "fromnode" in [field.name.lower() for field in arcpy.ListFields(feature_class)]:
+                        with arcpy.da.SearchCursor(feature_class, ["FromNode", uplevel_fieldname, "MUID"],
+                                                   where_clause="fromnode IN ('%s')" % (
+                                                   "', '".join(basins.keys()))) as cursor:
+                            for row in cursor:
+                                if row[1]:
+                                    basins[row[0]].edges.append(Basin.Edge(row[2], row[1]))
+
                 with arcpy.da.SearchCursor(os.path.join(MU_database, r"ms_TabD"), ["TabID", "Value1", "Value3"],
                                             where_clause = "TabID IN ('%s')" % ("', '".join(
                                                 [basin.geometryID for basin in basins.values()]))) as cursor:
@@ -279,23 +312,35 @@ class DisplayMikeUrban(object):
 
                 exportBasins = getAvailableFilename(arcpy.env.scratchGDB + r"\basins", parent = MU_database)
                 arcpy.Select_analysis(manholes, exportBasins, where_clause = "TypeNo = 2")
-                with arcpy.da.UpdateCursor(exportBasins, ["MUID","Freeboard_2D", "CriticalLevel","GeometryID"]) as cursor:
+                with arcpy.da.UpdateCursor(exportBasins, ["MUID","Freeboard_2D", "CriticalLevel", "GeometryID", "Description", "GroundLevel", "InvertLevel"]) as cursor:
                     for row in cursor:
                         basin = basins[row[0]]
                         if row[2]:
                             basin.critical_level = row[2]
                         try:
                             row[1] = basin.max_volume
-                            cursor.updateRow(row)
+                            # cursor.updateRow(row)
                         except Exception as e:
                             arcpy.AddWarning("Error: Could not calculate volume of basin %s" % (row[0]))
                             arcpy.AddWarning(traceback.format_exc())
-                
+
+                        description = ""
+                        for edge in basin.edges_sort:
+                            description += "%s (%1.2f): %d m3\n" % (edge.name, edge.uplevel, basin.get_volume(edge.uplevel)) if edge.uplevel and edge.uplevel < row[5] and edge.uplevel > row[6] else ""
+
+                        if basin.critical_level and basin.critical_level < row[5]:
+                            description += "Maks. (%1.2f): %d m3\n" % (basin.critical_level, basin.get_volume(basin.critical_level))
+                        else:
+                            description += "Maks. (%1.2f): %d m3\n" % (row[5], basin.max_volume)
+
+                        row[4] = description
+                        cursor.updateRow(row)
+
                 printStepAndTime("Adding basins to map")
                 arcpy.SetProgressor("default","Adding basins to map")
                 addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Basins.lyr",
                     exportBasins, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE", definition_query = sql_query)
-        
+
         printStepAndTime("Adding links, weirs and pumps to map")
         arcpy.SetProgressor("default","Adding links, weirs and pumps to map")
         
@@ -308,7 +353,7 @@ class DisplayMikeUrban(object):
         
         if len([row[0] for row in arcpy.da.SearchCursor(msm_Pump,["MUID"])])>0:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Pumps.lyr",
-                    msm_Pump, group = empty_group_layer)
+                    msm_Pump, group = empty_group_layer, definition_query = sql_query)
         
 
         printStepAndTime("Adding network loads to map")
@@ -465,7 +510,7 @@ class DisplayMikeUrban(object):
             with arcpy.da.SearchCursor(manholes, ["SHAPE@", "MUID"], where_clause = "TypeNo = 3 AND MUID IN ('%s')" % ("', '".join(outlets.keys()))) as cursor:
                 for row in cursor:
                     outlets[row[1]].geometry = row[0]
-            
+
             if len([outlet for outlet in outlets.values()])>0: # if any outlets with water level exist
                 boundariesShape = getAvailableFilename(arcpy.env.scratchGDB + r"\BoundaryWaterLevel", parent = MU_database)
                 try:

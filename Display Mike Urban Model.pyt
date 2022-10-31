@@ -102,7 +102,7 @@ class DisplayMikeUrban(object):
             category="Additional Settings",
             parameterType="optional",
             direction="Output")
-        show_depth.value = False
+        show_depth.value = True
         
         show_annotations = arcpy.Parameter(
             displayName="Show Annotations",
@@ -256,7 +256,6 @@ class DisplayMikeUrban(object):
             @property
             def edges_sort(self):
                 idx_sort = np.argsort([edge.uplevel for edge in self.edges])
-
                 return [self.edges[i] for i in idx_sort]
 
             @property
