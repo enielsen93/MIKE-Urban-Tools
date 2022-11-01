@@ -346,25 +346,32 @@ class PipeDimensionToolTAPro(object):
                 graphs_count += 1
                 old_setting = arcpy.env.addOutputsToMap
                 arcpy.env.addOutputsToMap = False
-                table = arcpy.management.CreateTable(r"in_memory", "Tab" + target_manhole, os.path.dirname(
+                table = arcpy.management.CreateTable(r"C:\Users\ELNN\OneDrive - Ramboll\Documents\ArcGIS\MIKE URBAN\MOL_055R_opdim_Langebro_12\scratch.gdb", "Tab" + target_manhole, os.path.dirname(
                     os.path.realpath(__file__)) + "\Data\PipeDimensionTool\Template.dbf")[0]
 
-                with arcpy.da.InsertCursor(table, ["Discharge"]) as cursor:
-                    for discharge in timearea_curves[target_manhole]:
-                        cursor.insertRow([discharge])
+                rationel_curves = rainseries.rationelCurve(target_manhole, graph) * scaling_factor
+
+                with arcpy.da.InsertCursor(table, ["Disch_ta", "Disch_rat"]) as cursor:
+                    for discharge_ta, discharge_rat in zip(timearea_curves[target_manhole], rationel_curves):
+                        cursor.insertRow([discharge_ta, discharge_rat])
 
                 table_view = arcpy.MakeTableView_management(table, r"%s_tv" % os.path.basename(table))
 
                 arcpy.env.addOutputsToMap = True
                 gr = arcpy.Graph()
 
-                gr.addSeriesAreaVertical(table_view, 'Discharge', "OID")
+                oid_fieldname = arcpy.Describe(table).OIDFieldName
+
+                disch_ta_plot = gr.addSeriesAreaVertical(table_view, 'Disch_ta', oid_fieldname)
+                arcpy.AddMessage(dir(gr.graphPropsGeneral))
+                gr.addSeriesLineVertical(table_view, 'Disch_rat', oid_fieldname)
                 gr.graphPropsGeneral.title = target_manhole
 
                 graph_template = os.path.dirname(
-                    os.path.realpath(__file__)) + "\Data\PipeDimensionTool\graph_template.grf"
+                    os.path.realpath(__file__)) + "\Data\PipeDimensionTool\graph_template_rev1.grf"
                 arcpy.MakeGraph_management(graph_template, gr, target_manhole)
                 arcpy.env.addOutputsToMap = old_setting
+                return
 
             peak_discharge[target_manhole] = np.max(timearea_curves[target_manhole])
             peak_discharge_time[target_manhole] = np.argmax(timearea_curves[target_manhole])
@@ -430,7 +437,7 @@ class PipeDimensionToolTAPro(object):
         # row[2] = peak_discharge[msm_Link_Network.links[row[0]].fromnode]
         # row[3] = peak_discharge_time[msm_Link_Network.links[row[0]].fromnode]
         # cursor.updateRow(row)
-        arcpy.AddMessage(debug_output)
+
         if debug_output:
             try:
                 result_layer = getAvailableFilename(arcpy.env.scratchGDB + "\Pipe_Dimensions", parent=MU_database)
@@ -477,7 +484,7 @@ class PipeDimensionToolTAPro(object):
                                     graph.network.links[row[3]].fromnode] and Di + 1 < len(D):
                                     Di += 1
                                     QFull = ColebrookWhite.QFull(D[Di] / 1e3, slope, row[2])
-                                    arcpy.AddMessage(QFull)
+                                    # arcpy.AddMessage(QFull)
                             diameter = D[Di] / 1.0e3
 
                             material = row[2]
@@ -1161,8 +1168,8 @@ class InterpolateInvertLevels(object):
                     arcpy.AddError("Pipe %s" % (MUID))
                     duplicates.append(MUID)
             raise(Exception("Cancelling toolbox"))
-        
-        msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link", filter_sql_query = "MUID IN ('')" % ("', '".join(links_MUIDs)))
+
+        msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link", filter_sql_query = "MUID IN ('%s')" % ("', '".join(links_MUIDs)))
         
         tonodes = [msm_Link_Network.links[MUID].tonode for MUID in links_MUIDs]
         fromnodes = [msm_Link_Network.links[MUID].fromnode for MUID in links_MUIDs]
