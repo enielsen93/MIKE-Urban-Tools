@@ -7,8 +7,8 @@ import mousereader
 import traceback
 
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_027\KOM_CDS_5_sc3Base.res1d"
-result_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\MOL\MOL_055Base.PRF"
-MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\MOL\MOL_055.mdb"
+result_file = r"C:\Offline\VOR_Status\VOR_Status_CDS5_CDS5.PRF"
+MU_model = r"C:\Offline\VOR_Status\VOR_Status_012.mdb"
 msm_Node = os.path.join(MU_model, "msm_Node")
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_STATUS_001\KOM_STATUS_CDS20Base.res1d"
 # MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_STATUS_001\KOM_STATUS_001.mdb"
@@ -35,7 +35,7 @@ with arcpy.da.SearchCursor(msm_Node, ["SHAPE@", "MUID", "GroundLevel", "Diameter
     for row in cursor:
         nodes[row[1]] = Node(row[1])
         nodes[row[1]].shape = row[0]
-        nodes[row[1]].ground_level = row[2]
+        nodes[row[1]].ground_level = row[2] if row[2] else nodes[row[1]].ground_level
         nodes[row[1]].diameter = row[3]
         nodes[row[1]].net_type_no = row[4]
 
@@ -46,11 +46,12 @@ mouse_result = mousereader.MouseResult(result_file, ["ALL"], "Node_WL")
 
 arcpy.env.overwriteOutput = True
 output_folder = r"C:\Papirkurv\Resultater"# r"C:\Users\ELNN\OneDrive - Ramboll\Documents\ArcGIS\scratch.gdb"
-new_filename = os.path.basename(result_file).replace(".prf",".shp")
+new_filename = os.path.basename(result_file).replace(".prf",".shp").replace(".PRF","2.SHP")
 try:
     output_filepath = arcpy.CreateFeatureclass_management(output_folder, new_filename, "POINT")[0]
     arcpy.management.AddField(output_filepath, "MUID", "TEXT")
     arcpy.management.AddField(output_filepath, "NetTypeNo", "SHORT")
+    arcpy.management.AddField(output_filepath, "Max_level", "FLOAT", 8, 2)
     arcpy.management.AddField(output_filepath, "Flood_dep", "FLOAT", 8, 2)
     arcpy.management.AddField(output_filepath, "Flood_vol", "FLOAT", 8, 2)
 except Exception as e:
@@ -60,11 +61,14 @@ except Exception as e:
         for row in cursor:
             cursor.deleteRow()
 
-with arcpy.da.InsertCursor(output_filepath, ["SHAPE@", "MUID", "Flood_dep", "Flood_vol", "NetTypeNo"]) as cursor:
+with arcpy.da.InsertCursor(output_filepath, ["SHAPE@", "MUID", "Flood_dep", "Flood_vol", "NetTypeNo", "Max_level"]) as cursor:
     for node in nodes.values():
-        muid = node
+        muid = node.muid
         if muid in nodes or not MU_model:
-            nodes[muid].max_level = np.max(mouse_result.query(row[1]))
+            try:
+                node.max_level = np.max(mouse_result.query(node.muid))
+            except Exception as e:
+                print(e.message)
 
             if nodes[muid].flood_depth>0:
-                cursor.insertRow([node.shape, muid, nodes[muid].flood_depth, nodes[muid].flood_volume, nodes[muid].net_type_no if nodes[muid].net_type_no is not None else 0])
+                cursor.insertRow([node.shape, muid, node.flood_depth, node.flood_volume, node.net_type_no if node.net_type_no is not None else 0, node.max_level])

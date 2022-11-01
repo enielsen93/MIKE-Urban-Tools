@@ -311,6 +311,7 @@ class DisplayMikeUrban(object):
 
                 exportBasins = getAvailableFilename(arcpy.env.scratchGDB + r"\basins", parent = MU_database)
                 arcpy.Select_analysis(manholes, exportBasins, where_clause = "TypeNo = 2")
+                arcpy.AddMessage(exportBasins)
                 with arcpy.da.UpdateCursor(exportBasins, ["MUID","Freeboard_2D", "CriticalLevel", "GeometryID", "Description", "GroundLevel", "InvertLevel"]) as cursor:
                     for row in cursor:
                         basin = basins[row[0]]
@@ -332,7 +333,8 @@ class DisplayMikeUrban(object):
                         else:
                             description += "Maks. (%1.2f): %d m3\n" % (row[5], basin.max_volume)
 
-                        row[4] = description
+                        row[4] = description if len(description)<50 else ""
+
                         cursor.updateRow(row)
 
                 printStepAndTime("Adding basins to map")
