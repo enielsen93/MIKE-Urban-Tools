@@ -5,8 +5,8 @@ import numpy as np
 import mousereader
 
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_027\KOM_CDS_5_sc3Base.res1d"
-res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\MOL\MOL_055_opdimBase.res1d"
-MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\MOL\MOL_055_opdim.mdb"
+res1d_file = r"C:\Offline\VOR_Status\VOR_Status_SV_rvServiceniveau rv.res1d"
+MU_model = r"C:\Offline\VOR_Status\VOR_Status_012.mdb"
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_STATUS_001\KOM_STATUS_CDS20Base.res1d"
 # MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_STATUS_001\KOM_STATUS_001.mdb"
 
@@ -20,7 +20,7 @@ class Node:
 
     @property
     def flood_depth(self):
-        return self.max_level - self.ground_level
+        return max(self.max_level - self.ground_level,0)
 
     @property
     def flood_volume(self):
@@ -67,8 +67,8 @@ with arcpy.da.InsertCursor(output_filepath, ["SHAPE@", "MUID", "Flood_dep", "Flo
     for node in df.data.Nodes:
         muid = node.ID
         if muid in nodes or not MU_model:
-            nodes[muid].ground_level = node.GroundLevel
-            nodes[muid].max_level = np.max(df.get_node_values(muid, "WaterLevel"))
+            node.ground_level = node.GroundLevel
+            node.max_level = np.max(df.get_node_values(muid, "WaterLevel"))
 
             if nodes[muid].flood_depth>0:
-                cursor.insertRow([arcpy.Point(node.XCoordinate, node.YCoordinate), muid, nodes[muid].flood_depth, nodes[muid].flood_volume, nodes[muid].net_type_no if nodes[muid].net_type_no is not None else 0])
+                cursor.insertRow([arcpy.Point(node.XCoordinate, node.YCoordinate), muid, node.flood_depth, node.flood_volume, node.net_type_no if node.net_type_no is not None else 0])

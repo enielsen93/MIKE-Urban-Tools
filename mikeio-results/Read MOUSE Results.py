@@ -25,7 +25,7 @@ class Node:
 
     @property
     def flood_depth(self):
-        return self.max_level - self.ground_level
+        return max(0, self.max_level - self.ground_level)
 
     @property
     def flood_volume(self):
