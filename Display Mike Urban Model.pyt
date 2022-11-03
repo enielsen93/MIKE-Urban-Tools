@@ -311,7 +311,7 @@ class DisplayMikeUrban(object):
 
                 exportBasins = getAvailableFilename(arcpy.env.scratchGDB + r"\basins", parent = MU_database)
                 arcpy.Select_analysis(manholes, exportBasins, where_clause = "TypeNo = 2")
-                arcpy.AddMessage(exportBasins)
+
                 with arcpy.da.UpdateCursor(exportBasins, ["MUID","Freeboard_2D", "CriticalLevel", "GeometryID", "Description", "GroundLevel", "InvertLevel"]) as cursor:
                     for row in cursor:
                         basin = basins[row[0]]
