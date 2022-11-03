@@ -13,7 +13,7 @@ import mikeio
 import arcpy
 arcpy.env.overwriteOutput = True
 
-mesh_file = r"K:\Hydrauliske modeller\Modeller\A265_1 Kapacitetsanalyse Sydbyen\Mesh\A265_1_Mesh_GA_v2_1_cropped_interp_E.mesh"
+mesh_file = r"C:\Users\ELNN\Downloads\Mesh_UTM32_2.mesh"
 dfs = mikeio.dfsu.Mesh(mesh_file)
 element_coordinates = dfs.element_coordinates
 
@@ -28,8 +28,8 @@ element_coordinates = dfs.element_coordinates
 #            np.max(element_coordinates[elements_with_water,1]) + raster_search_radius]
 
 
-nodesPath = r"K:\Hydrauliske modeller\Papirkurv"
-nodesName = "nodes.shp"
+nodesPath = r"C:\Papirkurv"
+nodesName = "nodes_Z.shp"
 arcpy.CreateFeatureclass_management(nodesPath, nodesName, "POINT")
 arcpy.AddField_management(os.path.join(nodesPath, nodesName), "Z", "DOUBLE")
 
