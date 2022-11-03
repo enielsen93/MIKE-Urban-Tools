@@ -5,18 +5,19 @@ import numpy as np
 import mousereader
 
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_027\KOM_CDS_5_sc3Base.res1d"
-res1d_file = r"C:\Offline\VOR_Status\VOR_Status_SV_rvServiceniveau rv.res1d"
-MU_model = r"C:\Offline\VOR_Status\VOR_Status_012.mdb"
+res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\MOL\MOL_055_opdimBase.res1d"
+MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\MOL\MOL_055_opdim.mdb"
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_STATUS_001\KOM_STATUS_CDS20Base.res1d"
 # MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_STATUS_001\KOM_STATUS_001.mdb"
 
 nodes = {}
 class Node:
-    def __init__(self):
+    def __init__(self, muid):
         self.diameter = None
         self.net_type_no = 0
         self.ground_level = 0
         self.max_level = 0
+        self.id = muid
 
     @property
     def flood_depth(self):
@@ -34,7 +35,7 @@ if MU_model:
     cursor.execute('select MUID, Diameter, NetTypeNo from msm_Node')
     rows = cursor.fetchall()
     for row in rows:
-        nodes[row[0]] = Node()
+        nodes[row[0]] = Node(row[0])
         nodes[row[0]].diameter = row[1]
         nodes[row[0]].net_type_no = row[2]
 
@@ -64,11 +65,13 @@ except Exception as e:
             cursor.deleteRow()
 
 with arcpy.da.InsertCursor(output_filepath, ["SHAPE@", "MUID", "Flood_dep", "Flood_vol", "NetTypeNo"]) as cursor:
-    for node in df.data.Nodes:
-        muid = node.ID
-        if muid in nodes or not MU_model:
-            node.ground_level = node.GroundLevel
-            node.max_level = np.max(df.get_node_values(muid, "WaterLevel"))
-
-            if nodes[muid].flood_depth>0:
-                cursor.insertRow([arcpy.Point(node.XCoordinate, node.YCoordinate), muid, node.flood_depth, node.flood_volume, node.net_type_no if node.net_type_no is not None else 0])
+    for query_node in df.data.Nodes:
+        muid = query_node.ID
+        if muid not in nodes:
+            nodes[muid] = Node(muid)
+        node = nodes[muid]
+        node.ground_level = query_node.GroundLevel
+        node.max_level = np.max(df.get_node_values(muid, "WaterLevel"))
+        # print((node.max_level, node.ground_level))
+        if node.flood_depth>0:
+            cursor.insertRow([arcpy.Point(query_node.XCoordinate, query_node.YCoordinate), muid, node.flood_depth, node.flood_volume, node.net_type_no if node.net_type_no is not None else 0])
