@@ -22,6 +22,8 @@ import mikegraph
 import sqlite3
 import timearea
 from copy import deepcopy
+import configparser
+
 
 if "mapping" in dir(arcpy):
     import arcpy.mapping as apmapping
@@ -58,6 +60,35 @@ def getAvailableFilename(filepath, parent = None):
             # return filepath + "%d" % i
     else:
         return filepath
+
+class Config:
+    def __init__(self, config_file):
+        self.config_file = config_file
+
+    def write(self, parameters):
+        config = configparser.ConfigParser(allow_no_value=True)
+        config.add_section("ArcGIS input parameters")
+        for par_i, parameter in enumerate(parameters):
+            if par_i == 0:
+                config.set("ArcGIS input parameters", "# " + parameter.displayName)
+            else:
+                config.set(
+                    "ArcGIS input parameters",
+                    "\r\n# " + parameter.displayName)
+            config.set("ArcGIS input parameters", str(parameter.name), str(parameter.value))
+
+        with open(self.config_file,
+                  "w") as file_write:
+            config.write(file_write)
+
+    def read(self):
+        config = configparser.ConfigParser()
+        config.read(self.config_file)
+        parameters_dict = {}
+        for option in config.options("ArcGIS input parameters"):
+            parameters_dict[option] = config.get("ArcGIS input parameters", option)
+
+        return parameters_dict
 
 class Toolbox(object):
     def __init__(self):
@@ -214,6 +245,25 @@ class PipeDimensionToolTAPro(object):
         return True
 
     def updateParameters(self, parameters): #optional
+        pipe_layer = parameters[0].ValueAsText
+        runoff_file = parameters[3].ValueAsText
+
+        if pipe_layer and not runoff_file:
+            MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry", "")
+            MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
+            config_folder = os.path.join(MIKE_folder, "Config")
+            config_file = os.path.join(config_folder, os.path.splitext(os.path.basename(MU_database))[0] + ".ini")
+            if os.path.exists(config_file):
+                config = Config(config_file)
+                parameters_dict = config.read()
+                for config_parameter in parameters_dict:
+                    # raise(Exception([parameter.name for par_i, parameter in enumerate(parameters)]))
+                    try:
+                        i = [par_i for par_i, parameter in enumerate(parameters) if parameter.name == config_parameter][0]
+                        parameters[i] = parameters_dict[config_parameter]
+                    except Exception as e:
+                        pass
+
         #pipe_layer = parameters[0].ValueAsText
         #MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)
         
@@ -263,6 +313,15 @@ class PipeDimensionToolTAPro(object):
         MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
         if not os.path.exists(MIKE_folder):
             os.mkdir(MIKE_folder)
+
+        config_folder = os.path.join(MIKE_folder, "Config")
+        if not os.path.exists(config_folder):
+            os.mkdir(config_folder)
+        config_file = os.path.join(config_folder, os.path.splitext(os.path.basename(MU_database))[0] + ".ini")
+
+        config = Config(config_file)
+        config.write(parameters)
+
         MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
         no_dir = True
         dir_ext = 0
@@ -314,13 +373,30 @@ class PipeDimensionToolTAPro(object):
         if breakChainOnNodes:
             breakEdges = [edge for edge in graph.graph.edges if
                           edge[0] in re.findall("([^'^(),; \n]+)", breakChainOnNodes)]
-            graph.graph.network.remove_edges_from(breakEdges)
+            graph.network.remove_edges_from(breakEdges)
             for edge in breakEdges:
                 arcpy.AddMessage(
                     "Removed edge %s-%s because %s is included in list of nodes to end trace at" % (edge[0], edge[1]))
 
+        if useMaxInflow:
+            maxInflow = {}
+            with arcpy.da.SearchCursor(msm_Node, ["MUID", "InletControlNo", "MaxInlet"],
+                                       where_clause="[MaxInlet] IS NOT NULL AND [InletControlNo] = 0") as cursor:
+                for row in cursor:
+                    maxInflow[row[0]] = row[2]
+                    arcpy.AddMessage("Added additional discharge %1.3f m3/s to node %s" % (row[2], row[0]))
+                    breakEdges = [edge for edge in graph.graph.edges if edge[1] == row[0]]
+                    graph.graph.remove_edges_from(breakEdges)
+                    for edge in breakEdges:
+                        arcpy.AddMessage(
+                            "Removed edge %s-%s because of additional discharge" % (
+                            edge[0], edge[1]))
+
         arcpy.SetProgressorLabel("Reading Rain Series")
         rainseries = timearea.TimeArea(runoff_file)
+
+        rainseries.additional_discharge = maxInflow
+        rainseries.scaling_factor = scaling_factor
 
         target_manholes = [graph.network.links[link].fromnode for link in selected_pipes]
         connected_sources = []
@@ -337,41 +413,42 @@ class PipeDimensionToolTAPro(object):
 
         for target_i, target_manhole in enumerate(target_manholes):
             arcpy.SetProgressorPosition(target_i)
-            timearea_curves[target_manhole] = rainseries.timeareaCurve(target_manhole, graph)*scaling_factor
+            timearea_curves[target_manhole] = rainseries.timeareaCurve(target_manhole, graph)
 
 
             if show_graph and graphs_count < 15:
-                if graphs_count:
+                if graphs_count > 15:
                     arcpy.AddMessage("Displaying no more than 15 graphs!")
-                graphs_count += 1
-                old_setting = arcpy.env.addOutputsToMap
-                arcpy.env.addOutputsToMap = False
-                table = arcpy.management.CreateTable(r"C:\Users\ELNN\OneDrive - Ramboll\Documents\ArcGIS\MIKE URBAN\MOL_055R_opdim_Langebro_12\scratch.gdb", "Tab" + target_manhole, os.path.dirname(
-                    os.path.realpath(__file__)) + "\Data\PipeDimensionTool\Template.dbf")[0]
+                else:
+                    graphs_count += 1
+                    old_setting = arcpy.env.addOutputsToMap
+                    arcpy.env.addOutputsToMap = False
+                    table = arcpy.management.CreateTable(r"C:\Users\ELNN\OneDrive - Ramboll\Documents\ArcGIS\MIKE URBAN\MOL_055R_opdim_Langebro_12\scratch.gdb", "Tab" + target_manhole, os.path.dirname(
+                        os.path.realpath(__file__)) + "\Data\PipeDimensionTool\Template.dbf")[0]
 
-                rationel_curves = rainseries.rationelCurve(target_manhole, graph) * scaling_factor
+                    rationel_curves = rainseries.rationelCurve(target_manhole, graph)
 
-                with arcpy.da.InsertCursor(table, ["Disch_ta", "Disch_rat"]) as cursor:
-                    for discharge_ta, discharge_rat in zip(timearea_curves[target_manhole], rationel_curves):
-                        cursor.insertRow([discharge_ta, discharge_rat])
+                    with arcpy.da.InsertCursor(table, ["Disch_ta", "Disch_rat"]) as cursor:
+                        for discharge_ta, discharge_rat in zip(timearea_curves[target_manhole], rationel_curves):
+                            cursor.insertRow([discharge_ta, discharge_rat])
 
-                table_view = arcpy.MakeTableView_management(table, r"%s_tv" % os.path.basename(table))
+                    table_view = arcpy.MakeTableView_management(table, r"%s_tv" % os.path.basename(table))
 
-                arcpy.env.addOutputsToMap = True
-                gr = arcpy.Graph()
+                    arcpy.env.addOutputsToMap = True
+                    gr = arcpy.Graph()
 
-                oid_fieldname = arcpy.Describe(table).OIDFieldName
+                    oid_fieldname = arcpy.Describe(table).OIDFieldName
 
-                disch_ta_plot = gr.addSeriesAreaVertical(table_view, 'Disch_ta', oid_fieldname)
-                arcpy.AddMessage(dir(gr.graphPropsGeneral))
-                gr.addSeriesLineVertical(table_view, 'Disch_rat', oid_fieldname)
-                gr.graphPropsGeneral.title = target_manhole
+                    disch_ta_plot = gr.addSeriesAreaVertical(table_view, 'Disch_ta', oid_fieldname)
+                    # arcpy.AddMessage(dir(gr.graphPropsGeneral))
+                    gr.addSeriesLineVertical(table_view, 'Disch_rat', oid_fieldname)
+                    gr.graphPropsGeneral.title = target_manhole
 
-                graph_template = os.path.dirname(
-                    os.path.realpath(__file__)) + "\Data\PipeDimensionTool\graph_template_rev1.grf"
-                arcpy.MakeGraph_management(graph_template, gr, target_manhole)
-                arcpy.env.addOutputsToMap = old_setting
-                return
+                    graph_template = os.path.dirname(
+                        os.path.realpath(__file__)) + "\Data\PipeDimensionTool\graph_template_rev1.grf"
+                    arcpy.MakeGraph_management(graph_template, gr, target_manhole)
+                    arcpy.env.addOutputsToMap = old_setting
+                # return
 
             peak_discharge[target_manhole] = np.max(timearea_curves[target_manhole])
             peak_discharge_time[target_manhole] = np.argmax(timearea_curves[target_manhole])
@@ -622,6 +699,14 @@ class PipeDimensionToolTAPro(object):
                 raise (e)
         # edit.stopOperation()
         # edit.stopEditing(True)
+        # import pickle
+        # import saveParameters
+        # save_parameters = saveParameters.Parameters(parameters)
+        # arcpy.AddMessage(save_parameters.parameters)
+        # for parameter in save_parameters.parameters:
+        #     arcpy.AddMessage((type(parameter.Value), type(parameter.ValueAsText)))
+        # with open(r"C:\Papirkurv\Parameters",'w') as f:
+        #     pickle.dump(save_parameters.parameters, f)
         return
 
 class upgradeDimensions(object):
