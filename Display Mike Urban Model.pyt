@@ -419,7 +419,7 @@ class DisplayMikeUrban(object):
         if networkLoadInProject:
             arcpy.CreateFeatureclass_management(os.path.dirname(networkShape), os.path.basename(networkShape), "POINT")
             arcpy.AddField_management(networkShape, "MUID", "TEXT")
-            arcpy.AddField_management(networkShape, "NetTypeNo", "TEXT")
+            arcpy.AddField_management(networkShape, "NetTypeNo", "SHORT")
             arcpy.AddField_management(networkShape, "Discharge", "DOUBLE")
             arcpy.AddField_management(networkShape, "Title", "STRING")
             arcpy.AddField_management(networkShape, "NodeID", "STRING")
