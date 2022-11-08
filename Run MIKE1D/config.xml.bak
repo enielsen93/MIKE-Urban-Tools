@@ -3,12 +3,12 @@
         <ComboBox caption="MIKE1D Model" category="Run MIKE1D" class="GroupComboBoxClass1" id="run_mike1d_addin.mikemodel" itemSizeString="WWWWWW" message="MIKE Urban Model" rows="8" sizeString="WWWWWW" tip="Pick the MIKE Urban Model"><Help heading="" /></ComboBox>
         <ComboBox caption="Simulation ID" category="Run MIKE1D" class="GroupComboBoxClass2" id="run_mike1d_addin.simulation_id" itemSizeString="WWWWWW" message="Simulation ID" rows="8" sizeString="WWWWWW" tip="Pick the Simulation ID"><Help heading="" /></ComboBox>
 		<Tool caption="Prepare Simulation" category="Run MIKE1D" class="PrepareMike1D" id="run_mike1d_addin.tool2" image="Images\Prepare Simulation.png" message="Prepare Simulation" tip=""><Help heading="" /></Tool>
-        <Tool caption="Run Simulation" category="Run MIKE1D" class="RunMike1D" id="run_mike1d_addin.tool" image="Images\Run Simulation.png" message="Run Simulation" tip=""><Help heading="" /></Tool>
+        <Tool caption="Run Simulation" category="Run MIKE1D" class="RunMike1D" id="run_mike1d_addin.tool" image="Images\Run Simulation.png" message="Run Simulation" tip="">
         </Commands>
     <Extensions>
         </Extensions>
     <Toolbars>
-        <Toolbar caption="Run MIKE1D" category="Run MIKE1D" id="run_mike1d_addin.toolbar" showInitially="true"><Items><ComboBox refID="run_mike1d_addin.mikemodel" /><ComboBox refID="run_mike1d_addin.simulation_id" /><Tool refID="run_mike1d_addin.tool" /></Items></Toolbar>
+        <Toolbar caption="Run MIKE1D" category="Run MIKE1D" id="run_mike1d_addin.toolbar" showInitially="true"><Items><ComboBox refID="run_mike1d_addin.mikemodel" /><ComboBox refID="run_mike1d_addin.simulation_id" /><Tool refID="run_mike1d_addin.tool2" /><Tool refID="run_mike1d_addin.tool" /></Items></Toolbar>
         </Toolbars>
     <Menus>
         </Menus>
