@@ -200,7 +200,7 @@ class DFSUFloodStatisticsToRaster(object):
 
     def updateParameters(self, parameters): #optional
         if parameters[0].altered:
-            dfs = mikeio.dfsu.Dfsu(parameters[0].valueAsText, dtype=np.float32)
+            dfs = mikeio.dfsu.Dfsu2DH(parameters[0].valueAsText)
             statusUpdate(dfs.items,1)
             parameters[1].filter.list = [item.name for item in dfs.items]
         return
@@ -231,17 +231,17 @@ class DFSUFloodStatisticsToRaster(object):
                         clip_shapes.append(row[0])
         
         statusUpdate("Reading DFSU file", tic)
-        dfs = mikeio.dfsu.Dfsu(DFSUFile, dtype=np.float32)
+        dfs = mikeio.dfsu.Dfsu2DH(DFSUFile)
     
         statusUpdate("Retrieving element coordinates from DFSU file", tic)
         element_coordinates = dfs.element_coordinates
         dfs_read = dfs.read(items=[i for i,a in enumerate(dfs.items) if DFSUField == a.name])
-        dfs_read_data = dfs_read.data[0]
+        dfs_read_data = dfs_read.to_numpy()
         np.nan_to_num(dfs_read_data, copy = False)
         
         statusUpdate("Isolating DFSU Elements with value",tic)
         
-        elements_with_water = np.where(dfs_read_data[0,:] > 0.003)[0] if DFSUField == "Maximum water depth" else np.where(dfs_read_data[0,:] != 0)[0]
+        elements_with_water = np.where(dfs_read_data[0, :] > 0.003)[0] if DFSUField == "Maximum water depth" else np.where(dfs_read_data[0,:] != 0)[0]
         no_elements = False if len(elements_with_water)>0 else True
         
         if no_elements:
@@ -392,8 +392,11 @@ class DFSUToRaster(object):
 
     def updateParameters(self, parameters): #optional
         if parameters[0].altered:
-            dfs = mikeio.dfsu.Dfsu(parameters[0].valueAsText, dtype=np.float32)
-            parameters[1].filter.list = [item.name for item in dfs.items]
+            dfs = mikeio.dfsu.Dfsu2DH(parameters[0].valueAsText)
+            items = [item.name for item in dfs.items]
+            if "Surface elevation" in items and not 'Total water depth' in items:
+                items.append('Total water depth (derived)')
+            parameters[1].filter.list = items
             if parameters[2].ValueAsText == "Specific Timestep":
                 parameters[3].filter.list = [str(dfs.start_time+timedelta(seconds=dfs.timestep*i)) for i in range(dfs.n_timesteps+1)]
             
@@ -416,10 +419,14 @@ class DFSUToRaster(object):
         searchDistance = parameters[6].Value
         raster_cell_size = parameters[7].Value
         DFSUFields = DFSUFields.split(";")
+        derived_depth = False
         for field_i in range(len(DFSUFields)):
             DFSUFields[field_i] = DFSUFields[field_i].replace("'","")
-            
-        
+            if DFSUFields[field_i] == "Total water depth (derived)":
+                DFSUFields[field_i] = "Surface elevation"
+                derived_depth = True
+                derived_depth_field_i = field_i
+
         clip_shapes = []
         if clip_layers:
             clip_layers_list = clip_layers.split(";")
@@ -431,15 +438,19 @@ class DFSUToRaster(object):
                         clip_shapes.append(row[0])
         
         statusUpdate("Reading DFSU file", tic)
-        dfs = mikeio.dfsu.Dfsu(DFSUFile, dtype=np.float32)
+        dfs = mikeio.dfsu.Dfsu2DH(parameters[0].valueAsText)
     
         statusUpdate("Retrieving element coordinates from DFSU file", tic)
         element_coordinates = dfs.element_coordinates
-        
+
         dfs_read = dfs.read(items=[i for i,item in enumerate(dfs.items) if item.name in DFSUFields])
-        dfs_read_data = dfs_read.data
-        for i in range(len(dfs_read_data)):    
-            np.nan_to_num(dfs_read_data[i], copy = False)
+        dfs_read_data = dfs_read.to_numpy()
+        if derived_depth:
+            dfs_read_data[derived_depth_field_i] = dfs_read_data[derived_depth_field_i] - element_coordinates[:, -1]
+
+        # for i in range(len(dfs_read_data)):
+        #     np.nan_to_num(dfs_read_data[i], copy = False)
+        #     dfs_read_data[derived_depth_field_i, :, :] = dfs_read_data[derived_depth_field_i, :, :] - element_coordinates[:, -1]
         
         statusUpdate("Isolating DFSU Elements with value",tic)
         elements_with_water = np.where(np.max(np.abs(dfs_read_data[0]),axis=0) > 0.01)[0] if DFSUFields[0] == "Total water depth" else np.where(np.max(np.abs(dfs_read_data[0]),axis=0))[0]
@@ -638,7 +649,7 @@ class DFSUPlumeStatistics(object):
         return
 
     def updateMessages(self, parameters): #optional
-        
+
         return
 
     def execute(self, parameters, messages):
@@ -654,7 +665,7 @@ class DFSUPlumeStatistics(object):
                 
         dfs_read = dfs.read(items=[i for i,item in enumerate(dfs.items) if item.name in DFSUField])
 
-        dfs_read_data = dfs_read.data[0]
+        dfs_read_data = dfs_read.to_numpy()
         np.nan_to_num(dfs_read_data, copy = False)
 
         elements_with_water = np.where(dfs_read_data[-1,:]>minimum_water_depth)[0]
@@ -987,3 +998,131 @@ class CutFromDFSU(object):
         mesh.write(MeshFileOutput, data = mesh.read(elements = element_IDs), items = mesh.items, elements = element_IDs)
         
         return
+
+if __name__ == '__main__':
+    DFSUFile = r"C:\Offline\VOR_Status\VOR_Status_CDS10_2dCDS10.m21fm - Result Files\VOR_Status_CDS10_2D.dfsu"
+    DFSUFields = ["Total water depth (derived)"]
+    RasterFileOutput = None
+    clip_layers = None
+    searchDistance = 6
+    raster_cell_size = 1
+
+    for field_i in range(len(DFSUFields)):
+        DFSUFields[field_i] = DFSUFields[field_i].replace("'", "")
+        if DFSUFields[field_i] == "Total water depth (derived)":
+            DFSUFields[field_i] = "Surface elevation"
+            derived_depth = True
+            derived_depth_field_i = field_i
+
+    clip_shapes = []
+    if clip_layers:
+        clip_layers_list = clip_layers.split(";")
+        # statusUpdate("Reading Clip Layers")
+        for clip_layer in clip_layers:
+            clip_layer_dissolved = arcpy.Dissolve_management(clip_layer, os.path.join("in_memory", os.path.splitext(
+                os.path.basename(clip_layer))[0]))[0]
+            with arcpy.da.SearchCursor(clip_layer_dissolved, ["SHAPE@"]) as cursor:
+                for row in cursor:
+                    clip_shapes.append(row[0])
+
+    # statusUpdate("Reading DFSU file", tic)
+    dfs = mikeio.dfsu.Dfsu2DH(DFSUFile)
+
+    # statusUpdate("Retrieving element coordinates from DFSU file", tic)
+    element_coordinates = dfs.element_coordinates
+
+    dfs_read = dfs.read(items=[i for i, item in enumerate(dfs.items) if item.name in DFSUFields])
+    dfs_read_data = dfs_read.to_numpy()
+    if derived_depth:
+        dfs_read_data[derived_depth_field_i] = dfs_read_data[derived_depth_field_i] - element_coordinates[:, -1]
+
+    for i in range(len(dfs_read_data)):
+        # np.nan_to_num(dfs_read_data[i], copy = False)
+        # dfs_read_data[derived_depth_field_i, :, :] = dfs_read_data[derived_depth_field_i, :, :] - element_coordinates[:, -1]
+        np.nan_to_num(dfs_read_data[i], copy=False)
+
+    # statusUpdate("Isolating DFSU Elements with value", tic)
+    elements_with_water = np.where(np.max(np.abs(dfs_read_data[0]), axis=0) > 0.01)[0] if DFSUFields[
+                                                                                              0] == "Total water depth" else \
+    np.where(np.max(np.abs(dfs_read_data[0]), axis=0))[0]
+    no_elements = False if len(elements_with_water) > 0 else True
+
+    if no_elements:
+        arcpy.AddError("Error: Could not find any DFSU Elements with a value different from zero")
+    else:
+        x_limit = [np.min(element_coordinates[elements_with_water, 0]) - searchDistance,
+                   np.max(element_coordinates[elements_with_water, 0]) + searchDistance]
+        y_limit = [np.min(element_coordinates[elements_with_water, 1]) - searchDistance,
+                   np.max(element_coordinates[elements_with_water, 1]) + searchDistance]
+
+        # statusUpdate(
+        #     "Creating empty raster with extent: %d-%d and %d-%d" % (x_limit[0], x_limit[1], y_limit[0], y_limit[1]),
+        #     tic)
+        raster_xs_vector = np.arange(x_limit[0], x_limit[1], raster_cell_size)
+        raster_ys_vector = np.arange(y_limit[0], y_limit[1], raster_cell_size)
+
+        raster_x, raster_y = np.meshgrid(raster_xs_vector, raster_ys_vector)
+        raster_depth = np.zeros(raster_x.shape)
+        raster_x_flat = raster_x.flatten()
+        raster_y_flat = raster_y.flatten()
+        raster_depth_flat = np.zeros(raster_x.flatten().shape + tuple([len(dfs_read_data)]))
+
+        # statusUpdate("Retrieving Raster Elements near water", tic)
+        # arcpy.AddMessage("%d elements with water. %d raster elements" % (
+        # len(element_coordinates[elements_with_water]), len(raster_depth_flat)))
+        # elements_searched = []
+        # idx = set(range(len(raster_x_flat)))
+        raster_cKDTree = cKDTree(np.array((raster_x_flat,raster_y_flat)))
+        idx
+        # for element_i, element in enumerate(element_coordinates[elements_with_water]):
+        #     # idx.update([i for i, [x,y] in enumerate(zip(raster_x_flat, raster_y_flat)) if np.abs(element[0] - raster_x_flat) < searchDistance and np.abs(element[1] - raster_y_flat[ix]) < searchDistance)])
+        #     ix = np.where(np.abs(element[0] - raster_x_flat) < searchDistance)[0]
+        #     idx.update(ix[np.where(np.abs(element[1] - raster_y_flat[ix]) < searchDistance)[0]])
+        #
+        # idx_remove = []
+        # # statusUpdate("Removing raster elements that overlap clip_layers", tic)
+        # for i in idx:
+        #     point = arcpy.Point(raster_x_flat[i], raster_y_flat[i])
+        #     for clip_shape in clip_shapes:
+        #         if clip_shape.contains(point):
+        #             idx_remove.append(i)
+        # for i in idx_remove:
+        #     idx.remove(i)
+
+        # statusUpdate("Removing raster elements that are not contained inside DFSU-file", tic)
+        idx_array = np.array(list(idx))
+        raster_coord_in_mesh = idx_array[np.where(~dfs.contains(np.column_stack((raster_x_flat[idx_array],
+                                                                                 raster_y_flat[
+                                                                                     idx_array]))))]  # idx_list[np.where(dfs.contains(np.column_stack((raster_x_flat[idx_list],raster_y_flat[idx_list]))))]
+        for i in raster_coord_in_mesh:
+            idx.remove(i)
+
+        # statusUpdate("Creating KDTree", tic)
+        elements_searchable = np.where((x_limit[0] < element_coordinates[:, 0]) &
+                                       (element_coordinates[:, 0] < x_limit[1]) &
+                                       (y_limit[0] < element_coordinates[:, 1]) &
+                                       (element_coordinates[:, 1] < y_limit[1]))[0]
+        dfsu_cKDTree = cKDTree(element_coordinates[elements_searchable, 0:2])
+
+        # statusUpdate("Interpolating DFSU to Raster (nearest neighbor)", tic)
+        for i in idx:
+            element_i = dfsu_cKDTree.query([raster_x_flat[i], raster_y_flat[i]])[1]
+            for item_i in range(len(dfs_read_data)):
+                if DFSUFieldSummary == "Max":
+                    raster_depth_flat[i, item_i] = np.max(dfs_read_data[item_i][:, elements_searchable[element_i]])
+                elif DFSUFieldSummary == "Last Timestep":
+                    raster_depth_flat[i, item_i] = dfs_read_data[item_i][-1, elements_searchable[element_i]]
+
+        for item_i in range(len(DFSUFields)):
+            # statusUpdate("Saving Raster", tic)
+            raster_depth = raster_depth_flat[:, item_i].reshape(raster_depth.shape[0:2] + tuple([1]))
+
+            raster_depth_compressed = raster_depth
+            raster = arcpy.NumPyArrayToRaster(np.flip(raster_depth_compressed[:, :, 0], axis=0),
+                                              lower_left_corner=arcpy.Point(x_limit[0], y_limit[0]),
+                                              x_cell_size=raster_cell_size,
+                                              y_cell_size=raster_cell_size,
+                                              value_to_nodata=0)
+            arcpy.AddMessage(DFSUFile.split("\\")[-1])
+            raster.save(os.path.join(RasterOutputFolder, DFSUFile.split("\\")[-1].replace(".dfsu", "%s %s.tif" % (
+            DFSUFields[item_i], DFSUFieldSummary))))
