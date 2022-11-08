@@ -364,6 +364,7 @@ class DisplayMikeUrban(object):
 
         class NetworkLoad():
             Geometry = None
+            net_type_no = None
             @property
             def title(self):
                 t = os.path.basename(self.TSConnection) + " " + self.TimeseriesName if self.TSConnection else None
@@ -402,13 +403,15 @@ class DisplayMikeUrban(object):
                             for xyrow in xycursor:
                                 network_load.Geometry = xyrow[1]
                     elif network_load.IndividualConnectionNo == 1:
-                        with arcpy.da.SearchCursor(manholes, ["MUID","SHAPE@XY"], where_clause = "MUID = '%s'" % (network_load.NodeID)) as xycursor:
+                        with arcpy.da.SearchCursor(manholes, ["MUID","SHAPE@XY", "NetTypeNo"], where_clause = "MUID = '%s'" % (network_load.NodeID)) as xycursor:
                             for xyrow in xycursor:
                                 network_load.Geometry = xyrow[1]
+                                network_load.net_type_no = xyrow[2]
                     elif network_load.IndividualConnectionNo == 2:
-                        with arcpy.da.SearchCursor(links, ["MUID","SHAPE@XY"], where_clause = "MUID = '%s'" % (network_load.LinkID)) as xycursor:
+                        with arcpy.da.SearchCursor(links, ["MUID","SHAPE@XY", "NetTypeNo"], where_clause = "MUID = '%s'" % (network_load.LinkID)) as xycursor:
                             for xyrow in xycursor:
                                 network_load.Geometry = xyrow[1]
+                                network_load.net_type_no = xyrow[2]
                     else:
                         arcpy.AddError("Unknown error")
         
@@ -416,16 +419,17 @@ class DisplayMikeUrban(object):
         if networkLoadInProject:
             arcpy.CreateFeatureclass_management(os.path.dirname(networkShape), os.path.basename(networkShape), "POINT")
             arcpy.AddField_management(networkShape, "MUID", "TEXT")
+            arcpy.AddField_management(networkShape, "NetTypeNo", "TEXT")
             arcpy.AddField_management(networkShape, "Discharge", "DOUBLE")
             arcpy.AddField_management(networkShape, "Title", "STRING")
             arcpy.AddField_management(networkShape, "NodeID", "STRING")
-            with arcpy.da.InsertCursor(networkShape, ["MUID", "SHAPE@XY","Discharge", "Title", "NodeID"]) as cursor:
+            with arcpy.da.InsertCursor(networkShape, ["MUID", "SHAPE@XY","Discharge", "Title", "NodeID", "NetTypeNo"]) as cursor:
                 for network_load in network_loads:
                     if network_load.Geometry:
-                        cursor.insertRow([network_load.MUID, network_load.Geometry, network_load.ConstantValue, network_load.title, network_load.NodeID])
+                        cursor.insertRow([network_load.MUID, network_load.Geometry, network_load.ConstantValue, network_load.title, network_load.NodeID, network_load.net_type_no])
 
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Network Load.lyr",
-                    networkShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
+                    networkShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE", definition_query = sql_query)
 
         if not is_sqlite_database:
             printStepAndTime("Adding passive regulations to map")
@@ -435,6 +439,7 @@ class DisplayMikeUrban(object):
                 q_max = 0
                 linkID = None
                 tabID = None
+                net_type_no = None
 
             regulations = {}
             with arcpy.da.SearchCursor(msm_PasReg, ["LinkID", "FunctionID"], where_clause = "TypeNo = 1") as cursor:
@@ -454,15 +459,17 @@ class DisplayMikeUrban(object):
 
                 arcpy.CreateFeatureclass_management(os.path.dirname(regulationsShape), os.path.basename(regulationsShape), "POLYLINE")
                 arcpy.AddField_management(regulationsShape, "LinkID", "TEXT")
+                arcpy.AddField_management(regulationsShape, "NetTypeNo", "SHORT")
                 arcpy.AddField_management(regulationsShape, "FunctionID", "TEXT")
                 arcpy.AddField_management(regulationsShape, "QMax", "FLOAT")
-                with arcpy.da.InsertCursor(regulationsShape, ["SHAPE@", "LinkID", "FunctionID", "QMax"]) as regulation_cursor:
-                    with arcpy.da.SearchCursor(links, ["SHAPE@", "MUID"], where_clause = "MUID IN ('%s')" % ("', '".join(regulations.keys()))) as link_cursor:
+                with arcpy.da.InsertCursor(regulationsShape, ["SHAPE@", "LinkID", "FunctionID", "QMax", "NetTypeNo"]) as regulation_cursor:
+                    with arcpy.da.SearchCursor(links, ["SHAPE@", "MUID", "NetTypeNo"], where_clause = "MUID IN ('%s')" % ("', '".join(regulations.keys()))) as link_cursor:
                         for row in link_cursor:
-                            regulation_cursor.insertRow([row[0], row[1], regulations[row[1]].tabID, regulations[row[1]].q_max])
+                            regulations[row[1]].net_type_no = row[2]
+                            regulation_cursor.insertRow([row[0], row[1], regulations[row[1]].tabID, regulations[row[1]].q_max, regulations[row[1]].net_type_no])
 
                 addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Passive Regulations.lyr",
-                        regulationsShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
+                        regulationsShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE", definition_query = sql_query)
 
         printStepAndTime("Adding outlets to map")
         # Adding outlets to project
@@ -474,6 +481,7 @@ class DisplayMikeUrban(object):
                 geometry = None
                 TSConnection = None
                 TimeseriesName = None
+                net_type_no = None
 
                 def __init__(self, nodeID):
                     self.nodeID = nodeID
@@ -508,25 +516,27 @@ class DisplayMikeUrban(object):
                         outlets[row[0]].boundary_water_level = row[1]
 
 
-            with arcpy.da.SearchCursor(manholes, ["SHAPE@", "MUID"], where_clause = "TypeNo = 3 AND MUID IN ('%s')" % ("', '".join(outlets.keys()))) as cursor:
+            with arcpy.da.SearchCursor(manholes, ["SHAPE@", "MUID", "NetTypeNo"], where_clause = "TypeNo = 3 AND MUID IN ('%s')" % ("', '".join(outlets.keys()))) as cursor:
                 for row in cursor:
                     outlets[row[1]].geometry = row[0]
+                    outlets[row[1]].net_type_no = row[2]
 
             if len([outlet for outlet in outlets.values()])>0: # if any outlets with water level exist
                 boundariesShape = getAvailableFilename(arcpy.env.scratchGDB + r"\BoundaryWaterLevel", parent = MU_database)
                 try:
                     arcpy.CreateFeatureclass_management(os.path.dirname(boundariesShape), os.path.basename(boundariesShape), "POINT")
                     arcpy.AddField_management(boundariesShape, "NodeID", "TEXT")
+                    arcpy.AddField_management(boundariesShape, "NetTypeNo", "SHORT")
                     arcpy.AddField_management(boundariesShape, "B_MUID", "TEXT")
                     arcpy.AddField_management(boundariesShape, "BI_MUID", "TEXT")
                     arcpy.AddField_management(boundariesShape, "Wat_Lev", "FLOAT")
                     arcpy.AddField_management(boundariesShape, "Title", "TEXT")
 
-                    with arcpy.da.InsertCursor(boundariesShape, ["SHAPE@", "NodeID", "B_MUID", "BI_MUID", "Wat_Lev", "Title"]) as cursor:
+                    with arcpy.da.InsertCursor(boundariesShape, ["SHAPE@", "NodeID", "B_MUID", "BI_MUID", "Wat_Lev", "Title", "NetTypeNo"]) as cursor:
                         for outlet in outlets.values():
-                            cursor.insertRow([outlet.geometry, outlet.nodeID, outlet.boundary_MUID, outlet.boundary_item_MUID, outlet.boundary_water_level, outlet.title])
+                            cursor.insertRow([outlet.geometry, outlet.nodeID, outlet.boundary_MUID, outlet.boundary_item_MUID, outlet.boundary_water_level, outlet.title, outlet.net_type_no])
                     addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Boundary Water Level.lyr",
-                        boundariesShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
+                        boundariesShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE", definition_query = sql_query)
                 except Exception as e:
                     arcpy.AddError(traceback.format_exc())
                 
