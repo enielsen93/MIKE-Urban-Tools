@@ -209,6 +209,7 @@ class DisplayMikeUrban(object):
                 update_layer.labelClasses = layer.labelClasses
                 update_layer.showLabels = layer.showLabels
                 update_layer.name = layer.name
+                update_layer.definitionQuery = definition_query
                 
                 try:
                     arcpy.mapping.UpdateLayer(df, update_layer, layer, symbology_only = True)
@@ -232,7 +233,7 @@ class DisplayMikeUrban(object):
                 for label_class in update_layer.labelClasses:
                     if show_depth:
                         label_class.expression = label_class.expression.replace("return labelstr", 'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
-        
+
         layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"        ),
                 manholes, group = empty_group_layer, definition_query = sql_query)
                 
@@ -344,10 +345,13 @@ class DisplayMikeUrban(object):
 
         printStepAndTime("Adding links, weirs and pumps to map")
         arcpy.SetProgressor("default","Adding links, weirs and pumps to map")
-        
+
+        if is_sqlite_database:
+            links_sql_query = sql_query + " AND Enabled = True" if sql_query else "Enabled = True"
+
         addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links.lyr",
-                links, group = empty_group_layer, definition_query = sql_query)
-        
+                links, group = empty_group_layer, definition_query = links_sql_query)
+
         if len([row[0] for row in arcpy.da.SearchCursor(weirs,["MUID"])])>0:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Weir.lyr",
                     weirs, group = empty_group_layer, definition_query = sql_query)
