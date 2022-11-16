@@ -106,13 +106,19 @@ class SummarizeButton(object):
         HParA_conctime = {}
         
         if combobox_1.selectedfield not in [field.name for field in arcpy.ListFields(catchmentLayer)]:
-            MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchmentLayer, ["MUID"])]     
+            try:
+                MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchmentLayer, ["MUID"])]
+            except RuntimeError:
+                fidset = map(int, arcpy.Describe(catchmentLayer).FIDset.split("; "))
+                MUIDs = [row[0] for i, row in enumerate(arcpy.da.SearchCursor(arcpy.Describe(catchmentLayer).catalogPath, ["MUID"])) if i in fidset]
             
-            # If there's more than 500 catchments, the length of the where_clause might exceed memory. If so, then ignore where_clause. 
+            # If there's more than 500 catchments, the length of the where_clause might exceed memory. If so, then ignore where_clause.
             if len(MUIDs)<500:
                 where_clause = "MUID IN ('%s')" % ("', '".join(MUIDs))
+                filter_catchments = False
             else:
                 where_clause = ""
+                filter_catchments = True
             
             if ".mdb" in arcpy.Describe(catchmentLayer).path:
                 msm_HModA = os.path.join(os.path.dirname(arcpy.Describe(catchmentLayer).path), "msm_HModA")
@@ -138,7 +144,7 @@ class SummarizeButton(object):
                             catchments[row[0]].initial_loss = HParA_initloss[row[4]]
                             catchments[row[0]].concentration_time = HParA_conctime[row[4]]
                     
-                with arcpy.da.SearchCursor(catchmentLayer, ["MUID", "SHAPE@AREA", "Area"], where_clause = where_clause) as cursor:
+                with arcpy.da.SearchCursor(arcpy.Describe(catchmentLayer).catalogPath, ["MUID", "SHAPE@AREA", "Area"], where_clause = where_clause) as cursor:
                     for row in cursor:
                         if row[2]:
                             catchments[row[0]].area = row[2]*1e4
@@ -153,7 +159,7 @@ class SummarizeButton(object):
                         HParA_initloss[row[0]] = row[2]
                         HParA_conctime[row[0]] = row[3]
                         
-                with arcpy.da.SearchCursor(catchmentLayer, ["muid", "SHAPE@AREA", "area", "ModelAImpArea", "ModelAParAID", "modelalocalno", "ModelARFactor", "ModelAILoss", "ModelAConcTime"], where_clause = where_clause) as cursor:
+                with arcpy.da.SearchCursor(arcpy.Describe(catchmentLayer).catalogPath, ["muid", "SHAPE@AREA", "area", "ModelAImpArea", "ModelAParAID", "modelalocalno", "ModelARFactor", "ModelAILoss", "ModelAConcTime"], where_clause = where_clause) as cursor:
                     for row in cursor:
                         catchments[row[0]] = Catchment(row[0])
                         if row[2]:
@@ -176,16 +182,16 @@ class SummarizeButton(object):
             # for catchment in catchments.values():
                 # pythonaddins.MessageBox((catchment.area, catchment.imperviousness, catchment.reduction_factor), "Catchment summary", 0)
             
-            if where_clause:
+            if where_clause or filter_catchments:
                 catchments_selected = {MUID: catchments[MUID] for MUID in MUIDs}
             else: 
                 catchments_selected = catchments
-            
-            catchment_area = np.sum([catchment.area for catchment in catchments.values()])
-            catchment_impervious_area = np.sum([catchment.impervious_area for catchment in catchments.values()])
-            catchment_reduced_area = np.sum([catchment.reduced_area for catchment in catchments.values()])
-            catchment_initial_loss = [catchment.initial_loss for catchment in catchments.values()]
-            catchment_concentration_time = [catchment.concentration_time for catchment in catchments.values()]
+
+            catchment_area = np.sum([catchment.area for catchment in catchments_selected.values()])
+            catchment_impervious_area = np.sum([catchment.impervious_area for catchment in catchments_selected.values()])
+            catchment_reduced_area = np.sum([catchment.reduced_area for catchment in catchments_selected.values()])
+            catchment_initial_loss = [catchment.initial_loss for catchment in catchments_selected.values()]
+            catchment_concentration_time = [catchment.concentration_time for catchment in catchments_selected.values()]
             
             message_text = "Total area: %1.2f ha\nImpervious area: %1.2f ha (%1.0f%s)\nReduced area: %1.2f ha" % (
                             catchment_area/1e4, catchment_impervious_area/1e4, catchment_impervious_area/catchment_area*1e2, "%", catchment_reduced_area/1e4)
