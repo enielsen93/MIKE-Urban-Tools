@@ -17,6 +17,7 @@ import os
 import traceback
 import re
 import scipy.integrate
+from collections import namedtuple
 
 def getAvailableFilename(filepath, parent = None):
     parent = "F%s" % (parent) if parent and parent[0].isdigit() else None
@@ -147,7 +148,7 @@ class DisplayMikeUrban(object):
         links = MU_database + "\mu_Geometry\msm_Link"
         catchments = MU_database + "\mu_Geometry\ms_Catchment" if not ".sqlite" in MU_database else MU_database + "\msm_Catchment"
         catchcons = MU_database + "\mu_Geometry\msm_CatchConLink" if not ".sqlite" in MU_database else MU_database + "\msm_CatchCon"
-        weirs = MU_database + "\mu_Geometry\msm_Weir"
+        weirs = MU_database + "\mu_Geometry\msm_Weir" if not ".sqlite" in MU_database else MU_database + "\msm_Weir"
         orifices = MU_database + "\msm_Orifice"
         networkLoad = MU_database + "\msm_BBoundary"
         msm_Pump = MU_database + "\msm_Pump"
@@ -256,8 +257,11 @@ class DisplayMikeUrban(object):
 
             @property
             def edges_sort(self):
-                idx_sort = np.argsort([edge.uplevel for edge in self.edges])
-                return [self.edges[i] for i in idx_sort]
+                if len(self.edges)>1:
+                    idx_sort = np.argsort([edge.uplevel for edge in self.edges])
+                    return [self.edges[i] for i in idx_sort]
+                else:
+                    return [self.edges[0]]
 
             @property
             def terrain_elevation(self):
@@ -271,7 +275,11 @@ class DisplayMikeUrban(object):
                 elevations = [elevation for elevation in elevations if elevation < self.critical_level] + [self.critical_level]
                 surface_areas = np.interp(elevations, np.sort(self.value1), surface_areas)
                 return np.trapz(surface_areas, elevations)
-
+                
+            @property
+            def max_area(self):
+                return np.max(self.value3)
+            
             def get_volume(self, level):
                 idxSort = np.argsort(self.value1)
                 elevations = np.array(self.value1)[idxSort]
@@ -282,7 +290,7 @@ class DisplayMikeUrban(object):
                 return np.interp(level, elevations, [0] + list(scipy.integrate.cumtrapz(surface_areas, elevations)))
 
         basins = {}
-        if not is_sqlite_database:
+        if True:
             arcpy.SetProgressor("default", "Calculating volume of basins")
             printStepAndTime("Calculating volume of basins")
             # Import basins
@@ -291,16 +299,37 @@ class DisplayMikeUrban(object):
                     basins[row[0]] = Basin(row[1])
 
             if len(basins)>0:
+                fromnode_fieldname = "fromnode" if not is_sqlite_database else "fromnodeid"
+                tonode_fieldname = "tonode" if not is_sqlite_database else "tonodeid"
                 outlet_feature_classes = {links: "UpLevel", orifices: "InvertLevel", weirs: "CrestLevel"}
+                tonodes = {}
                 for feature_class, uplevel_fieldname in zip(outlet_feature_classes.keys(),
                                                             outlet_feature_classes.values()):
-                    if "fromnode" in [field.name.lower() for field in arcpy.ListFields(feature_class)]:
-                        with arcpy.da.SearchCursor(feature_class, ["FromNode", uplevel_fieldname, "MUID"],
-                                                   where_clause="fromnode IN ('%s')" % (
-                                                   "', '".join(basins.keys()))) as cursor:
+                    if fromnode_fieldname in [field.name.lower() for field in arcpy.ListFields(feature_class)]:
+                        with arcpy.da.SearchCursor(feature_class, [fromnode_fieldname, uplevel_fieldname, "MUID", tonode_fieldname],
+                                                   where_clause="%s IN ('%s')" % (fromnode_fieldname,
+                                                                                  "', '".join(basins.keys()))) as cursor:
                             for row in cursor:
+                                if row[3]:
+                                    if row[0] in tonodes:
+                                        tonodes[row[0]].append(row[3])
+                                    else:
+                                        tonodes[row[0]] = [row[3]]
                                 if row[1]:
-                                    basins[row[0]].edges.append(Basin.Edge(row[2], row[1]))
+                                    basins[row[0]].edges.append(basins[row[0]].Edge(row[2], row[1]))
+
+                for feature_class, uplevel_fieldname in zip(outlet_feature_classes.keys(),
+                                                            outlet_feature_classes.values()):
+                    if fromnode_fieldname in [field.name.lower() for field in arcpy.ListFields(feature_class)]:
+                        with arcpy.da.SearchCursor(feature_class,
+                                                   [fromnode_fieldname, uplevel_fieldname, "MUID", tonode_fieldname],
+                                                   where_clause="%s IN ('%s')" % (fromnode_fieldname,
+                                                                                  "', '".join(
+                                                                                      [item for sublist in tonodes.values() for item in sublist]))) as cursor:
+                            for row in cursor:
+                                basin_MUIDs = [a for a in tonodes if row[0] in tonodes[a]]
+                                for basin_MUID in basin_MUIDs:
+                                    basins[basin_MUID].edges.append(basins[basin_MUID].Edge(row[2], row[1]))
 
                 with arcpy.da.SearchCursor(os.path.join(MU_database, r"ms_TabD"), ["TabID", "Value1", "Value3"],
                                             where_clause = "TabID IN ('%s')" % ("', '".join(
@@ -312,31 +341,40 @@ class DisplayMikeUrban(object):
 
                 exportBasins = getAvailableFilename(arcpy.env.scratchGDB + r"\basins", parent = MU_database)
                 arcpy.Select_analysis(manholes, exportBasins, where_clause = "TypeNo = 2")
-
-                with arcpy.da.UpdateCursor(exportBasins, ["MUID","Freeboard_2D", "CriticalLevel", "GeometryID", "Description", "GroundLevel", "InvertLevel"]) as cursor:
+                arcpy.management.AddField(exportBasins, "Volume", "FLOAT")
+                arcpy.management.AddField(exportBasins, "MaxArea", "FLOAT")
+                with arcpy.da.UpdateCursor(exportBasins, ["MUID","Volume", "CriticalLevel", "GeometryID", "Description", "GroundLevel", "InvertLevel", "MaxArea"]) as cursor:
                     for row in cursor:
-                        basin = basins[row[0]]
-                        if row[2]:
-                            basin.critical_level = row[2]
-                        try:
-                            row[1] = basin.max_volume
-                            # cursor.updateRow(row)
-                        except Exception as e:
-                            arcpy.AddWarning("Error: Could not calculate volume of basin %s" % (row[0]))
-                            arcpy.AddWarning(traceback.format_exc())
+                        if row[0] in basins:
+                            basin = basins[row[0]]
+                            if row[2]:
+                                basin.critical_level = row[2]
+                            try:
+                                row[1] = basin.max_volume
+                                row[7] = basin.max_area
+                                description = ""
+                                if basin.edges:
+                                    for edge in basin.edges_sort:
+                                        description += "%s (%1.2f): %d m3\n" % (edge.name, edge.uplevel, basin.get_volume(
+                                            edge.uplevel)) if edge.uplevel and edge.uplevel < row[5] and edge.uplevel > row[
+                                            6] else ""
 
-                        description = ""
-                        for edge in basin.edges_sort:
-                            description += "%s (%1.2f): %d m3\n" % (edge.name, edge.uplevel, basin.get_volume(edge.uplevel)) if edge.uplevel and edge.uplevel < row[5] and edge.uplevel > row[6] else ""
+                                if basin.critical_level and basin.critical_level < row[5]:
+                                    description += "Maks. (%1.2f): %d m3\n" % (
+                                    basin.critical_level, basin.get_volume(basin.critical_level))
+                                else:
+                                    description += "Maks. (%1.2f): %d m3\n" % (row[5], basin.max_volume)
 
-                        if basin.critical_level and basin.critical_level < row[5]:
-                            description += "Maks. (%1.2f): %d m3\n" % (basin.critical_level, basin.get_volume(basin.critical_level))
-                        else:
-                            description += "Maks. (%1.2f): %d m3\n" % (row[5], basin.max_volume)
+                                row[4] = description
+                                # cursor.updateRow(row)
+                            except Exception as e:
+                                arcpy.AddWarning("Error: Could not calculate volume of basin %s" % (row[0]))
+                                arcpy.AddWarning(basin.value1)
+                                arcpy.AddWarning(basin.value3)
+                                arcpy.AddWarning(basin.edges)
+                                arcpy.AddWarning(traceback.format_exc())
 
-                        row[4] = description if len(description)<50 else ""
-
-                        cursor.updateRow(row)
+                            cursor.updateRow(row)
 
                 printStepAndTime("Adding basins to map")
                 arcpy.SetProgressor("default","Adding basins to map")
@@ -348,6 +386,8 @@ class DisplayMikeUrban(object):
 
         if is_sqlite_database:
             links_sql_query = sql_query + " AND Enabled = True" if sql_query else "Enabled = True"
+        else:
+            links_sql_query = sql_query
 
         addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links.lyr",
                 links, group = empty_group_layer, definition_query = links_sql_query)
@@ -553,12 +593,64 @@ class DisplayMikeUrban(object):
         if join_catchments and not ".sqlite" in MU_database:
             arcpy.SetProgressor("default","Joining ms_Catchment and msm_HModA and adding catchments to map")
             ms_Catchment = arcpy.CopyFeatures_management(MU_database + r"\mu_Geometry\ms_Catchment", getAvailableFilename(arcpy.env.scratchGDB + "\ms_CatchmentImp", parent = MU_database)).getOutput(0)
-            ms_CatchmentImpLayer = arcpy.MakeFeatureLayer_management(ms_Catchment, getAvailableFilename(arcpy.env.scratchGDB + "\ms_CatchmentImpLayer", parent = MU_database)).getOutput(0).name
-            arcpy.JoinField_management(in_data=ms_CatchmentImpLayer, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_HModA", join_field="CatchID", fields="ImpArea")
-            arcpy.JoinField_management(in_data=ms_CatchmentImpLayer, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_CatchCon", join_field="CatchID", fields="NodeID")
-            arcpy.AddMessage(ms_CatchmentImpLayer)
+            arcpy.JoinField_management(in_data=ms_Catchment, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_HModA", join_field="CatchID", fields="ImpArea")
+
+            arcpy.management.AddField(ms_Catchment, "ParAID", "TEXT")
+            arcpy.management.AddField(ms_Catchment, "RedFactor", "FLOAT")
+            arcpy.management.AddField(ms_Catchment, "ConcTime", "FLOAT")
+            arcpy.management.AddField(ms_Catchment, "InitLoss", "FLOAT")
+
+            class HParA:
+                reduction_factor = None
+                concentration_time = None
+                initial_loss = None
+
+            hParA_dict = {}
+            with arcpy.da.SearchCursor(parameters[0].ValueAsText + r"\msm_HParA", ["MUID", "RedFactor", "ConcTime", "InitLoss"]) as cursor:
+                for row in cursor:
+                    hParA_dict[row[0]] = HParA()
+                    hParA_dict[row[0]].reduction_factor = row[1]
+                    hParA_dict[row[0]].concentration_time = row[2]
+                    hParA_dict[row[0]].initial_loss = row[3]
+
+            catchments_dict = {}
+            class Catchment:
+                ParAID = None
+                reduction_factor = None
+                concentration_time = None
+                initial_loss = None
+
+            with arcpy.da.SearchCursor(parameters[0].ValueAsText + r"\msm_HModA",
+                                       ["CatchID", "ImpArea", "ParAID", "LocalNo", "RFactor", "ConcTime", "ILoss"]) as cursor:
+                for row in cursor:
+                    try:
+                        catchments_dict[row[0]] = Catchment()
+                        catchments_dict[row[0]].ParAID = row[2] if row[3] == 0 else ""
+                        catchments_dict[row[0]].reduction_factor = (hParA_dict[row[2]].reduction_factor
+                                                                         if row[3] == 0 else row[4])
+                        catchments_dict[row[0]].concentration_time = (hParA_dict[row[2]].concentration_time
+                                                                           if row[3] == 0 else row[5])
+                        catchments_dict[row[0]].initial_loss = (hParA_dict[row[2]].initial_loss
+                                                                      if row[3] == 0 else row[6])
+                    except Exception as e:
+                        catchments_dict[row[0]].concentration_time = 7
+                        catchments_dict[row[0]].reduction_factor = 0
+                        warnings.warn("%s not found in msm_HParA" % (row[2]))
+
+            with arcpy.da.UpdateCursor(ms_Catchment, ["MUID", "ParAID", "RedFactor", "ConcTime", "InitLoss"]) as cursor:
+                for row in cursor:
+                    catchment = catchments_dict[row[0]]
+                    row[1] = catchment.ParAID
+                    row[2] = catchment.reduction_factor
+                    row[3] = catchment.concentration_time
+                    row[4] = catchment.initial_loss
+                    cursor.updateRow(row)
+
+            arcpy.JoinField_management(in_data=ms_Catchment, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_CatchCon", join_field="CatchID", fields="NodeID")
+            arcpy.management.AddField(ms_Catchment, "RedFactor", field_type = "FLOAT")
+
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments W Imp Area.lyr",
-                    ms_CatchmentImpLayer, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
+                    ms_Catchment, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
             
         else:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments WO Imp Area.lyr",
