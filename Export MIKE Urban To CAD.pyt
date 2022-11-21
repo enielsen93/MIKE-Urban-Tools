@@ -56,7 +56,7 @@ class DisplayMikeUrbanAsCAD(object):
             displayName="Mike Urban database",
             name="database",
             datatype="DEWorkspace",
-            parameterType="Required",
+            parameterType="Optional",
             direction="Input")
             
         label_scale = arcpy.Parameter(
@@ -462,14 +462,17 @@ class ExportToCAD(object):
 
         inPolygonIndexLayer = os.path.join(arcpy.env.scratchWorkspace, "Extent")
 
-        arcpy.TiledLabelsToAnnotation_cartography(
+        labels = arcpy.TiledLabelsToAnnotation_cartography(
             os.path.join(MIKE_gdb, "CAD.mxd"), "Layers", inPolygonIndexLayer, arcpy.env.scratchWorkspace,
             "anno", "_", label_scale, generate_unplaced_annotation="NOT_GENERATE_UNPLACED_ANNOTATION")
+
+        arcpy.AddMessage(labels)
 
         arcpy.env.workspace = arcpy.env.scratchWorkspace
         anno_classes = [os.path.join(arcpy.env.scratchWorkspace, fc) for fc in arcpy.ListFeatureClasses(feature_type = "Annotation")]
         feature_layers = [layer.longName for layer in arcpy.mapping.ListLayers(mxd, "", df) if not layer.isGroupLayer and layer.isFeatureLayer and layer.visible]
         layers = anno_classes + feature_layers
+        arcpy.AddMessage(layers)
         arcpy.ExportCAD_conversion(anno_classes + feature_layers, Output_Type = "DWG_R2010", Output_File = dgn_file,
                                     Seed_File = os.path.dirname(os.path.realpath(__file__)) + r"\Data\ExportToCAD\Seedfile.dwg")
         return
