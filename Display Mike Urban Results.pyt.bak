@@ -8,7 +8,7 @@ arcpy.env.addOutputsToMap = False
 import codecs
 import sys
 import mousereader
-import colebrookWhite
+import ColebrookWhite
 import networker
 import codecs
 m11extraPath = r"C:\Program Files (x86)\DHI\2016\bin\m11extra.exe"
@@ -133,6 +133,11 @@ class DisplayFloodReturnPeriodFun(object):
                 txt = f.read()
                 observationPeriod = float(re.findall(r"Observation_period =[^,]+,[^,]+,([^\n]+)",txt)[0])
                 parameters[1].value = observationPeriod
+        #
+        # if parameters[0].altered:
+        #     parameters[3].value = getAvailableFilename(os.path.join(arcpy.env.scratchGDB, os.path.basename(parameters[0].ValueAsText)).replace(".ERF","_NodeFlood"))
+        #     parameters[4].value = getAvailableFilename(
+        #         os.path.join(arcpy.env.scratchGDB, os.path.basename(parameters[0].ValueAsText)).replace(".ERF", "_BasinFlood"))
         return
 
     def updateMessages(self, parameters): #optional
@@ -264,22 +269,26 @@ class DisplayFloodReturnPeriodFun(object):
                     msm_LinkToNode[row[0]] = row[2]
         arcpy.SetProgressorLabel("Reading ERF-file")
         dataTables = mousereader.readERF(erfFile,"MaxLevel_Ranked",MUIDs)
-        
         arcpy.SetProgressorLabel("Getting return period of flooding")
         MUIDsTCrit = {}
         for i,MUID in enumerate(MUIDs):
-            nodeH = dataTables[i]["col2"]
-            if MUIDsHCrit[MUID]>np.max(nodeH):
-                MUIDsTCrit[MUID] = 1000
-            elif MUIDsHCrit[MUID]<np.min(nodeH):
-                MUIDsTCrit[MUID] = 0
-            else:
-                MUIDsTCrit[MUID] = np.interp(MUIDsHCrit[MUID],
-                      np.flipud(nodeH),
-                      np.flipud(float(observationPeriod)/(np.array(range(len(nodeH)))+1)))
+            try:
+                # arcpy.AddMessage(dataTables[i])
+                nodeH = dataTables[i]["col2"]
+                if MUIDsHCrit[MUID]>np.max(nodeH):
+                    MUIDsTCrit[MUID] = 1000
+                elif MUIDsHCrit[MUID]<np.min(nodeH):
+                    MUIDsTCrit[MUID] = 0
+                else:
+                    MUIDsTCrit[MUID] = np.interp(MUIDsHCrit[MUID],
+                          np.flipud(nodeH),
+                          np.flipud(float(observationPeriod)/(np.array(range(len(nodeH)))+1)))
+            except Exception as e:
+                arcpy.AddError(MUID)
+                arcpy.AddError(traceback.format_exc())
         
         arcpy.SetProgressorLabel("Creating manhole result file")
-        msm_NodeNew = arcpy.CopyFeatures_management(msm_Node,exportShape)
+        msm_NodeNew = arcpy.CopyFeatures_management(msm_Node, exportShape)
 
         arcpy.AddField_management (msm_NodeNew, "TCrit", "DOUBLE", 10, 5)
         with arcpy.da.UpdateCursor(msm_NodeNew,["MUID","TCrit"]) as cursor:
@@ -294,6 +303,7 @@ class DisplayFloodReturnPeriodFun(object):
         nodeLayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Node.lyr")
         nodeLayer = arcpy.mapping.AddLayer(df, nodeLayer)
         nodeLayer = arcpy.mapping.ListLayers(mxd, nodeLayer, df)[0]
+        arcpy.AddMessage((os.path.dirname(exportShape), "SHAPEFILE_WORKSPACE", os.path.basename(exportShape).split(".")[0]))
         nodeLayer.replaceDataSource(os.path.dirname(exportShape), "SHAPEFILE_WORKSPACE", os.path.basename(exportShape).split(".")[0])
         
         arcpy.SetProgressorLabel("Creating basin result file")
@@ -579,16 +589,24 @@ class DisplayWeirStatistics(object):
         MUIDsQVol = {}
         MUIDsQNo = {}
         MUIDsQHours = {}
-
+        # arcpy.AddMessage(weirs)
         getMUIDRe = re.compile(r"ALIGN=LEFT>([^<]+)")
-        getQs = re.compile(r"<TD>([0-9 <>\.]+)<\/TD><TD>([0-9 <>\.]+)<\/TD><TD>([0-9 <>\.]+)<\/TD><\/TR>$")
+        getQs = re.compile(r"<TD>([-0-9 <>\.]+)<\/TD><TD>([-0-9 <>\.]+)<\/TD><TD>([-0-9 <>\.]+)<\/TD><\/TR>$")
         for line in htmlFileTxtWeirs:
             if "ALIGN=LEFT" in line:
-                arcpy.AddMessage(weirs["%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1])])
-                arcpy.AddMessage("%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1]))
-                MUIDsQVol[weirs["%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1])]] = float(getQs.findall(line)[0][0])
-                MUIDsQNo[weirs["%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1])]] = float(getQs.findall(line)[0][1])
-                MUIDsQHours[weirs["%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1])]] = float(getQs.findall(line)[0][2])
+                try:
+                    # arcpy.AddMessage(weirs["%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1])])
+                    # arcpy.AddMessage("%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1]))
+                    fromnode = getMUIDRe.findall(line)[0]
+                    tonode = getMUIDRe.findall(line)[1] if not "Weir Outlet" in line else "0"
+                    MUIDsQVol[weirs["%s-%s" % (fromnode, tonode)]] = float(getQs.findall(line)[0][0])
+                    MUIDsQNo[weirs["%s-%s" % (fromnode, tonode)]] = float(getQs.findall(line)[0][1])
+                    MUIDsQHours[weirs["%s-%s" % (fromnode, tonode)]] = float(getQs.findall(line)[0][2])
+                except Exception as e:
+                    arcpy.AddError("Error on line %s" % (line))
+                    arcpy.AddError(traceback.format_exc())
+                    raise(e)
+
         
         with arcpy.da.UpdateCursor(msm_weir[0],["MUID", "QVol", "QNo", "QHour", "fromnode", "tonode"]) as cursor:
             for row in cursor:

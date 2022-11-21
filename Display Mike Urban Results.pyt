@@ -19,6 +19,7 @@ m11extraPath = m11extraPath.replace("2016",str(i))
 from subprocess import call
 from shutil import copyfile
 import traceback
+# arcpy.env.workspace = arcpy.env.scratchGDB
 
 def getAvailableFilename(filepath):
     if arcpy.Exists(filepath):
@@ -60,8 +61,15 @@ class DisplayFloodReturnPeriodFun(object):
             name="observationPeriod",
             datatype="Double",
             parameterType="Required",
-            direction="Input")      
-        
+            direction="Input")
+
+        critical_return_period = arcpy.Parameter(
+            displayName="Critical Return Period (5 years, 10 years or 20 years)",
+            name="critical_return_period",
+            datatype="Double",
+            parameterType="Optional",
+            direction="Input")
+
         MU_database = arcpy.Parameter(
             displayName="Mike Urban Database",
             name="database",
@@ -72,14 +80,14 @@ class DisplayFloodReturnPeriodFun(object):
         exportShape = arcpy.Parameter(
             displayName="Output manholes with Flood Return Period",
             name="exportShape",
-            datatype="DEShapefile",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
             
         exportBasins = arcpy.Parameter(
             displayName="Output basins with Flood Return Period",
             name="exportBasins",
-            datatype="DEShapefile",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
             
@@ -120,7 +128,7 @@ class DisplayFloodReturnPeriodFun(object):
         breakChainOnNodes.category = "Additional settings"
         breakChainOnNodes.category = "Get Catchment Area"
             
-        parameters = [erfFile, observationPeriod, MU_database, exportShape, exportBasins, flowFile, traceNetwork, reaches, breakChainOnNodes]
+        parameters = [erfFile, observationPeriod, critical_return_period, MU_database, exportShape, exportBasins, flowFile, traceNetwork, reaches, breakChainOnNodes]
         
         return parameters
 
@@ -133,6 +141,11 @@ class DisplayFloodReturnPeriodFun(object):
                 txt = f.read()
                 observationPeriod = float(re.findall(r"Observation_period =[^,]+,[^,]+,([^\n]+)",txt)[0])
                 parameters[1].value = observationPeriod
+        #
+        # if parameters[0].altered:
+        #     parameters[3].value = getAvailableFilename(os.path.join(arcpy.env.scratchGDB, os.path.basename(parameters[0].ValueAsText)).replace(".ERF","_NodeFlood"))
+        #     parameters[4].value = getAvailableFilename(
+        #         os.path.join(arcpy.env.scratchGDB, os.path.basename(parameters[0].ValueAsText)).replace(".ERF", "_BasinFlood"))
         return
 
     def updateMessages(self, parameters): #optional
@@ -141,7 +154,8 @@ class DisplayFloodReturnPeriodFun(object):
     def execute(self, parameters, messages):
         erfFile = parameters[0].ValueAsText
         observationPeriod = float(parameters[1].ValueAsText)
-        MUDatabase = parameters[2].ValueAsText
+        critical_return_period = float(parameters[2].ValueAsText)
+        MUDatabase = parameters[3].ValueAsText
         msm_Node = MUDatabase + "\msm_Node"
         msm_Link = MUDatabase + "\msm_Link"
         msm_Weir = MUDatabase + "\msm_Weir"
@@ -152,11 +166,12 @@ class DisplayFloodReturnPeriodFun(object):
         msm_HModA = os.path.join(MUDatabase,"msm_HModA")
         msm_HParA = os.path.join(MUDatabase,"msm_HParA")
         
-        exportShape = parameters[3].ValueAsText
-        exportBasins = parameters[4].ValueAsText
-        flowFile = parameters[5].ValueAsText
-        traceNetwork = parameters[6].ValueAsText
-        reaches = parameters[7].ValueAsText
+        exportShape = parameters[4].ValueAsText
+        exportBasins = parameters[5].ValueAsText
+        flowFile = parameters[6].ValueAsText
+        traceNetwork = parameters[7].ValueAsText
+        reaches = parameters[8].ValueAsText
+        # break_chain_on_nodes = parameters[9].ValueAsText
         
         arcpy.SetProgressorLabel("Getting critical level for manholes")
         MUIDsHCrit = {}
@@ -166,6 +181,7 @@ class DisplayFloodReturnPeriodFun(object):
                     MUIDsHCrit[row[0]] = row[2]
                 else:
                     MUIDsHCrit[row[0]] = row[1]
+
         MUIDs = MUIDsHCrit.keys()
         if flowFile:
             arcpy.SetProgressorLabel("Getting Discharge from Basins")
@@ -264,22 +280,44 @@ class DisplayFloodReturnPeriodFun(object):
                     msm_LinkToNode[row[0]] = row[2]
         arcpy.SetProgressorLabel("Reading ERF-file")
         dataTables = mousereader.readERF(erfFile,"MaxLevel_Ranked",MUIDs)
-        
+        arcpy.AddMessage(dataTables)
         arcpy.SetProgressorLabel("Getting return period of flooding")
         MUIDsTCrit = {}
+        MUIDs_volume_at_crit = {}
         for i,MUID in enumerate(MUIDs):
-            nodeH = dataTables[i]["col2"]
-            if MUIDsHCrit[MUID]>np.max(nodeH):
-                MUIDsTCrit[MUID] = 1000
-            elif MUIDsHCrit[MUID]<np.min(nodeH):
-                MUIDsTCrit[MUID] = 0
-            else:
-                MUIDsTCrit[MUID] = np.interp(MUIDsHCrit[MUID],
-                      np.flipud(nodeH),
-                      np.flipud(float(observationPeriod)/(np.array(range(len(nodeH)))+1)))
+            try:
+                # arcpy.AddMessage(dataTables[i])
+                nodeH = dataTables[i]["col2"]
+                MUIDs_volume_at_crit[MUID] = -1
+
+                if MUID == "B828":
+                    arcpy.AddMessage((critical_return_period,
+                                      np.flipud(float(observationPeriod) /
+                                                (np.array(range(len(nodeH))) + 1)),
+                                      np.flipud(nodeH)))
+
+                if MUIDsHCrit[MUID]>np.max(nodeH):
+                    MUIDsTCrit[MUID] = 1000
+                elif MUIDsHCrit[MUID]<np.min(nodeH):
+                    MUIDsTCrit[MUID] = 0
+                else:
+                    MUIDsTCrit[MUID] = np.interp(MUIDsHCrit[MUID],
+                          np.flipud(nodeH),
+                          np.flipud(float(observationPeriod)/(np.array(range(len(nodeH)))+1)))
+                if critical_return_period:
+                    try:
+                        MUIDs_volume_at_crit[MUID] = np.interp(critical_return_period,
+                                                           np.flipud(float(observationPeriod) /
+                                                                     (np.array(range(len(nodeH))) + 1)),
+                                                           np.flipud(nodeH))
+                    except Exception as e:
+                        pass
+            except Exception as e:
+                arcpy.AddError(MUID)
+                arcpy.AddError(traceback.format_exc())
         
         arcpy.SetProgressorLabel("Creating manhole result file")
-        msm_NodeNew = arcpy.CopyFeatures_management(msm_Node,exportShape)
+        msm_NodeNew = arcpy.CopyFeatures_management(msm_Node, exportShape)
 
         arcpy.AddField_management (msm_NodeNew, "TCrit", "DOUBLE", 10, 5)
         with arcpy.da.UpdateCursor(msm_NodeNew,["MUID","TCrit"]) as cursor:
@@ -291,22 +329,75 @@ class DisplayFloodReturnPeriodFun(object):
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
         arcpy.env.addOutputsToMap = False
-        nodeLayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Node.lyr")
-        nodeLayer = arcpy.mapping.AddLayer(df, nodeLayer)
-        nodeLayer = arcpy.mapping.ListLayers(mxd, nodeLayer, df)[0]
-        nodeLayer.replaceDataSource(os.path.dirname(exportShape), "SHAPEFILE_WORKSPACE", os.path.basename(exportShape).split(".")[0])
+
+        def addLayer(layer_source, source, group=None, workspace_type = None, new_name=None,
+                     definition_query=None):
+            if not workspace_type:
+                if ".mdb" in source:
+                    workspace_type = "ACCESS_WORKSPACE"
+                elif ".shp" in source:
+                    workspace_type = "SHAPEFILE_WORKSPACE"
+                elif ".gdb" in source:
+                    workspace_type = "FILEGDB_WORKSPACE"
+            if ".sqlite" in source:
+                source_layer = arcpy.mapping.Layer(source)
+
+                if group:
+                    arcpy.mapping.AddLayerToGroup(df, group, source_layer, "BOTTOM")
+                else:
+                    arcpy.mapping.AddLayer(df, source_layer, "TOP")
+                update_layer = arcpy.mapping.ListLayers(mxd, source_layer.name, df)[0]
+
+                layer_source_mike_plus = layer_source.replace("MOUSE",
+                                                              "MIKE+") if "MOUSE" in layer_source and os.path.exists(
+                    layer_source.replace("MOUSE", "MIKE+")) else None
+                layer_source = layer_source_mike_plus if layer_source_mike_plus else layer_source
+                layer = arcpy.mapping.Layer(layer_source)
+                update_layer.visible = layer.visible
+                update_layer.labelClasses = layer.labelClasses
+                update_layer.showLabels = layer.showLabels
+                update_layer.name = layer.name
+                update_layer.definitionQuery = definition_query
+
+                try:
+                    arcpy.mapping.UpdateLayer(df, update_layer, layer, symbology_only=True)
+                except Exception as e:
+                    arcpy.AddWarning(source)
+                    pass
+            else:
+                layer = arcpy.mapping.Layer(layer_source)
+                if group:
+                    arcpy.mapping.AddLayerToGroup(df, group, layer, "BOTTOM")
+                else:
+                    arcpy.mapping.AddLayer(df, layer, "BOTTOM")
+                update_layer = arcpy.mapping.ListLayers(mxd, layer.name, df)[0]
+                if definition_query:
+                    update_layer.definitionQuery = definition_query
+                if new_name:
+                    update_layer.name = new_name
+                # arcpy.AddMessage((unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))),
+                #                                workspace_type, unicode(os.path.basename(source))))
+                update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))),
+                                               workspace_type, unicode(os.path.basename(source)))
+
+        addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Node.lyr", exportShape)
+        # nodeLayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Node.lyr")
+        # nodeLayer = arcpy.mapping.AddLayer(df, nodeLayer)
+        # nodeLayer = arcpy.mapping.ListLayers(mxd, nodeLayer, df)[0]
+        # # arcpy.AddMessage((os.path.dirname(exportShape), "SHAPEFILE_WORKSPACE", os.path.basename(exportShape)))
+        # nodeLayer.replaceDataSource(exportShape, "SHAPEFILE_WORKSPACE")
         
         arcpy.SetProgressorLabel("Creating basin result file")
         arcpy.Select_analysis(MUDatabase + r"\mu_Geometry\msm_Node", exportBasins, where_clause = "TypeNo = 2")
-        fields = ["MUID", "GeometryID","CriticalLe", "Volume", "TCrit", "CatchArea", "CatchImpA"]
-        if flowFile:
-            arcpy.AddField_management(exportBasins, "Discharge", "FLOAT")
-            fields.append("Discharge")
+        fields = ["MUID", "GeometryID","CriticalLe" if ".shp" in exportBasins else "CriticalLevel", "Volume", "TCrit", "CatchArea", "CatchImpA", "Discharge", "VolCrit"]
+
+        arcpy.AddField_management(exportBasins, "Discharge", "FLOAT")
         arcpy.AddField_management(exportBasins, "Volume", "FLOAT")
         arcpy.AddField_management(exportBasins, "TCrit", "FLOAT")
+        arcpy.AddField_management(exportBasins, "VolCrit", "FLOAT")
         arcpy.AddField_management(exportBasins, "CatchArea", "FLOAT")
         arcpy.AddField_management(exportBasins, "CatchImpA", "FLOAT")
-        
+
         class Basin:
             def __init__(self, MUID):
                 self.MUID = MUID
@@ -317,7 +408,7 @@ class DisplayFloodReturnPeriodFun(object):
                 self.direct_catchment_area_impervious = None
                 self.total_catchment_area = None
                 self.total_catchment_area_impervious = None
-        
+
         basins = {}
         for basin in [row[0] for row in arcpy.da.SearchCursor(exportBasins, ["MUID"])]:
             basins[basin] = Basin(basin)
@@ -430,7 +521,8 @@ class DisplayFloodReturnPeriodFun(object):
                 
                 basins[basin].total_catchment_area = round(np.sum([catchmentAreaDict[catchID] for catchID in catchIDs])/1e4*100)/100
                 basins[basin].total_catchment_area_impervious = round(np.sum([catchmentImperviousAreaDict[catchID] for catchID in catchIDs])/1e4*100)/100
-                
+
+        arcpy.AddMessage(fields)
         arcpy.SetProgressorLabel("Creating basin result file - analyzing basin volume")
         with arcpy.da.UpdateCursor(exportBasins, fields) as cursor:
             for row in cursor:
@@ -440,7 +532,7 @@ class DisplayFloodReturnPeriodFun(object):
                     for msTabRow in msTabCursor:
                         basinH.append(msTabRow[0])
                         basinA.append(msTabRow[1])
-                        
+
                 idxSort = np.argsort(basinH)
                 basinH = np.array(basinH)
                 basinA = np.array(basinA)
@@ -484,15 +576,18 @@ class DisplayFloodReturnPeriodFun(object):
                     
                 row[5] = basins[row[0]].total_catchment_area if basins[row[0]].total_catchment_area else 0
                 row[6] = basins[row[0]].total_catchment_area_impervious if basins[row[0]].total_catchment_area_impervious else 0
+                if critical_return_period:
+                    row[8] = MUIDs_volume_at_crit[row[0]]
                 cursor.updateRow(row)
         
-        if flowFile:
-            basinLayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Basin Discharge.lyr")
-        else:
-            basinLayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Basin.lyr")
-        basinLayer = arcpy.mapping.AddLayer(df, basinLayer)
-        basinLayer = arcpy.mapping.ListLayers(mxd, basinLayer, df)[0]
-        basinLayer.replaceDataSource(os.path.dirname(exportBasins), "SHAPEFILE_WORKSPACE", os.path.basename(exportBasins).split(".")[0])
+        # if flowFile:
+        addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Basin Discharge.lyr", exportBasins)
+        # basinLayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Basin Discharge.lyr")
+        # # else:
+        # #     basinLayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Basin.lyr")
+        # basinLayer = arcpy.mapping.AddLayer(df, basinLayer)
+        # basinLayer = arcpy.mapping.ListLayers(mxd, basinLayer, df)[0]
+        # basinLayer.replaceDataSource(os.path.dirname(exportBasins), "SHAPEFILE_WORKSPACE", os.path.basename(exportBasins).split(".")[0])
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
         return
@@ -579,16 +674,24 @@ class DisplayWeirStatistics(object):
         MUIDsQVol = {}
         MUIDsQNo = {}
         MUIDsQHours = {}
-
+        # arcpy.AddMessage(weirs)
         getMUIDRe = re.compile(r"ALIGN=LEFT>([^<]+)")
-        getQs = re.compile(r"<TD>([0-9 <>\.]+)<\/TD><TD>([0-9 <>\.]+)<\/TD><TD>([0-9 <>\.]+)<\/TD><\/TR>$")
+        getQs = re.compile(r"<TD>([-0-9 <>\.]+)<\/TD><TD>([-0-9 <>\.]+)<\/TD><TD>([-0-9 <>\.]+)<\/TD><\/TR>$")
         for line in htmlFileTxtWeirs:
             if "ALIGN=LEFT" in line:
-                arcpy.AddMessage(weirs["%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1])])
-                arcpy.AddMessage("%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1]))
-                MUIDsQVol[weirs["%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1])]] = float(getQs.findall(line)[0][0])
-                MUIDsQNo[weirs["%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1])]] = float(getQs.findall(line)[0][1])
-                MUIDsQHours[weirs["%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1])]] = float(getQs.findall(line)[0][2])
+                try:
+                    # arcpy.AddMessage(weirs["%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1])])
+                    # arcpy.AddMessage("%s-%s" % (getMUIDRe.findall(line)[0],getMUIDRe.findall(line)[1]))
+                    fromnode = getMUIDRe.findall(line)[0]
+                    tonode = getMUIDRe.findall(line)[1] if not "Weir Outlet" in line else "0"
+                    MUIDsQVol[weirs["%s-%s" % (fromnode, tonode)]] = float(getQs.findall(line)[0][0])
+                    MUIDsQNo[weirs["%s-%s" % (fromnode, tonode)]] = float(getQs.findall(line)[0][1])
+                    MUIDsQHours[weirs["%s-%s" % (fromnode, tonode)]] = float(getQs.findall(line)[0][2])
+                except Exception as e:
+                    arcpy.AddError("Error on line %s" % (line))
+                    arcpy.AddError(traceback.format_exc())
+                    raise(e)
+
         
         with arcpy.da.UpdateCursor(msm_weir[0],["MUID", "QVol", "QNo", "QHour", "fromnode", "tonode"]) as cursor:
             for row in cursor:
