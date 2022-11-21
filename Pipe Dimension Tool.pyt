@@ -1127,8 +1127,8 @@ class CopyDiameter(object):
                 for row in cursor:
                     
                     match = [reference for reference in references if getattr(reference, match_by.lower()) == row[match_by_field_i]]
-                    arcpy.AddMessage(match)
-                    arcpy.AddMessage(row[match_by_field_i])
+                    # arcpy.AddMessage(match)
+                    # arcpy.AddMessage(row[match_by_field_i])
                     
                     if match:
                         reference = match[0]
@@ -1469,28 +1469,42 @@ class GetMinimumSlope(object):
                 last_critical_energy_gradient = critical_energy_gradient[fromnode]
         
         if ".sqlite" in MU_database:
-            msm_Link_result = getAvailableFilename(arcpy.env.scratchGDB + "\msm_Link")
-            arcpy.Select_analysis(msm_Link, msm_Link_result, where_clause="MUID IN ('%s')" % ("', '".join(links_MUIDs)))
+            with sqlite3.connect(
+                    MU_database) as connection:
+                update_cursor = connection.cursor()
+                with arcpy.da.SearchCursor(msm_Link, ["MUID"],
+                                       where_clause="MUID IN ('%s')" % ("', '".join(links_MUIDs))) as cursor:
+                    for row in cursor:
+                        fromnode = msm_Link_Network.links[row[0]].fromnode
+                        if fromnode in critical_energy_gradient:
+                            update_cursor.execute(
+                                "UPDATE msm_Link SET Slope = %1.2f WHERE MUID = '%s'" % (
+                                    critical_energy_gradient[fromnode] * 1e2, row[0]))
+                        else:
+                            arcpy.AddWarning("%s not in critical_energy_gradient" % (fromnode))
+            # msm_Link_result = getAvailableFilename(arcpy.env.scratchGDB + "\msm_Link")
+            # arcpy.Select_analysis(msm_Link, msm_Link_result, where_clause="MUID IN ('%s')" % ("', '".join(links_MUIDs)))
         else:
             msm_Link_result = msm_Link
             edit = arcpy.da.Editor(MU_database)
             edit.startEditing(False, True)
             edit.startOperation()
-        with arcpy.da.UpdateCursor(msm_Link_result, ["MUID", "Slope_C" if not ".sqlite" in MU_database else "Slope"],
-                                   where_clause="MUID IN ('%s')" % ("', '".join(links_MUIDs))) as cursor:
-            for row in cursor:
-                fromnode = msm_Link_Network.links[row[0]].fromnode
-                if fromnode in critical_energy_gradient:
-                    row[1] = critical_energy_gradient[fromnode] * 1e2
-                    cursor.updateRow(row)
-                else:
-                    arcpy.AddWarning("%s not in critical_energy_gradient" % (fromnode))
-        
-        if ".sqlite" in MU_database:
-            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links Dimensioned.lyr", msm_Link_result, workspace_type = "FILEGDB_WORKSPACE")
-        else:
+            with arcpy.da.UpdateCursor(msm_Link, ["MUID", "Slope_C" if not ".sqlite" in MU_database else "Slope"],
+                                       where_clause="MUID IN ('%s')" % ("', '".join(links_MUIDs))) as cursor:
+                for row in cursor:
+                    fromnode = msm_Link_Network.links[row[0]].fromnode
+                    if fromnode in critical_energy_gradient:
+                        row[1] = critical_energy_gradient[fromnode] * 1e2
+                        cursor.updateRow(row)
+                    else:
+                        arcpy.AddWarning("%s not in critical_energy_gradient" % (fromnode))
             edit.stopOperation()
             edit.stopEditing(True)
+        # if ".sqlite" in MU_database:
+        #     addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links Dimensioned.lyr", msm_Link_result, workspace_type = "FILEGDB_WORKSPACE")
+        # else:
+        #     edit.stopOperation()
+        #     edit.stopEditing(True)
 
         return
 
