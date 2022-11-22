@@ -72,6 +72,7 @@ class GroupComboBoxClass1(object):
         self.msm_Link = None
         self.ms_Catchment = None
         self.layers_in_group = []
+        self.map_only = ""
 
     def onSelChange(self, selection):
         self.selected_group = selection
@@ -86,11 +87,19 @@ class GroupComboBoxClass1(object):
          "Ledning" in layer.name or "msm_Link" in layer.name]
         print(msm_Link_layer)
         self.msm_Link = msm_Link_layer[0] if msm_Link_layer else None
+        if msm_Link_layer:
+            self.map_only += ", link" if self.map_only else "link"
 
         ms_Catchment_layer = [layer for layer in self.layers_in_group if
          "Delopland" in layer.name or "Catchment" in layer.name]
         print(ms_Catchment_layer)
         self.ms_Catchment = ms_Catchment_layer[0] if ms_Catchment_layer else None
+
+        link_layers = {"msm_Weir": "weir", "msm_Orifice":"orifice", "msm_Pump":"pump"}
+        for link_layer in link_layers.keys():
+            matching_layers = [layer for layer in self.layers_in_group if layer.isFeatureLayer and link_layer in layer.datasetName and layer.visible]
+            if matching_layers:
+                self.map_only += ", %s" % link_layers[link_layer] if self.map_only else "%s" % link_layers[link_layer]
         
         links_MUID = [row[0] for row in arcpy.da.SearchCursor(self.msm_Link, ["MUID"])]
         print(links_MUID)
@@ -101,7 +110,7 @@ class GroupComboBoxClass1(object):
         
         import mikegraph
         print("Graphing %s" % (self.msm_Node.workspacePath)) 
-        self.graph = mikegraph.Graph(self.msm_Node.workspacePath)
+        self.graph = mikegraph.Graph(self.msm_Node.workspacePath, map_only = self.map_only)
         self.graph.map_network()
         pass
     def onEditChange(self, text):
