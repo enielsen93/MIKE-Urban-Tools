@@ -1,5 +1,6 @@
 import os
 import zipfile
+import numpy as np
 
 class Toolbox(object):
     def __init__(self):
@@ -78,11 +79,11 @@ class CompressFolder(object):
             file_extensions = list(file_extensions)
             file_extensions.sort()
             parameters[2].filter.list = file_extensions
-            if not parameters[2].value:
-                default_formats = [".mdb", ".dfs0", ".mjl"]
-                parameters[2].value = [format for format in default_formats if format in file_extensions]
-
-            parameters[3].Value = os.path.join(os.path.dirname(folder), os.path.basename(folder) + ".zip")
+            # if not parameters[2].value:
+            #     default_formats = [".mdb", ".dfs0", ".mjl"]
+            #     parameters[2].value = [format for format in default_formats if format in file_extensions]
+            if not parameters[4].Value:
+                parameters[3].Value = os.path.join(os.path.dirname(folder), os.path.basename(folder) + ".zip")
 
         return
 
@@ -100,20 +101,26 @@ class CompressFolder(object):
 
         files = []
         folders = []
+        file_sizes = []
         for (dir_path, dir_names, filenames) in os.walk(folder):
             for filename in filenames:
                 if os.path.splitext(filename)[-1].lower() in file_formats:
                     files.append(os.path.join(dir_path, filename))
-
+                    file_sizes.append(os.stat(os.path.join(dir_path, filename)).st_size)
                     folders.append(dir_path)
             if not include_subfolders:
                 break
 
-        import random
-        random.shuffle(files)
         arcpy.AddMessage(output_file)
+
+        total_filesize = np.sum(file_sizes)
+
+        arcpy.SetProgressor("step", "Compressing files...",
+                            0, total_filesize, 1)
+
+        completed_filesize = 0
         with zipfile.ZipFile(output_file, "w", allowZip64 = True, compression = zipfile.ZIP_DEFLATED) as new_zip:
-            for file, file_folder in zip(files, folders):
+            for file, file_folder, file_size in zip(files, folders, file_sizes):
                 # arcpy.AddMessage((file_folder, folder))
                 # arcpy.AddMessage(os.path.relpath(file_folder, folder))
                 arcname = os.path.join(os.path.relpath(file_folder, folder), os.path.basename(file))
@@ -122,5 +129,8 @@ class CompressFolder(object):
                 if delete_files:
                     arcpy.AddMessage("Deleting %s" % (file))
                     os.remove(file)
+
+                completed_filesize += file_size
+                arcpy.SetProgressorPosition(completed_filesize)
 
         return
