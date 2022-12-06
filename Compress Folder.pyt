@@ -60,7 +60,22 @@ class CompressFolder(object):
             direction="Input")
         delete_files.value = False
 
-        parameters = [folder, include_subfolders, file_formats, output_file, delete_files]
+        delete_files = arcpy.Parameter(
+            displayName="Delete Original Files upon compressing",
+            name="delete_files",
+            datatype="GPBoolean",
+            parameterType="Optional",
+            direction="Input")
+        delete_files.value = False
+
+        separate_archives = arcpy.Parameter(
+            displayName="Create archive for each file",
+            name="separate_archives",
+            datatype="GPBoolean",
+            parameterType="Optional",
+            direction="Input")
+
+        parameters = [folder, include_subfolders, file_formats, output_file, delete_files, separate_archives]
         return parameters
 
     def isLicensed(self):
@@ -82,9 +97,11 @@ class CompressFolder(object):
             # if not parameters[2].value:
             #     default_formats = [".mdb", ".dfs0", ".mjl"]
             #     parameters[2].value = [format for format in default_formats if format in file_extensions]
-            if not parameters[4].Value:
+            if not parameters[5].Value and not parameters[4].Value:
                 parameters[3].Value = os.path.join(os.path.dirname(folder), os.path.basename(folder) + ".zip")
 
+        if parameters[5].Value:
+            parameters[3].enabled = False
         return
 
     def updateMessages(self, parameters):  # optional
@@ -96,6 +113,7 @@ class CompressFolder(object):
         file_formats = parameters[2].ValueAsText.split(";")
         output_file = parameters[3].ValueAsText
         delete_files = parameters[4].Value
+        separate_archives = parameters[5].Value
 
         arcpy.AddMessage(file_formats)
 
@@ -119,18 +137,34 @@ class CompressFolder(object):
                             0, total_filesize, 1)
 
         completed_filesize = 0
-        with zipfile.ZipFile(output_file, "w", allowZip64 = True, compression = zipfile.ZIP_DEFLATED) as new_zip:
-            for file, file_folder, file_size in zip(files, folders, file_sizes):
-                # arcpy.AddMessage((file_folder, folder))
-                # arcpy.AddMessage(os.path.relpath(file_folder, folder))
-                arcname = os.path.join(os.path.relpath(file_folder, folder), os.path.basename(file))
-                arcpy.AddMessage(arcname)
-                new_zip.write(file, arcname = arcname)
-                if delete_files:
-                    arcpy.AddMessage("Deleting %s" % (file))
-                    os.remove(file)
 
-                completed_filesize += file_size
-                arcpy.SetProgressorPosition(completed_filesize)
+        if separate_archives:
+            for file, file_folder, file_size in zip(files, folders, file_sizes):
+                with zipfile.ZipFile(os.path.splitext(file)[-2] + ".zip", "w", allowZip64=True, compression=zipfile.ZIP_DEFLATED) as new_zip:
+                    # arcpy.AddMessage((file_folder, folder))
+                    # arcpy.AddMessage(os.path.relpath(file_folder, folder))
+                    arcname = os.path.basename(file)
+                    arcpy.AddMessage(arcname)
+                    new_zip.write(file, arcname = arcname)
+                    if delete_files:
+                        arcpy.AddMessage("Deleting %s" % (file))
+                        os.remove(file)
+
+                    completed_filesize += file_size
+                    arcpy.SetProgressorPosition(completed_filesize)
+        else:
+            with zipfile.ZipFile(output_file, "w", allowZip64 = True, compression = zipfile.ZIP_DEFLATED) as new_zip:
+                for file, file_folder, file_size in zip(files, folders, file_sizes):
+                    # arcpy.AddMessage((file_folder, folder))
+                    # arcpy.AddMessage(os.path.relpath(file_folder, folder))
+                    arcname = os.path.join(os.path.relpath(file_folder, folder), os.path.basename(file))
+                    arcpy.AddMessage(arcname)
+                    new_zip.write(file, arcname = arcname)
+                    if delete_files:
+                        arcpy.AddMessage("Deleting %s" % (file))
+                        os.remove(file)
+
+                    completed_filesize += file_size
+                    arcpy.SetProgressorPosition(completed_filesize)
 
         return
