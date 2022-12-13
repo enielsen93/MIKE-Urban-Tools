@@ -83,7 +83,7 @@ class CompareMikeModels(object):
             parameterType="Optional",
             multiValue=True,
             direction="Input")
-        ignore_fields.filter.list = ["OBJECTID", "SHAPE", "Slope", "UpLevel_C", "DwLevel_C", "Length_C", "UpLevel", "DwLevel", "Diameter", "NetTypeNo", "GroundLevel", "CriticalLevel", "Area"]
+        ignore_fields.filter.list = ["OBJECTID", "SHAPE", "Slope", "UpLevel_C", "DwLevel_C", "Length_C", "UpLevel", "DwLevel", "Diameter", "NetTypeNo", "GroundLevel", "InvertLevel", "CriticalLevel", "Area"]
         ignore_fields.value = ["OBJECTID", "Slope", "UpLevel_C", "DwLevel_C", "Length_C", "CriticalLevel", "Area"]
         #ignore_fields.value = ["msm_Catchment", "msm_Node", "msm_Link", "msm_Weir", "msm_Orifice"]
 
@@ -178,7 +178,7 @@ class CompareMikeModels(object):
             if "SHAPE@" not in fields:
                 fields.append("SHAPE@")
 
-            arcpy.SetProgressor("step","Checking feature %s" % (feature_path_1), 0, len([1 for row in arcpy.da.SearchCursor(feature_path_1, "OID@")]), 1)
+            arcpy.SetProgressor("step","Checking feature %s" % (feature_path_1), 0, len([1 for row in arcpy.da.SearchCursor(feature_path_1, "muid")]), 1)
             with arcpy.da.SearchCursor(feature_path_1, fields) as cursor:
                 step = 0
                 for row in cursor:
@@ -186,7 +186,7 @@ class CompareMikeModels(object):
                     step += 1
                     features_1[row[MUID_field_i]] = row
 
-            arcpy.SetProgressor("step","Checking feature %s" % (feature_path_2), 0, len([1 for row in arcpy.da.SearchCursor(feature_path_2, "OID@")]), 1)
+            arcpy.SetProgressor("step","Checking feature %s" % (feature_path_2), 0, len([1 for row in arcpy.da.SearchCursor(feature_path_2, "muid")]), 1)
             with arcpy.da.SearchCursor(feature_path_2, fields) as cursor:
                 step = 0
                 for row in cursor:
