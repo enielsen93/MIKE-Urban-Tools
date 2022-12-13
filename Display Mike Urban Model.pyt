@@ -359,11 +359,32 @@ class DisplayMikeUrban(object):
                                             edge.uplevel)) if edge.uplevel and edge.uplevel < row[5] and edge.uplevel > row[
                                             6] else ""
 
+                                if len(description)>255-30:
+                                    description = ""
+                                    if basin.edges:
+                                        for edge in basin.edges_sort:
+                                            description += "%s. (%1.2f): %d m3\n" % (
+                                            edge.name[0:5], edge.uplevel, basin.get_volume(
+                                                edge.uplevel)) if edge.uplevel and edge.uplevel < row[
+                                                5] and edge.uplevel > row[
+                                                                      6] else ""
+
+                                if len(description) > 255 - 30:
+                                    description = ""
+                                    if basin.edges:
+                                        for edge in basin.edges_sort:
+                                            description += "%1.2f: %d m3\n" % (edge.uplevel, basin.get_volume(
+                                                    edge.uplevel)) if edge.uplevel and edge.uplevel < row[
+                                                5] and edge.uplevel > row[
+                                                                          6] else ""
+
                                 if basin.critical_level and basin.critical_level < row[5]:
                                     description += "Maks. (%1.2f): %d m3\n" % (
                                     basin.critical_level, basin.get_volume(basin.critical_level))
                                 else:
                                     description += "Maks. (%1.2f): %d m3\n" % (row[5], basin.max_volume)
+
+
 
                                 row[4] = description
                                 # cursor.updateRow(row)
@@ -374,7 +395,10 @@ class DisplayMikeUrban(object):
                                 arcpy.AddWarning(basin.edges)
                                 arcpy.AddWarning(traceback.format_exc())
 
+                            # arcpy.AddMessage(row)
+                            # arcpy.AddMessage(len(description))
                             cursor.updateRow(row)
+
 
                 printStepAndTime("Adding basins to map")
                 arcpy.SetProgressor("default","Adding basins to map")
@@ -484,36 +508,68 @@ class DisplayMikeUrban(object):
                 linkID = None
                 tabID = None
                 net_type_no = None
+                shape = None
 
-            regulations = {}
+            passive_regulations = {}
             with arcpy.da.SearchCursor(msm_PasReg, ["LinkID", "FunctionID"], where_clause = "TypeNo = 1") as cursor:
                 for row in cursor:
-                    regulations[row[0]] = Regulation()
-                    regulations[row[0]].tabID = row[1]
-                    regulations[row[0]].linkID = row[0]
+                    passive_regulations[row[0]] = Regulation()
+                    passive_regulations[row[0]].tabID = row[1]
+                    passive_regulations[row[0]].linkID = row[0]
 
-            if len(regulations)>0:
-                regulationsShape = getAvailableFilename(arcpy.env.scratchGDB + r"\Regulations", parent = MU_database)
+            if len(passive_regulations)>0:
+                regulationsShape = getAvailableFilename(arcpy.env.scratchGDB + r"\passive_regulations", parent = MU_database)
 
-                with arcpy.da.SearchCursor(ms_TabD, ["TabID", "Sqn", "Value2"], where_clause = "TabID IN ('%s')" % ("', '".join([regulation.tabID for regulation in regulations.values()]))) as cursor:
+                with arcpy.da.SearchCursor(ms_TabD, ["TabID", "Sqn", "Value2"], where_clause = "TabID IN ('%s')" % ("', '".join([regulation.tabID for regulation in passive_regulations.values()]))) as cursor:
                     for row in cursor:
-                        linkIDs = [regulation.linkID for regulation in regulations.values() if regulation.tabID == row[0]]
+                        linkIDs = [regulation.linkID for regulation in passive_regulations.values() if regulation.tabID == row[0]]
                         for linkID in linkIDs:
-                            regulations[linkID].q_max = row[2] if regulations[linkID].q_max < row[2] else regulations[linkID].q_max
+                            passive_regulations[linkID].q_max = row[2] if passive_regulations[linkID].q_max < row[2] else passive_regulations[linkID].q_max
 
-                arcpy.CreateFeatureclass_management(os.path.dirname(regulationsShape), os.path.basename(regulationsShape), "POLYLINE")
-                arcpy.AddField_management(regulationsShape, "LinkID", "TEXT")
-                arcpy.AddField_management(regulationsShape, "NetTypeNo", "SHORT")
-                arcpy.AddField_management(regulationsShape, "FunctionID", "TEXT")
-                arcpy.AddField_management(regulationsShape, "QMax", "FLOAT")
-                with arcpy.da.InsertCursor(regulationsShape, ["SHAPE@", "LinkID", "FunctionID", "QMax", "NetTypeNo"]) as regulation_cursor:
-                    with arcpy.da.SearchCursor(links, ["SHAPE@", "MUID", "NetTypeNo"], where_clause = "MUID IN ('%s')" % ("', '".join(regulations.keys()))) as link_cursor:
-                        for row in link_cursor:
-                            regulations[row[1]].net_type_no = row[2]
-                            regulation_cursor.insertRow([row[0], row[1], regulations[row[1]].tabID, regulations[row[1]].q_max, regulations[row[1]].net_type_no])
+            printStepAndTime("Adding pump regulations to map")
+            # Adding passive regulations to project
+            arcpy.SetProgressor("default", "Adding pump regulations to map")
 
-                addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Passive Regulations.lyr",
-                        regulationsShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE", definition_query = sql_query)
+            pumps = {}
+            with arcpy.da.SearchCursor(msm_Pump, ["MUID", "QMaxSetID", "NetTypeNo", "SHAPE@"], where_clause = "CapTypeNo = 1") as cursor:
+                for row in cursor:
+                    pumps[row[0]] = Regulation()
+                    pumps[row[0]].linkID = row[0]
+                    pumps[row[0]].tabID = row[1]
+                    pumps[row[0]].shape = row[3]
+                    pumps[row[0]].net_type_no = row[2]
+
+            with arcpy.da.SearchCursor(ms_TabD, ["TabID", "Sqn", "Value2"], where_clause="TabID IN ('%s')" % (
+            "', '".join([regulation.tabID for regulation in pumps.values()]))) as cursor:
+                for row in cursor:
+                    regulations = [regulation for regulation in pumps.values() if regulation.tabID == row[0]]
+                    for regulation in regulations:
+                        regulation.q_max = row[2] if regulation.q_max < row[2] else regulation.q_max
+
+            arcpy.CreateFeatureclass_management(os.path.dirname(regulationsShape), os.path.basename(regulationsShape),
+                                                "POLYLINE")
+            arcpy.AddField_management(regulationsShape, "LinkID", "TEXT")
+            arcpy.AddField_management(regulationsShape, "NetTypeNo", "SHORT")
+            arcpy.AddField_management(regulationsShape, "FunctionID", "TEXT")
+            arcpy.AddField_management(regulationsShape, "QMax", "FLOAT")
+            with arcpy.da.InsertCursor(regulationsShape,
+                                       ["SHAPE@", "LinkID", "FunctionID", "QMax", "NetTypeNo"]) as regulation_cursor:
+                with arcpy.da.SearchCursor(links, ["SHAPE@", "MUID", "NetTypeNo"], where_clause="MUID IN ('%s')" % (
+                "', '".join(passive_regulations.keys()))) as link_cursor:
+                    for row in link_cursor:
+                        passive_regulations[row[1]].net_type_no = row[2]
+                        regulation_cursor.insertRow(
+                            [row[0], row[1], passive_regulations[row[1]].tabID, passive_regulations[row[1]].q_max,
+                             passive_regulations[row[1]].net_type_no])
+
+                for regulation in pumps.values():
+                    row = [regulation.shape, regulation.linkID, regulation.tabID, regulation.q_max, regulation.net_type_no]
+                    regulation_cursor.insertRow(row)
+
+            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Passive Regulations.lyr",
+                     regulationsShape, group=empty_group_layer, workspace_type="FILEGDB_WORKSPACE",
+                     definition_query=sql_query)
+
 
         printStepAndTime("Adding outlets to map")
         # Adding outlets to project
