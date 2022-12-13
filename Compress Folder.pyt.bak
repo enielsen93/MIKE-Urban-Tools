@@ -126,20 +126,17 @@ class CompressFolder(object):
             for filename in filenames:
                 if os.path.splitext(filename)[-1].lower() in file_formats:
                     files.append(os.path.join(dir_path, filename))
-                    file_sizes.append(float(os.path.getsize(os.path.join(dir_path, filename))))
+                    file_sizes.append(int(os.path.getsize(os.path.join(dir_path, filename))))
                     folders.append(dir_path)
             if not include_subfolders:
                 break
 
         arcpy.AddMessage(output_file)
-        file_sizes = [float(f) for f in file_sizes]
 
-        total_filesize = float(np.sum(file_sizes))
-        arcpy.AddMessage(("step", "Compressing files...",
-                            0, total_filesize, 1))
+        total_filesize = int(np.sum(file_sizes))
 
         arcpy.SetProgressor("step", "Compressing files...",
-                            0, 100, 1)
+                            0, total_filesize, 1)
 
         completed_filesize = 0
 
@@ -156,7 +153,7 @@ class CompressFolder(object):
                         os.remove(file)
 
                     completed_filesize += int(file_size)
-                    arcpy.SetProgressorPosition(int(completed_filesize/total_filesize*100))
+                    arcpy.SetProgressorPosition(completed_filesize)
         else:
             with zipfile.ZipFile(output_file, "w", allowZip64 = True, compression = zipfile.ZIP_DEFLATED) as new_zip:
                 for file, file_folder, file_size in zip(files, folders, file_sizes):
@@ -170,6 +167,6 @@ class CompressFolder(object):
                         os.remove(file)
 
                     completed_filesize += file_size
-                    arcpy.SetProgressorPosition(int(completed_filesize/total_filesize*100))
+                    arcpy.SetProgressorPosition(completed_filesize)
 
         return
