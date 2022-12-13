@@ -382,7 +382,7 @@ class ExportToCAD(object):
             displayName="Mike Urban database",
             name="database",
             datatype="DEWorkspace",
-            parameterType="Required",
+            parameterType="Optional",
             direction="Input")
 
         dgn_file = arcpy.Parameter(
@@ -391,7 +391,7 @@ class ExportToCAD(object):
             datatype="File",
             parameterType="Required",
             direction="Output")
-        dgn_file.filter.list = ["dwg", "dgn"]
+        dgn_file.filter.list = ["dwg"]
         
         label_scale = arcpy.Parameter(
             displayName="Label Scale",
@@ -418,7 +418,7 @@ class ExportToCAD(object):
         return
 
     def execute(self, parameters, messages):
-        MU_database = parameters[0].ValueAsText
+        MU_database = parameters[0].ValueAsText if parameters[0].ValueAsText else "CAD export"
         dgn_file = parameters[1].ValueAsText
         label_scale = parameters[2].Value
 
@@ -452,12 +452,20 @@ class ExportToCAD(object):
         arcpy.env.scratchWorkspace = os.path.join(MIKE_gdb, "scratch.gdb")
 
         arcpy.CreateFeatureclass_management(arcpy.env.scratchWorkspace, "Extent", geometry_type="Polygon")
-        extent = arcpy.Describe(msm_Node).extent
+        if os.path.exists(msm_Node):
+            extent = arcpy.Describe(msm_Node).extent
+        else:
+            extent = df.extent
+
         with arcpy.da.InsertCursor(os.path.join(arcpy.env.scratchWorkspace, "Extent"), ["SHAPE@"]) as cursor:
-            row = [arcpy.Polygon(arcpy.Array([arcpy.Point(extent.XMin, extent.YMin),
-                                              arcpy.Point(extent.XMax, extent.YMin),
-                                              arcpy.Point(extent.XMax, extent.YMax),
-                                              arcpy.Point(extent.XMin, extent.YMax)]))]
+            # row = [arcpy.Polygon(arcpy.Array([arcpy.Point(extent.XMin, extent.YMin),
+            #                                   arcpy.Point(extent.XMax, extent.YMin),
+            #                                   arcpy.Point(extent.XMax, extent.YMax),
+            #                                   arcpy.Point(extent.XMin, extent.YMax)]))]
+            row = [arcpy.Polygon(arcpy.Array([arcpy.Point(-1e9, -1e9),
+                                              arcpy.Point(-1e9, 1e9),
+                                              arcpy.Point(1e9, 1e9),
+                                              arcpy.Point(1e9, -1e9)]))]
             cursor.insertRow(row)
 
         inPolygonIndexLayer = os.path.join(arcpy.env.scratchWorkspace, "Extent")
@@ -473,8 +481,12 @@ class ExportToCAD(object):
         feature_layers = [layer.longName for layer in arcpy.mapping.ListLayers(mxd, "", df) if not layer.isGroupLayer and layer.isFeatureLayer and layer.visible]
         layers = anno_classes + feature_layers
         arcpy.AddMessage(layers)
-        arcpy.ExportCAD_conversion(anno_classes + feature_layers, Output_Type = "DWG_R2010", Output_File = dgn_file,
-                                    Seed_File = os.path.dirname(os.path.realpath(__file__)) + r"\Data\ExportToCAD\Seedfile.dwg")
+        arcpy.AddMessage(extent)
+        arcpy.ExportCAD_conversion(anno_classes + feature_layers,
+                                   Output_Type = "DWG_R2010" if ".dwg" in dgn_file else "DGN_V8", Output_File = dgn_file,
+                                    Seed_File = os.path.dirname(os.path.realpath(__file__)) +
+                                                (r"\Data\ExportToCAD\Seedfile_2D.dwg" if ".dwg" in dgn_file
+                                                else r"\Data\ExportToCAD\Seedfile_2D.dgn"))
         return
         
 class ExportToDUModelBuilder(object):
