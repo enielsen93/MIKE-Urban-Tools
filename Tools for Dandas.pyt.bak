@@ -810,7 +810,7 @@ class CopyMikeUrbanFeatures(object):
                         arcpy.AddMessage(sql_expression)
                         return
                     else:
-                        arcpy.Append_management(selected, MU_database + "\msm_Node")
+                        arcpy.Append_management(selected, MU_database + "\msm_Node", schema_type = "NO_TEST")
             
             if msm_Links:
                 links_in_database = [row[0] for row in arcpy.da.SearchCursor(MU_database + "\msm_Link", ["MUID"])]
@@ -844,7 +844,7 @@ class CopyMikeUrbanFeatures(object):
                             # pythonaddins.MessageBox("Attempting to add FROMNODE and TONODE to %s. Close the Mike Urban model before proceeding." % (MU_database + "\msm_Link"), "Close Mike Urban", 0) 
                             # for field in ["FROMNODE", "TONODE"]:
                                 # arcpy.AddField_management(MU_database + "\msm_Link", field, "TEXT", field_length = 255)
-                        arcpy.Append_management(selected, MU_database + "\msm_Link")
+                        arcpy.Append_management(selected, MU_database + "\msm_Link", schema_type = "NO_TEST")
                     except Exception as e:
 
                         arcpy.AddError("FromNode and ToNode not found in Mike Urban Database. Try manually copying the Pipes")
@@ -877,7 +877,7 @@ class CopyMikeUrbanFeatures(object):
                         if errorMessage:
                             arcpy.AddWarning(errorMessage)
                         if not errorMessage or pythonaddins.MessageBox("%s\nTransfer catchments anyway?" % (errorMessage), "Confirm Transfer", 1) == "OK":
-                            arcpy.Append_management(selected, os.path.join(MU_database,"ms_Catchment"),"NO_TEST")
+                            arcpy.Append_management(selected, os.path.join(MU_database,"ms_Catchment"), schema_type = "NO_TEST")
                             with arcpy.da.SearchCursor(selected,["MUID","ImpArea","NodeID"]) as catchmentCursor:
                                 with arcpy.da.InsertCursor(os.path.join(MU_database,"msm_CatchCon"),["CatchID","NodeID","TypeNo"]) as cursor:
                                     for row in catchmentCursor:
@@ -908,7 +908,7 @@ class CopyMikeUrbanFeatures(object):
                         arcpy.management.Append(selected_HModA, MU_database + "\msm_HModA")
                         selected_CatchCon = arcpy.TableSelect_analysis(os.path.join(input_database, "msm_CatchCon"), "in_memory\msm_CatchCon", where_clause = "CatchID IN ('%s')" % "', '".join(MUIDs))[0]
                         arcpy.AddMessage("CatchID IN ('%s')" % "', '".join(MUIDs))
-                        arcpy.AddMessage(
+                        arcpy.AddMessage([row[0] for row in arcpy.da.SearchCursor(selected_CatchCon, ["CatchID"])])
                         arcpy.management.Append(selected_CatchCon, MU_database + "\msm_CatchCon")
         
         return

@@ -780,7 +780,7 @@ class CopyMikeUrbanFeatures(object):
                 for i, msm_Node in enumerate(msm_Nodes):
                     reference_MU_database = os.path.dirname(arcpy.Describe(msm_Node).catalogPath)
                     nodes_in_database = [row[0] for row in arcpy.da.SearchCursor(MU_database + "\msm_Node", ["MUID"])]
-                    selected = arcpy.Select_analysis(msm_Node, "in_memory\msm_Node_%d" % (i))
+                    selected = arcpy.Select_analysis(msm_Node, "in_memory\msm_Node_%d" % (i+1))
                     nodes_in_msm_Node = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
                     duplicate_nodes = np.intersect1d(nodes_in_database, nodes_in_msm_Node)
                     if duplicate_nodes.size > 0:
