@@ -399,7 +399,7 @@ class DFSUToRaster(object):
             parameters[1].filter.list = items
             if parameters[2].ValueAsText == "Specific Timestep":
                 parameters[3].filter.list = [str(dfs.start_time+timedelta(seconds=dfs.timestep*i)) for i in range(dfs.n_timesteps+1)]
-            
+
         return
 
     def updateMessages(self, parameters): #optional
@@ -436,10 +436,10 @@ class DFSUToRaster(object):
                 with arcpy.da.SearchCursor(clip_layer_dissolved, ["SHAPE@"]) as cursor:
                     for row in cursor:
                         clip_shapes.append(row[0])
-        
+
         statusUpdate("Reading DFSU file", tic)
         dfs = mikeio.dfsu.Dfsu2DH(parameters[0].valueAsText)
-    
+
         statusUpdate("Retrieving element coordinates from DFSU file", tic)
         element_coordinates = dfs.element_coordinates
 
@@ -451,23 +451,23 @@ class DFSUToRaster(object):
         for i in range(len(dfs_read_data)):
             np.nan_to_num(dfs_read_data[i], copy = False)
         #     dfs_read_data[derived_depth_field_i, :, :] = dfs_read_data[derived_depth_field_i, :, :] - element_coordinates[:, -1]
-        
+
         statusUpdate("Isolating DFSU Elements with value",tic)
         elements_with_water = np.where(np.max(np.abs(dfs_read_data[0]),axis=0) > 0.01)[0] if DFSUFields[0] == "Total water depth" else np.where(np.max(np.abs(dfs_read_data[0]),axis=0))[0]
         no_elements = False if len(elements_with_water)>0 else True
-        
+
         if no_elements:
             arcpy.AddError("Error: Could not find any DFSU Elements with a value different from zero")
         else:
-            x_limit = [np.min(element_coordinates[elements_with_water,0]) - searchDistance, 
+            x_limit = [np.min(element_coordinates[elements_with_water,0]) - searchDistance,
                    np.max(element_coordinates[elements_with_water,0]) + searchDistance]
-            y_limit = [np.min(element_coordinates[elements_with_water,1]) - searchDistance, 
+            y_limit = [np.min(element_coordinates[elements_with_water,1]) - searchDistance,
                    np.max(element_coordinates[elements_with_water,1]) + searchDistance]
-           
+
             statusUpdate("Creating empty raster with extent: %d-%d and %d-%d" % (x_limit[0], x_limit[1], y_limit[0], y_limit[1]), tic)
             raster_xs_vector = np.arange(x_limit[0],x_limit[1],raster_cell_size)
             raster_ys_vector = np.arange(y_limit[0],y_limit[1],raster_cell_size)
-            
+
             raster_x, raster_y = np.meshgrid(raster_xs_vector, raster_ys_vector)
             raster_depth = np.zeros(raster_x.shape)
             raster_x_flat = raster_x.flatten()
@@ -484,7 +484,7 @@ class DFSUToRaster(object):
                                                                        r=searchDistance)
             for points_list in raster_points_near_water:
                 idx.update(points_list)
-            
+
             idx_remove = []
             statusUpdate("Removing raster elements that overlap clip_layers",tic)
             if clip_layers:
@@ -497,10 +497,10 @@ class DFSUToRaster(object):
                     idx.remove(i)
 
             idx = list(idx)
-            
+
             statusUpdate("Creating KDTree",tic)
             elements_searchable = np.where((x_limit[0] < element_coordinates[:,0]) &
-                                           (element_coordinates[:,0] < x_limit[1]) & 
+                                           (element_coordinates[:,0] < x_limit[1]) &
                                            (y_limit[0] < element_coordinates[:,1]) &
                                            (element_coordinates[:,1] < y_limit[1]))[0]
             dfsu_cKDTree = cKDTree(element_coordinates[:, 0:2])
@@ -518,15 +518,17 @@ class DFSUToRaster(object):
             arcpy.AddMessage(np.max(raster_depth_flat))
             idx_remove = ~dfs.contains(
                 np.array((raster_x_flat, raster_y_flat))[:, raster_points_with_value].transpose())
-            raster_depth_flat[
+            arcpy.AddMessage(idx_remove)
+            if idx_remove.size>0:
+                raster_depth_flat[
                 np.array([raster_points_with_value[i] for i in [j for j, val in enumerate(idx_remove) if val]])] = 0
 
             for item_i in range(len(DFSUFields)):
                 statusUpdate("Saving Raster", tic)
                 raster_depth = raster_depth_flat[:,item_i].reshape(raster_depth.shape[0:2] + tuple([1]))
-                
+
                 raster_depth_compressed = raster_depth
-                raster = arcpy.NumPyArrayToRaster(np.flip(raster_depth_compressed[:,:,0],axis=0), lower_left_corner = arcpy.Point(x_limit[0],y_limit[0]), 
+                raster = arcpy.NumPyArrayToRaster(np.flip(raster_depth_compressed[:,:,0],axis=0), lower_left_corner = arcpy.Point(x_limit[0],y_limit[0]),
                                          x_cell_size = raster_cell_size,
                                          y_cell_size = raster_cell_size,
                                          value_to_nodata = 0)
@@ -1005,48 +1007,48 @@ class CutFromDFSU(object):
         
         return
 
-if __name__ == '__main__':
-    DHMFile = r"\\files\Projects\RWA2022N001XX\RWA2022N00174\Model\04_DTM\Viborg_Viborg (3).tif"
-    MeshFile = "C:\Offline\VOR_Status\Mesh\Mesh_v1.1.mesh"
-    MeshFileOutput = MeshFile.replace(".mesh","_test.mesh")
-
-    # statusUpdate("Reading Mesh", tic)
-    dfs = mikeio.dfsu.Mesh(MeshFile)
-
-    # statusUpdate("Reading Mesh: Getting Node Coordinates", tic)
-    data = dfs.node_coordinates
-    node_codes = dfs.codes
-
-    # statusUpdate("Reading Raster", tic)
-    DHMRaster = np.flip(arcpy.RasterToNumPyArray(DHMFile, nodata_to_value=0), axis=0)
-
-    DHMRasterInfo = np.array([float(arcpy.GetRasterProperties_management(DHMFile, "LEFT")[0].replace(",", ".")),
-                              float(arcpy.GetRasterProperties_management(DHMFile, "BOTTOM")[0].replace(",", ".")),
-                              float(arcpy.GetRasterProperties_management(DHMFile, "CELLSIZEX")[0].replace(",", ".")),
-                              float(arcpy.GetRasterProperties_management(DHMFile, "CELLSIZEY")[0].replace(",", "."))])
-    DHMRasterXs = np.arange(DHMRasterInfo[0], DHMRasterInfo[0] + DHMRaster.shape[1] * DHMRasterInfo[2],
-                            float(DHMRasterInfo[2])).astype(np.float32)
-    DHMRasterYs = np.arange(DHMRasterInfo[1], DHMRasterInfo[1] + DHMRaster.shape[0] * DHMRasterInfo[3],
-                            float(DHMRasterInfo[3])).astype(np.float32)
-
-    DHMRasterX, DHMRasterY = np.meshgrid(DHMRasterXs, DHMRasterYs)
-    DHMRasterXsFlat = DHMRasterX.flatten()
-    DHMRasterYsFlat = DHMRasterY.flatten()
-    DHMRasterFlat = DHMRaster.flatten()
-
-    idx = np.where(DHMRasterFlat != 0)
-    DHMRasterXsFlatSparse = DHMRasterXsFlat[idx]
-    DHMRasterYsFlatSparse = DHMRasterYsFlat[idx]
-    DHMRasterFlatSparse = DHMRasterFlat[idx]
-
-    tic = time.time()
-    bedLevelFlat = np.zeros((data.shape[0]), dtype=np.float64)
-
-    # statusUpdate("Interpolating raster to mesh (nearest neighbor)", tic)
-    for row in range(int(len(bedLevelFlat))):
-        bedLevelFlat[row] = DHMRaster[
-            bisect.bisect_left(DHMRasterYs, data[row, 1]), bisect.bisect_left(DHMRasterXs, data[row, 0])]
-
-    # statusUpdate("Saving mesh", tic)
-    dfs.zn = bedLevelFlat
-    dfs.write(MeshFileOutput)
+# if __name__ == '__main__':
+#     DHMFile = r"\\files\Projects\RWA2022N001XX\RWA2022N00174\Model\04_DTM\Viborg_Viborg (3).tif"
+#     MeshFile = "C:\Offline\VOR_Status\Mesh\Mesh_v1.1.mesh"
+#     MeshFileOutput = MeshFile.replace(".mesh","_test.mesh")
+#
+#     # statusUpdate("Reading Mesh", tic)
+#     dfs = mikeio.dfsu.Mesh(MeshFile)
+#
+#     # statusUpdate("Reading Mesh: Getting Node Coordinates", tic)
+#     data = dfs.node_coordinates
+#     node_codes = dfs.codes
+#
+#     # statusUpdate("Reading Raster", tic)
+#     DHMRaster = np.flip(arcpy.RasterToNumPyArray(DHMFile, nodata_to_value=0), axis=0)
+#
+#     DHMRasterInfo = np.array([float(arcpy.GetRasterProperties_management(DHMFile, "LEFT")[0].replace(",", ".")),
+#                               float(arcpy.GetRasterProperties_management(DHMFile, "BOTTOM")[0].replace(",", ".")),
+#                               float(arcpy.GetRasterProperties_management(DHMFile, "CELLSIZEX")[0].replace(",", ".")),
+#                               float(arcpy.GetRasterProperties_management(DHMFile, "CELLSIZEY")[0].replace(",", "."))])
+#     DHMRasterXs = np.arange(DHMRasterInfo[0], DHMRasterInfo[0] + DHMRaster.shape[1] * DHMRasterInfo[2],
+#                             float(DHMRasterInfo[2])).astype(np.float32)
+#     DHMRasterYs = np.arange(DHMRasterInfo[1], DHMRasterInfo[1] + DHMRaster.shape[0] * DHMRasterInfo[3],
+#                             float(DHMRasterInfo[3])).astype(np.float32)
+#
+#     DHMRasterX, DHMRasterY = np.meshgrid(DHMRasterXs, DHMRasterYs)
+#     DHMRasterXsFlat = DHMRasterX.flatten()
+#     DHMRasterYsFlat = DHMRasterY.flatten()
+#     DHMRasterFlat = DHMRaster.flatten()
+#
+#     idx = np.where(DHMRasterFlat != 0)
+#     DHMRasterXsFlatSparse = DHMRasterXsFlat[idx]
+#     DHMRasterYsFlatSparse = DHMRasterYsFlat[idx]
+#     DHMRasterFlatSparse = DHMRasterFlat[idx]
+#
+#     tic = time.time()
+#     bedLevelFlat = np.zeros((data.shape[0]), dtype=np.float64)
+#
+#     # statusUpdate("Interpolating raster to mesh (nearest neighbor)", tic)
+#     for row in range(int(len(bedLevelFlat))):
+#         bedLevelFlat[row] = DHMRaster[
+#             bisect.bisect_left(DHMRasterYs, data[row, 1]), bisect.bisect_left(DHMRasterXs, data[row, 0])]
+#
+#     # statusUpdate("Saving mesh", tic)
+#     dfs.zn = bedLevelFlat
+#     dfs.write(MeshFileOutput)
