@@ -147,7 +147,9 @@ class SummarizeButton(object):
 
                 connected_node = None
                 if len(MUIDs) == 1:
-                    connected_node = [row[0] for row in arcpy.da.SearchCursor(msm_CatchCon, ["NodeID"], where_clause = "CatchID = '%s'" % (MUIDs[0]))][0]
+                    matches = [row[0] for row in arcpy.da.SearchCursor(msm_CatchCon, ["NodeID"], where_clause = "CatchID = '%s'" % (MUIDs[0]))]
+                    if matches:
+                        connected_node = matches[0]
                     
                 with arcpy.da.SearchCursor(arcpy.Describe(catchmentLayer).catalogPath, ["MUID", "SHAPE@AREA", "Area"], where_clause = where_clause) as cursor:
                     for row in cursor:
