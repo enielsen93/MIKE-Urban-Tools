@@ -241,7 +241,7 @@ class DisplayMikeUrban(object):
         
         class Basin:
             def __init__(self, geometryID):
-                self.geometryID = geometryID
+                self.geometryID = geometryID if geometryID else ""
                 self.value1 = []
                 self.value3 = []
                 self.edges = []
@@ -253,7 +253,14 @@ class DisplayMikeUrban(object):
 
             @property
             def critical_level(self): # overwritten if critical level in msm_Node
-                return np.max(self.value1)
+                return np.max(self.elevations)
+                
+            @property
+            def elevations(self):
+                if np.min(self.value1) < self.invert_level:
+                    return self.value + (self.invert_level - np.min(self.value1))
+                else:
+                    return self.value1
 
             @property
             def edges_sort(self):
@@ -265,15 +272,15 @@ class DisplayMikeUrban(object):
 
             @property
             def terrain_elevation(self):
-                return [elevation for elevation in self.value1 if elevation<self.critical_level] + [self.critical_level]
+                return [elevation for elevation in self.elevations if elevation<self.critical_level] + [self.critical_level]
 
             @property
             def max_volume(self):
-                idxSort = np.argsort(self.value1)
-                elevations = np.array(self.value1)[idxSort]
+                idxSort = np.argsort(self.elevations)
+                elevations = np.array(self.elevations)[idxSort]
                 surface_areas = np.array(self.value3)[idxSort]
                 elevations = [elevation for elevation in elevations if elevation < self.critical_level] + [self.critical_level]
-                surface_areas = np.interp(elevations, np.sort(self.value1), surface_areas)
+                surface_areas = np.interp(elevations, np.sort(self.elevations), surface_areas)
                 return np.trapz(surface_areas, elevations)
                 
             @property
@@ -281,12 +288,12 @@ class DisplayMikeUrban(object):
                 return np.max(self.value3)
             
             def get_volume(self, level):
-                idxSort = np.argsort(self.value1)
-                elevations = np.array(self.value1)[idxSort]
+                idxSort = np.argsort(self.elevations)
+                elevations = np.array(self.elevations)[idxSort]
                 surface_areas = np.array(self.value3)[idxSort]
                 elevations = [elevation for elevation in elevations if elevation < self.critical_level] + [
                     self.critical_level]
-                surface_areas = np.interp(elevations, np.sort(self.value1), surface_areas)
+                surface_areas = np.interp(elevations, np.sort(self.elevations), surface_areas)
                 return np.interp(level, elevations, [0] + list(scipy.integrate.cumtrapz(surface_areas, elevations)))
 
         basins = {}
@@ -347,6 +354,7 @@ class DisplayMikeUrban(object):
                     for row in cursor:
                         if row[0] in basins:
                             basin = basins[row[0]]
+                            basin.invert_level = row[6]
                             if row[2]:
                                 basin.critical_level = row[2]
                             try:
@@ -499,7 +507,7 @@ class DisplayMikeUrban(object):
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Network Load.lyr",
                     networkShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE", definition_query = sql_query)
 
-        if True:
+        if not is_sqlite_database:
             printStepAndTime("Adding passive regulations to map")
             # Adding passive regulations to project
             arcpy.SetProgressor("default","Adding passive regulations to map")
