@@ -12,16 +12,27 @@ import pythonaddins
 import hashlib
 import math
 import sys
-functionsPath = [r"K:\Hydrauliske modeller\Makroer & Beregningsark\Functions", r"C:\Dokumenter\Makroer\Functions", os.path.join(os.path.dirname(os.path.dirname(__file__)),"Functions")]
-i = 0
-while not os.path.exists(functionsPath[i]):
-    i += 1
-sys.path.append(functionsPath[i])
-import TranslateMDBToSQLLite
+# functionsPath = [r"K:\Hydrauliske modeller\Makroer & Beregningsark\Functions", r"C:\Dokumenter\Makroer\Functions", os.path.join(os.path.dirname(os.path.dirname(__file__)),"Functions")]
+# i = 0
+# while not os.path.exists(functionsPath[i]):
+#     i += 1
+# sys.path.append(functionsPath[i])
+# import TranslateMDBToSQLLite
 thisFolder = os.path.dirname(__file__)
 # scriptFolder = os.path.join(thisFolder, r"Scripts")
 # sys.path.append(scriptFolder)
 # import networkx as nx
+
+def translate(field, table="", dbExt="sqlite"):
+    dictionairy = {"ms_Catchment": "msm_Catchment",
+                   "msm_HModA": "msm_Catchment",
+                   "FromNode": "fromnodeid",
+                   "ToNode": "tonodeid"}
+    if dbExt == "sqlite":
+        return dictionairy[field]
+    else:
+        return field
+
 
 def getAvailableFilename(filepath):
     if arcpy.Exists(filepath):
@@ -129,9 +140,9 @@ class CheckMikeUrbanDatabase(object):
         run_cleanup = parameters[2].Value
         # check_basin_outlet_elevation = parameters[2].Value
         dbExtension = MU_database.split(".")[-1]
-        catchments = os.path.join(MU_database, TranslateMDBToSQLLite.translate("ms_Catchment", dbExt = dbExtension))
+        catchments = os.path.join(MU_database, translate("ms_Catchment", dbExt = dbExtension))
         catchCon = MU_database + "\msm_CatchCon"
-        hModA = os.path.join(MU_database, TranslateMDBToSQLLite.translate("msm_HModA", dbExt = dbExtension))
+        hModA = os.path.join(MU_database, translate("msm_HModA", dbExt = dbExtension))
         hParA = MU_database + "\msm_HParA"
         msm_Node = MU_database + "\msm_Node"
         msm_Link = MU_database + "\msm_Link"
@@ -339,7 +350,7 @@ class CheckMikeUrbanDatabase(object):
         msm_Node_saddle = []
         msm_Node_PipeAboveGround = []
         try:
-            with arcpy.da.SearchCursor(msm_Link, [TranslateMDBToSQLLite.translate("FromNode", dbExt = dbExtension), TranslateMDBToSQLLite.translate("ToNode", dbExt = dbExtension), "Diameter"]) as cursor:
+            with arcpy.da.SearchCursor(msm_Link, [translate("FromNode", dbExt = dbExtension), translate("ToNode", dbExt = dbExtension), "Diameter"]) as cursor:
                 for row in cursor:
                     for node in [row[0],row[1]]:
                         if (node not in msm_Node_saddle and
@@ -357,7 +368,7 @@ class CheckMikeUrbanDatabase(object):
             arcpy.AddWarning("Warning: Manholes found with diameter less than diameter of one more connected links with an outlet head loss defined. Consider removing outlet head loss: ('%s')" % ("', '".join(msm_Node_saddle)))
             
         try: 
-            with arcpy.da.SearchCursor(msm_Link, [TranslateMDBToSQLLite.translate("FromNode", dbExt = dbExtension), TranslateMDBToSQLLite.translate("ToNode", dbExt = dbExtension), "Diameter", "MUID", "UpLevel", "DwLevel", "UpLevel_C", "DwLevel_C","CrsID"]) as cursor:
+            with arcpy.da.SearchCursor(msm_Link, [translate("FromNode", dbExt = dbExtension), translate("ToNode", dbExt = dbExtension), "Diameter", "MUID", "UpLevel", "DwLevel", "UpLevel_C", "DwLevel_C","CrsID"]) as cursor:
                     for row in cursor:
                         if (MUIDsCritLevel[row[0]] < max(row[4], row[6])+row[2] or MUIDsCritLevel[row[1]] < max(row[5], row[7])+row[2]) and not row[8]:
                             msm_Node_PipeAboveGround.append(row[3])
