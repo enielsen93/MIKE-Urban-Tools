@@ -1339,7 +1339,15 @@ class GenerateCatchmentConnections(object):
             direction="Output")
         delete_old_connections.value = True
 
-        parameters = [catchment_layer, delete_old_connections]
+        catchcon_layer = arcpy.Parameter(
+            displayName="Generate catchment connections in this layer (default is msm_CatchConLink)",
+            name="catchment_layer",
+            datatype="GPFeatureLayer",
+            parameterType="optional",
+            category="Additional Settings",
+            direction="Input")
+
+        parameters = [catchment_layer, delete_old_connections, catchcon_layer]
         return parameters
 
     def isLicensed(self):
@@ -1355,7 +1363,8 @@ class GenerateCatchmentConnections(object):
 
     def execute(self, parameters, messages):
         catchment_layer = parameters[0].Value
-        delete_old_connections = parameters[0].ValueAsText
+        delete_old_connections = parameters[1].Value
+        catchcon_layer = parameters[2].Value
         mu_database = os.path.dirname(os.path.dirname(arcpy.Describe(catchment_layer).catalogPath))
         
         MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchment_layer,["MUID"])]
@@ -1364,7 +1373,7 @@ class GenerateCatchmentConnections(object):
         msm_Node = os.path.join(mu_database, "msm_Node")
         ms_Catchment = os.path.join(mu_database, "ms_Catchment")
         msm_CatchCon = os.path.join(mu_database, "msm_CatchCon")
-        msm_CatchConLink = os.path.join(mu_database, "msm_CatchConLink")
+        msm_CatchConLink = os.path.join(mu_database, "msm_CatchConLink") if not catchcon_layer else catchcon_layer
 
         where_clause = "MUID IN ('%s')" % "', '".join(MUIDs)
         if len(where_clause) > 2900:
@@ -1378,12 +1387,13 @@ class GenerateCatchmentConnections(object):
                                     where_clause = where_clause.replace("MUID","CatchID")) if row[1] in MUIDs}
         # arcpy.AddMessage(where_clause.replace("MUID","CatchID"))
         # arcpy.AddMessage(links)
-        
-        with arcpy.da.UpdateCursor(msm_CatchConLink, ["CatchConID"], where_clause = "CatchConID IN (%s)" % ", ".join([str(key) for key in links.keys()])) as cursor:
-            for row in cursor:
-                if row[0] in links.keys():
-                    # arcpy.AddMessage(row)
-                    cursor.deleteRow()
+
+        if not catchcon_layer:
+            with arcpy.da.UpdateCursor(msm_CatchConLink, ["CatchConID"], where_clause = "CatchConID IN (%s)" % ", ".join([str(key) for key in links.keys()])) as cursor:
+                for row in cursor:
+                    if row[0] in links.keys():
+                        # arcpy.AddMessage(row)
+                        cursor.deleteRow()
 
         nodes_MUIDs = [node for catchment, node in links.values()]
         
@@ -1392,7 +1402,12 @@ class GenerateCatchmentConnections(object):
 
         # arcpy.AddMessage("Generating %d links" % (len(links)))
         arcpy.SetProgressor("step","Generating Catchment Connections", 0, len(links), 1)
-        with arcpy.da.InsertCursor(msm_CatchConLink, ["SHAPE@", "MUID", "CatchConID","SHAPE_Length"]) as cursor:
+        fields = ["shape@"]
+        for field in ["MUID", "CatchConID","SHAPE_Length", "CatchID"]:
+            if field.lower() in [f.name.lower() for f in arcpy.ListFields(msm_CatchConLink)]:
+                fields.append(field.lower())
+        arcpy.AddMessage(fields)
+        with arcpy.da.InsertCursor(msm_CatchConLink, fields) as cursor:
             for link_i, link in enumerate(links.keys()):
                 arcpy.AddMessage(links[link])
                 catchment, node = links[link]
@@ -1403,8 +1418,20 @@ class GenerateCatchmentConnections(object):
                     node_coordinate = nodes_coordinates[node] 
                     shape = arcpy.Polyline(arcpy.Array([arcpy.Point(catchment_coordinate[0], catchment_coordinate[1]),
                                                  arcpy.Point(node_coordinate[0], node_coordinate[1])]))
-                    row = [shape, link_i, link, shape.length]
+                    # row = [shape, link_i, link, shape.length]
+                    row = [None]*len(fields)
+                    arcpy.AddMessage([i for i,field in enumerate(fields) if field=="shape@"][0])
+                    row[[i for i,field in enumerate(fields) if field=="shape@"][0]] = shape
+                    if "muid" in fields:
+                        row[[i for i, field in enumerate(fields) if field == "muid"][0]] = link_i
+                    if "catchconid" in fields:
+                        row[[i for i, field in enumerate(fields) if field == "catchconid"][0]] = link
+                    if "shape_length" in fields:
+                        row[[i for i, field in enumerate(fields) if field == "shape_length"][0]] = shape.length
+                    if "catchid" in fields:
+                        row[[i for i, field in enumerate(fields) if field == "catchid"][0]] = catchment
                     cursor.insertRow(row)
                 arcpy.SetProgressorPosition(link_i)
+
                 
         return
