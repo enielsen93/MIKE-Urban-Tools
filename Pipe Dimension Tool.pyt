@@ -96,7 +96,7 @@ class Toolbox(object):
         self.alias  = "Pipe Dimension Tool"
         self.canRunInBackground = True
         # List of tool classes associated with this toolbox
-        self.tools = [PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope, CopyDiameter, CalculateSlopeOfPipe, ResetUpLevelDwlevel]
+        self.tools = [PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope, CopyDiameter, CalculateSlopeOfPipe, ResetUpLevelDwlevel, SetDischargeRegulation]
 
 class PipeDimensionToolTAPro(object):
     def __init__(self):
@@ -313,14 +313,14 @@ class PipeDimensionToolTAPro(object):
         MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
         if not os.path.exists(MIKE_folder):
             os.mkdir(MIKE_folder)
-
-        config_folder = os.path.join(MIKE_folder, "Config")
-        if not os.path.exists(config_folder):
-            os.mkdir(config_folder)
-        config_file = os.path.join(config_folder, os.path.splitext(os.path.basename(MU_database))[0] + ".ini")
-
-        config = Config(config_file)
-        config.write(parameters)
+        #
+        # config_folder = os.path.join(MIKE_folder, "Config")
+        # if not os.path.exists(config_folder):
+        #     os.mkdir(config_folder)
+        # config_file = os.path.join(config_folder, os.path.splitext(os.path.basename(MU_database))[0] + ".ini")
+        #
+        # config = Config(config_file)
+        # config.write(parameters)
 
         MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
         no_dir = True
@@ -1092,21 +1092,26 @@ class CopyDiameter(object):
         # arcpy.AddMessage(fields)
         # arcpy.AddMessage(match_by_field_i)
         
-        # target_where_clause = target_where_clause if target_where_clause else reference_where_clause
-        arcpy.AddMessage(target_where_clause)
-        
+        target_where_clause = target_where_clause if target_where_clause else reference_where_clause
+        # arcpy.AddMessage(reference_where_clause)
+
         if is_sqlite:
+            arcpy.AddMessage(MU_database)
             with sqlite3.connect(
                         MU_database) as connection:
                 update_cursor = connection.cursor()
-                layer_name = os.path.basename(arcpy.Describe("target").catalogPath).replace("main.","")
+                layer_name = os.path.basename(arcpy.Describe(target_feature_layer).catalogPath).replace("main.","")
                 copy_field = copy_field if type(copy_field) is str else copy_field.split(";")
                 # arcpy.AddMessage(copy_field)
                 # arcpy.AddMessage(target_where_clause)
                 # arcpy.AddMessage([row[0] for row in arcpy.da.SearchCursor(target_feature_layer, ["MUID"], target_where_clause)])
                 
                 for MUID in [row[0] for row in arcpy.da.SearchCursor(target_feature_layer, ["MUID"], target_where_clause)]:
+                    # arcpy.AddMessage(MUID)
+                    # arcpy.AddMessage(target_where_clause)
+                    # arcpy.AddMessage([getattr(reference, "muid") for reference in references])
                     match = [reference for reference in references if getattr(reference, "muid") == MUID][0]
+
                     for field in copy_field:
                         field_value = getattr(match, field.lower())
                         # arcpy.AddMessage(type(field_value) is str or type(field_value) is unicode)
@@ -1115,10 +1120,14 @@ class CopyDiameter(object):
                         sql_expression = "UPDATE %s SET %s = %s WHERE MUID = '%s'" % (layer_name, field,
                                             "'%s'" % (field_value) if type(field_value) is str or type(field_value) is unicode else "%s" % (field_value),
                                             MUID)
-                        # arcpy.AddMessage(sql_expression)
+                        arcpy.AddMessage(sql_expression)
                         arcpy.AddMessage(
                                     "Changed %s field %s from %s to %s" % (MUID, field, old_field_value, field_value))
-                        update_cursor.execute(sql_expression)
+                        try:
+                            update_cursor.execute(sql_expression)
+                        except Exception as e:
+                            arcpy.AddMessage(sql_expression)
+                            raise(e)
         else:
             edit = arcpy.da.Editor(MU_database)
             edit.startEditing(False, True)
@@ -1868,4 +1877,104 @@ class ResetUpLevelDwlevel(object):
                     raise(e)
         edit.stopOperation()
         edit.stopEditing(True)
+        return
+
+
+class SetDischargeRegulation(object):
+    def __init__(self):
+        self.label = "Set Discharge Regulation"
+        self.description = "Set Discharge Regulation"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        pipe_layer = arcpy.Parameter(
+            displayName="Pipe feature layer",
+            name="pipe_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+
+        discharge = arcpy.Parameter(
+            displayName="Discharge [m3/s]",
+            name="discharge",
+            datatype="double",
+            parameterType="optional",
+            direction="Input")
+
+        parameters = [pipe_layer, discharge]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):
+        if not parameters[0].value:
+            mxd = arcpy.mapping.MapDocument("CURRENT")
+            links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if
+                     lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
+                     and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+            if links:
+                parameters[0].value = links
+        return
+
+    def updateMessages(self, parameters):  # optional
+        return
+
+    def execute(self, parameters, messages):
+        pipe_layer = parameters[0].Value
+        discharge = parameters[1].Value
+        links_MUID = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["MUID"])]
+
+        MU_database = (
+            os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)) if ".mdb" in arcpy.Describe(
+                pipe_layer).catalogPath else
+            os.path.dirname(arcpy.Describe(pipe_layer).catalogPath))
+        is_sqlite = True if ".sqlite" in MU_database else False
+
+        msm_PasReg = os.path.join(MU_database, "msm_PasReg")
+        ms_Tab = os.path.join(MU_database, "ms_Tab")
+        ms_TabD = os.path.join(MU_database, "ms_TabD")
+
+        links_MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["MUID"])]
+        msm_Node = os.path.join(MU_database, "msm_Node")
+        msm_Link = os.path.join(MU_database, "msm_Link")
+        end_node_critical = None
+
+        if len(links_MUIDs) == len(
+                [row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).CatalogPath, ["MUID"])]):
+            userquery = pythonaddins.MessageBox("Set Discharge Regulation for %d pipes?" % (len(links_MUIDs)),
+                                                "Confirm Assignment", 4)
+            if not userquery == "Yes":
+                return
+
+        passive_regulations = {row[0]:row[1] for row in arcpy.da.SearchCursor(msm_PasReg, ["LinkID", "FunctionID"], where_clause = "LinkID IN ('%s')" % ("', '".join(links_MUIDs)))}
+        missing_links = [MUID for MUID in links_MUID if MUID not in passive_regulations]
+        msm_Link_Network = networker.NetworkLinks(MU_database, map_only="link", filter_sql_query = "MUID IN ('%s')" % ("', '".join(links_MUIDs)))
+        arcpy.AddMessage("TabID IN ('%s')" % ("', '".join(passive_regulations.values())))
+
+        with arcpy.da.UpdateCursor(ms_TabD, ["TabID", "Value2"], where_clause = "TabID IN ('%s')" % ("', '".join(passive_regulations.values()))) as cursor:
+            for row in cursor:
+                old_discharge = row[1]
+                row[1] = discharge
+                cursor.updateRow(row)
+                arcpy.AddMessage("Changed %s from %d L/s to %d L/s " % (row[0], old_discharge*1e3 if old_discharge else 0, row[1]*1e3))
+
+        with arcpy.da.InsertCursor(msm_PasReg, ["LinkID", "TypeNo", "FunctionID", "ControlNodeAID"]) as cursor:
+            for link in missing_links:
+                row = [link, 1, "Reg_%s" % (link), msm_Link_Network.links[link].fromnode]
+                cursor.insertRow(row)
+
+        with arcpy.da.InsertCursor(ms_Tab, ["MUID", "TypeNo"]) as cursor:
+            for link in missing_links:
+                row = ["Reg_%s" % (link), 4]
+                cursor.insertRow(row)
+                arcpy.AddMessage("Inserted regulation for link %s at %d L/s " % (row[0], discharge*1e3))
+
+        with arcpy.da.InsertCursor(ms_TabD, ["TabID", "Sqn", "Value1", "Value2"]) as cursor:
+            for link in missing_links:
+                cursor.insertRow(["Reg_%s" % (link), 1, -100, discharge])
+                cursor.insertRow(["Reg_%s" % (link), 2, 100, discharge])
+
         return
