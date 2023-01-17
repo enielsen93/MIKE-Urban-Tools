@@ -88,9 +88,9 @@ class DisplayMikeUrban(object):
             category="Additional Settings",
             direction="Input")
         features_to_display.filter.type = "ValueList"
-        features_to_display.filter.list = ["Manholes", "Basins", "Pipes", "Weirs", "Pumps", "Network Loads",
+        features_to_display.filter.list = ["Manholes", "Pipes", "Basins", "Weirs", "Pumps", "Network Loads",
                                            "Boundary Water Levels", "Catchment Connections", "Catchments"]
-        features_to_display.value = ["Manholes", "Basins", "Pipes", "Weirs", "Pumps", "Network Loads",
+        features_to_display.value = ["Manholes", "Pipes", "Basins", "Weirs", "Pumps", "Network Loads",
                                      "Boundary Water Levels", "Catchment Connections", "Catchments"]
         
         show_loss_par = arcpy.Parameter(
