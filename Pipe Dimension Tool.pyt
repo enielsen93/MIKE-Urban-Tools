@@ -1349,7 +1349,11 @@ class InterpolateInvertLevels(object):
                     if row[0] != end_node or (fixed_slope is not None and use_slope_from_downstream and row[0] != end_node) or (fixed_slope is not None and use_slope_from_upstream and row[0] != start_node):
                         total_length = nx.bellman_ford_path_length(network, row[0], end_node, weight="weight")
 
-                        new_invert_level = round(invert_levels[end_node] + total_length * slope,2)
+                        try:
+                            new_invert_level = round(invert_levels[end_node] + total_length * slope,2)
+                        except Exception as e:
+                            arcpy.AddError((invert_levels[end_node], total_length, slope))
+                            raise(e)
                         if new_invert_level != row[1]:
                             arcpy.AddMessage(
                                 "Changed invert level of %s from %1.2f to %1.2f" % (row[0], row[1] if row[1] else 0, new_invert_level))
@@ -1977,4 +1981,54 @@ class SetDischargeRegulation(object):
                 cursor.insertRow(["Reg_%s" % (link), 1, -100, discharge])
                 cursor.insertRow(["Reg_%s" % (link), 2, 100, discharge])
 
+        return
+        
+class IncreaseBasinSize(object):
+    def __init__(self):
+        self.label = "Increase volume of Basin"
+        self.description = "Increase volume of Basin"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        basin_layer = arcpy.Parameter(
+            displayName="Basin feature layer",
+            name="basin_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+    
+        depth = arcpy.Parameter(
+            displayName="Depth to increase volume at",
+            name="depth",
+            datatype="double",
+            parameterType="Required",
+            direction="Input")
+
+        size_at_depth = arcpy.Parameter(
+            displayName="Volume",
+            name="size_at_depth",
+            datatype="double",
+            parameterType="Required",
+            direction="Input")
+
+        parameters = [basin_layer, depth, size_at_depth]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):
+        return
+
+    def updateMessages(self, parameters):  # optional
+        return
+
+    def execute(self, parameters, messages):
+        basin_layer = parameters[0].Value
+        depth = parameters[1].Value
+        size_at_depth = parameters[2].Value
+        
+        
         return
