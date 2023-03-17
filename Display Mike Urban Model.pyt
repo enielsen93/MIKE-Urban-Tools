@@ -19,6 +19,7 @@ import traceback
 import re
 import scipy.integrate
 from collections import namedtuple
+import warnings
 
 def getAvailableFilename(filepath, parent = None):
     parent = "F%s" % (parent) if parent and parent[0].isdigit() else None
@@ -89,9 +90,9 @@ class DisplayMikeUrban(object):
             direction="Input")
         features_to_display.filter.type = "ValueList"
         features_to_display.filter.list = ["Manholes", "Pipes", "Basins", "Weirs", "Pumps", "Network Loads",
-                                           "Boundary Water Levels", "Catchment Connections", "Catchments"]
+                                           "Boundary Water Levels", "Catchment Connections", "Catchments", "Annotations"]
         features_to_display.value = ["Manholes", "Pipes", "Basins", "Weirs", "Pumps", "Network Loads",
-                                     "Boundary Water Levels", "Catchment Connections", "Catchments"]
+                                     "Boundary Water Levels", "Catchment Connections", "Catchments", "Annotations"]
         
         show_loss_par = arcpy.Parameter(
             displayName="Show Loss Parameters on Manhole Text",
@@ -111,15 +112,6 @@ class DisplayMikeUrban(object):
             direction="Output")
         show_depth.value = True
         
-        show_annotations = arcpy.Parameter(
-            displayName="Show Annotations",
-            name="show_annotations",
-            datatype="Boolean",
-            category="Additional Settings",
-            parameterType="optional",
-            direction="Output")
-        show_annotations.value = True
-        
         sql_query = arcpy.Parameter(
             displayName="Set as Definition Query for layers",
             name="sql_query",
@@ -128,7 +120,7 @@ class DisplayMikeUrban(object):
             parameterType="optional",
             direction="Output")
                 
-        parameters = [MU_database, join_catchments, features_to_display, show_loss_par, show_depth, show_annotations, sql_query]
+        parameters = [MU_database, join_catchments, features_to_display, show_loss_par, show_depth, sql_query]
         
         return parameters
 
@@ -148,10 +140,11 @@ class DisplayMikeUrban(object):
         features_to_display = [feature_name.replace("'", "").replace('"','') for feature_name in parameters[2].ValueAsText.split(";")]
         show_loss_par = parameters[3].Value
         show_depth = parameters[4].Value
-        show_annotations = parameters[5].Value
-        sql_query = parameters[6].Value
+        sql_query = parameters[5].Value
+        
         manholes = MU_database + "\msm_Node"
         links = MU_database + "\mu_Geometry\msm_Link"
+        # arcpy.AddMessage(MU_database)
         catchments = MU_database + "\mu_Geometry\ms_Catchment" if not ".sqlite" in MU_database else MU_database + "\msm_Catchment"
         catchcons = MU_database + "\mu_Geometry\msm_CatchConLink" if not ".sqlite" in MU_database else MU_database + "\msm_CatchCon"
         weirs = MU_database + "\mu_Geometry\msm_Weir" if not ".sqlite" in MU_database else MU_database + "\msm_Weir"
@@ -200,7 +193,39 @@ class DisplayMikeUrban(object):
         def addLayer(layer_source, source, group = None, workspace_type = "ACCESS_WORKSPACE", new_name = None, definition_query = None):
             if ".sqlite" in source:
                 source_layer = apmapping.Layer(source)
-                
+                # if not "objectid" in [field.name.lower() for field in arcpy.ListFields(source)]:
+                #     import sqlite3
+                #     with sqlite3.connect(MU_database) as connection:
+                #         update_cursor = connection.cursor()
+                #         sql_expression = """
+                #         PRAGMA foreign_keys=off;
+                #         BEGIN TRANSACTION;
+                #
+                #         ALTER TABLE %s RENAME TO delete_table;
+                #
+                #         CREATE TABLE %s
+                #         (
+                #           column1 datatype [ NULL | NOT NULL ],
+                #           column2 datatype [ NULL | NOT NULL ],
+                #           ...
+                #           CONSTRAINT constraint_name UNIQUE (uc_col1, uc_col2, ... uc_col_n)
+                #         );
+                #
+                #         INSERT INTO table_name SELECT * FROM old_table;
+                #
+                #         COMMIT;
+                #
+                #         PRAGMA foreign_keys=on;
+                #         """
+                #         try:
+                #             update_cursor.execute("ALTER TABLE %s ADD COLUMN OBJECTID INTEGER" % os.path.basename(source))
+                #             sql_expression = "CREATE INDEX OBJECTID ON %s(OBJECTID)" % os.path.basename(source)
+                #             update_cursor.execute(sql_expression)
+                #         except Exception as e:
+                #             arcpy.AddMessage(source)
+                #             raise(e)
+
+
                 if group:
                     apmapping.AddLayerToGroup(df, group, source_layer, "BOTTOM")
                 else:
@@ -252,6 +277,7 @@ class DisplayMikeUrban(object):
                 self.value1 = []
                 self.value3 = []
                 self.edges = []
+                self.permanent_level = None
 
             class Edge:
                 def __init__(self, name, uplevel):
@@ -301,7 +327,10 @@ class DisplayMikeUrban(object):
                 elevations = [elevation for elevation in elevations if elevation < self.critical_level] + [
                     self.critical_level]
                 surface_areas = np.interp(elevations, np.sort(self.elevations), surface_areas)
-                return np.interp(level, elevations, [0] + list(scipy.integrate.cumtrapz(surface_areas, elevations)))
+                if self.permanent_level:
+                    return np.interp(level, elevations, [0] + list(scipy.integrate.cumtrapz(surface_areas, elevations))) - np.interp(self.permanent_level, elevations, [0] + list(scipy.integrate.cumtrapz(surface_areas, elevations)))
+                else:
+                    return np.interp(level, elevations, [0] + list(scipy.integrate.cumtrapz(surface_areas, elevations)))
 
         if "Basins" in features_to_display:
             basins = {}
@@ -318,6 +347,7 @@ class DisplayMikeUrban(object):
                     tonode_fieldname = "tonode" if not is_sqlite_database else "tonodeid"
                     outlet_feature_classes = {links: ["UpLevel", "DwLevel"], orifices: ["InvertLevel"]*2, weirs: ["CrestLevel"]*2}
                     tonodes = {}
+
                     for feature_class, edgelevel_fieldname in zip(outlet_feature_classes.keys(),
                                                                 outlet_feature_classes.values()):
                         if fromnode_fieldname in [field.name.lower() for field in arcpy.ListFields(feature_class)]:
@@ -434,14 +464,14 @@ class DisplayMikeUrban(object):
                     links, group = empty_group_layer, definition_query = links_sql_query)
 
         if "Weirs" in features_to_display:
-            if len([row[0] for row in arcpy.da.SearchCursor(weirs,["MUID"])])>0:
-                addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Weir.lyr",
-                        weirs, group = empty_group_layer, definition_query = sql_query)
+            # arcpy.AddMessage(weirs)
+            # if len([row[0] for row in arcpy.da.SearchCursor(weirs,["MUID"])])>0:
+            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Weir.lyr",
+                    weirs, group = empty_group_layer, definition_query = sql_query)
 
         if "Pumps" in features_to_display:
-            if len([row[0] for row in arcpy.da.SearchCursor(msm_Pump,["MUID"])])>0:
-                addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Pumps.lyr",
-                        msm_Pump, group = empty_group_layer, definition_query = sql_query)
+            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Pumps.lyr",
+                    msm_Pump, group = empty_group_layer, definition_query = sql_query)
         
 
         if "Network Loads" in features_to_display:
@@ -667,15 +697,18 @@ class DisplayMikeUrban(object):
 
         if "Catchments" in features_to_display:
             printStepAndTime("Adding catchments to map")
-            if join_catchments and not ".sqlite" in MU_database:
+            if join_catchments:
                 arcpy.SetProgressor("default", "Joining ms_Catchment and msm_HModA and adding catchments to map")
-                ms_Catchment = arcpy.CopyFeatures_management(MU_database + r"\mu_Geometry\ms_Catchment", getAvailableFilename(arcpy.env.scratchGDB + "\ms_CatchmentImp", parent = MU_database)).getOutput(0)
-                arcpy.JoinField_management(in_data=ms_Catchment, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_HModA", join_field="CatchID", fields="ImpArea")
+                ms_Catchment = arcpy.CopyFeatures_management(catchments, getAvailableFilename(arcpy.env.scratchGDB + "\ms_CatchmentImp", parent = MU_database)).getOutput(0)
+                # arcpy.JoinField_management(in_data=ms_Catchment, in_field="MUID", join_table=MU_database + r"\msm_HModA", join_field="CatchID", fields="ImpArea")
 
+                arcpy.management.AddField(ms_Catchment, "ImpArea", "FLOAT")
                 arcpy.management.AddField(ms_Catchment, "ParAID", "TEXT")
                 arcpy.management.AddField(ms_Catchment, "RedFactor", "FLOAT")
                 arcpy.management.AddField(ms_Catchment, "ConcTime", "FLOAT")
                 arcpy.management.AddField(ms_Catchment, "InitLoss", "FLOAT")
+                arcpy.management.AddField(ms_Catchment, "NodeID", "TEXT")
+                arcpy.management.AddField(ms_Catchment, "NodeNT", "SHORT")
 
                 class HParA:
                     reduction_factor = None
@@ -683,7 +716,7 @@ class DisplayMikeUrban(object):
                     initial_loss = None
 
                 hParA_dict = {}
-                with arcpy.da.SearchCursor(parameters[0].ValueAsText + r"\msm_HParA", ["MUID", "RedFactor", "ConcTime", "InitLoss"]) as cursor:
+                with arcpy.da.SearchCursor(MU_database + r"\msm_HParA", ["MUID", "RedFactor", "ConcTime", "InitLoss"]) as cursor:
                     for row in cursor:
                         hParA_dict[row[0]] = HParA()
                         hParA_dict[row[0]].reduction_factor = row[1]
@@ -692,53 +725,92 @@ class DisplayMikeUrban(object):
 
                 catchments_dict = {}
                 class Catchment:
+                    imperviousness = None
+                    local_parameters = None
                     ParAID = None
                     reduction_factor = None
                     concentration_time = None
                     initial_loss = None
+                    node_ID = None
+                    node_id_net_type_no = None
 
-                with arcpy.da.SearchCursor(parameters[0].ValueAsText + r"\msm_HModA",
-                                           ["CatchID", "ImpArea", "ParAID", "LocalNo", "RFactor", "ConcTime", "ILoss"]) as cursor:
-                    for row in cursor:
-                        try:
-                            catchments_dict[row[0]] = Catchment()
-                            catchments_dict[row[0]].ParAID = row[2] if row[3] == 0 else ""
+                if "mdb" in MU_database:
+                    cursor = arcpy.da.SearchCursor(MU_database + r"\msm_HModA",
+                                           ["CatchID", "ImpArea", "ParAID", "LocalNo", "RFactor", "ConcTime", "ILoss"])
+                else:
+                    cursor = arcpy.da.SearchCursor(catchments,
+                                                   ["muid", "modelaimparea", "modelaparaid", "modelalocalno", "modelarfactor", "modelaconctime",
+                                                    "modelailoss"])
+
+                for row in cursor:
+                    # try:
+                        catchments_dict[row[0]] = Catchment()
+                        catchments_dict[row[0]].local_parameters = row[3] if "mdb" in MU_database else 1 - row[3]
+                        catchments_dict[row[0]].imperviousness = row[1]
+                        catchments_dict[row[0]].ParAID = row[2] if not catchments_dict[row[0]].local_parameters else ""
+                        if catchments_dict[row[0]].local_parameters or row[2] in hParA_dict:
                             catchments_dict[row[0]].reduction_factor = (hParA_dict[row[2]].reduction_factor
-                                                                             if row[3] == 0 else row[4])
+                                                                             if not catchments_dict[row[0]].local_parameters else row[4])
                             catchments_dict[row[0]].concentration_time = (hParA_dict[row[2]].concentration_time
-                                                                               if row[3] == 0 else row[5])
+                                                                               if not catchments_dict[row[0]].local_parameters else row[5])
                             catchments_dict[row[0]].initial_loss = (hParA_dict[row[2]].initial_loss
-                                                                          if row[3] == 0 else row[6])
-                        except Exception as e:
-                            catchments_dict[row[0]].concentration_time = 7
-                            catchments_dict[row[0]].reduction_factor = 0
-                            warnings.warn("%s not found in msm_HParA" % (row[2]))
+                                                                          if not catchments_dict[row[0]].local_parameters else row[6])
+                        else:
+                            arcpy.AddWarning("%s not in msm_HParA" % row[2])
+                        # arcpy.AddMessage((catchments_dict[row[0]].ParAID, catchments_dict[row[0]], catchments_dict[row[0]].local_parameters))
+                    # except Exception as e:
+                    #     catchments_dict[row[0]].concentration_time = 7
+                    #     catchments_dict[row[0]].reduction_factor = 0
+                    #     arcpy.AddWarning("%s not found in msm_HParA" % (row[2]))
+                    #     arcpy.AddWarning(e)
 
-                with arcpy.da.UpdateCursor(ms_Catchment, ["MUID", "ParAID", "RedFactor", "ConcTime", "InitLoss"]) as cursor:
+                del cursor
+
+                nodes_net_type_no = {row[0]:row[1] for row in arcpy.da.SearchCursor(manholes, ["MUID", "NetTypeNo"])}
+
+                with arcpy.da.SearchCursor(os.path.join(MU_database, "msm_CatchCon"), ["CatchID", "NodeID"]) as cursor:
+                    for row in cursor:
+                        if row[0] in catchments_dict:
+                            catchments_dict[row[0]].node_ID = row[1]
+
+                            if row[1] in nodes_net_type_no:
+                                catchments_dict[row[0]].node_id_net_type_no = nodes_net_type_no[row[1]]
+                        else:
+                            arcpy.AddWarning("Catchment connection registers connection to nonexisting catchment %s" % row[0])
+
+
+
+
+                with arcpy.da.UpdateCursor(ms_Catchment, ["MUID", "ImpArea", "ParAID", "RedFactor", "ConcTime", "InitLoss", "NodeID", "NodeNT"]) as cursor:
                     for row in cursor:
                         try:
                             catchment = catchments_dict[row[0]]
                         except Exception as e:
                             arcpy.AddWarning("Could not find catchment %s in msm_HModA" % (row[0]))
                         else:
-                            row[1] = catchment.ParAID
-                            row[2] = catchment.reduction_factor
-                            row[3] = catchment.concentration_time
-                            row[4] = catchment.initial_loss
+                            row[1] = catchment.imperviousness
+                            row[2] = catchment.ParAID
+                            row[3] = catchment.reduction_factor
+                            row[4] = catchment.concentration_time
+                            row[5] = catchment.initial_loss
+                            row[6] = catchment.node_ID
+                            row[7] = catchment.node_id_net_type_no
                             cursor.updateRow(row)
 
-                arcpy.JoinField_management(in_data=ms_Catchment, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_CatchCon", join_field="CatchID", fields="NodeID")
-                arcpy.management.AddField(ms_Catchment, "RedFactor", field_type = "FLOAT")
+                # arcpy.JoinField_management(in_data=ms_Catchment, in_field="MUID", join_table=MU_database + r"\msm_CatchCon", join_field="CatchID", fields="NodeID")
+                # arcpy.management.AddField(ms_Catchment, "RedFactor", field_type = "FLOAT")
 
                 addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments W Imp Area.lyr",
                         ms_Catchment, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
 
             else:
+                # arcpy.AddMessage((os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments WO Imp Area.lyr",
+                        # catchments, empty_group_layer))
                 addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments WO Imp Area.lyr",
                         catchments, group = empty_group_layer)
         
         old_workspace = arcpy.env.workspace
-        if show_annotations and not is_sqlite_database:
+        if "Annotations" in features_to_display and not is_sqlite_database:
             arcpy.env.workspace = os.path.join(MU_database, "mu_Geometry")
             annotation_classes = [os.path.join(MU_database, fc) for fc in arcpy.ListFeatureClasses(feature_type = "Annotation")]
             for annotation_class in annotation_classes:
@@ -751,10 +823,10 @@ class DisplayMikeUrban(object):
             arcpy.env.workspace = old_workspace
             
             
-        printStepAndTime("Refreshing Map")
-        arcpy.SetProgressor("default","Refreshing map")
-        arcpy.RefreshTOC()
-        arcpy.RefreshActiveView()
+        #printStepAndTime("Refreshing Map")
+        #arcpy.SetProgressor("default","Refreshing map")
+        #arcpy.RefreshTOC()
+        #arcpy.RefreshActiveView()
         return
         
 class DimensionAnalysis(object):
