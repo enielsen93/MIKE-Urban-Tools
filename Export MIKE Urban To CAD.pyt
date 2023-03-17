@@ -8,6 +8,10 @@ import arcpy
 import os
 import traceback
 import networker
+import xml.etree.ElementTree as ET
+import xml.dom.minidom
+import numpy as np
+import warnings
 
 def getAvailableFilename(filepath, parent = None):
     parent = "F%s" % (parent) if parent and parent[0].isdigit() else None
@@ -33,6 +37,39 @@ def getAvailableFilename(filepath, parent = None):
     else: 
         return filepath
 
+class Catchment:
+    muid = None
+    area = None
+    persons = None
+
+    imperviousness = None
+    reduction_factor = None
+    concentration_time = None
+    connection = None
+    nettypeno = None
+
+    nodeID = None
+
+    use_local_parameters = None
+
+    def __init__(self, MUID):
+        self.MUID = MUID
+
+    @property
+    def impervious_area(self):
+        return self.area*self.imperviousness/1e2
+
+    @property
+    def reduced_area(self):
+        return self.area*self.imperviousness/1e2*self.reduction_factor
+
+class HParA:
+    reduction_factor = None
+    concentration_time = None
+
+    def __init__(self, MUID):
+        self.MUID = MUID
+
 from arcpy import env
 class Toolbox(object):
     def __init__(self):
@@ -40,7 +77,7 @@ class Toolbox(object):
         self.alias  = "Export to CAD"
 
         # List of tool classes associated with this toolbox
-        self.tools = [DisplayMikeUrbanAsCAD, ExportToCAD, ExportToDUModelBuilder]
+        self.tools = [DisplayMikeUrbanAsCAD, ExportToCAD, ExportToDUModelBuilder, ExportToDDS]
 
 class DisplayMikeUrbanAsCAD(object):
     def __init__(self):
@@ -857,3 +894,390 @@ class ExportToDUModelBuilder(object):
         # for link in arcpy.da.SearchCursor(msm_Link, ["MUID", "UpLevel", "DwLevel", "SHAPE@"], where_clause = "UpLevel IS NOT NULL OR DwLevel IS NOT NULL"):
         #     for row in cursor:
         #         if row[1] is not None:
+
+
+class ExportToDDS(object):
+    def __init__(self):
+        self.label = "Export MIKE Urban Model to DanDasGraf"
+        self.description = "Export MIKE Urban Model to DanDasGraf"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        # Input Features parameter
+        msm_Node = arcpy.Parameter(
+            displayName="Manhole Layers:",
+            name="msm_Node",
+            datatype="GPFeatureLayer",
+            parameterType="Optional",
+            direction="Input")
+        
+        msm_Link = arcpy.Parameter(
+            displayName="Link Layers:",
+            name="msm_Link",
+            datatype="GPFeatureLayer",
+            parameterType="Optional",
+            direction="Input")
+
+        dandas_knuder = arcpy.Parameter(
+            displayName="Export Manholes to DanDasGraf XML-file:",
+            name="dandas_knuder",
+            datatype="File",
+            parameterType="Required",
+            direction="Output")
+        dandas_knuder.filter.list = ["xml"]
+
+        dandas_ledninger = arcpy.Parameter(
+            displayName="Export Pipes to DanDasGraf XML-file:",
+            name="dandas_ledninger",
+            datatype="File",
+            parameterType="Required",
+            direction="Output")
+        dandas_ledninger.filter.list = ["xml"]
+
+        dandas_deloplande = arcpy.Parameter(
+            displayName="Export Catchments to DanDasGraf XML-file:",
+            name="dandas_deloplande",
+            datatype="File",
+            parameterType="Optional",
+            direction="Output")
+
+        use_pipe_catalogue = arcpy.Parameter(
+            displayName="Use Pipe Catalogue:",
+            name="use_pipe_catalogue",
+            datatype="DEDbaseTable",
+            parameterType="Optional",
+            direction="Input")
+        use_pipe_catalogue.value = os.path.dirname(os.path.realpath(__file__)) + r"\Data\ExportToCad\Pipe_Catalogue.dbf"
+
+        parameters = [msm_Node, msm_Link, dandas_knuder, dandas_ledninger, dandas_deloplande, use_pipe_catalogue]
+
+        return parameters
+
+    def isLicensed(self):  # optional
+        return True
+
+    def updateParameters(self, parameters):  # optional
+        # if not parameters[0].value and not parameters[1].value:
+        #     mxd = arcpy.mapping.MapDocument("CURRENT")
+        #
+        #     nodes = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Point'
+        #             and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]]
+        #     if nodes:
+        #         parameters[0].value = nodes
+        #
+        #     links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
+        #             and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]]
+        #     if links:
+        #         parameters[1].value = links
+                    
+        return
+
+    def updateMessages(self, parameters):  # optional
+
+        return
+
+    def execute(self, parameters, messages):
+        msm_Node = parameters[0].Value
+        msm_Link = parameters[1].Value
+        dandas_knuder = parameters[2].ValueAsText
+        dandas_ledninger = parameters[3].ValueAsText
+        dandas_deloplande = parameters[4].ValueAsText
+        use_pipe_catalogue = parameters[5].Value
+
+        pipe_catalogue = []
+        class PipeSize:
+            def __init__(self, material, internal_diameter, wall_thickness):
+                self.material = material
+                self.internal_diameter = internal_diameter
+                self.wall_thickness = wall_thickness
+
+        if use_pipe_catalogue:
+            with arcpy.da.SearchCursor(use_pipe_catalogue, ["*"]) as cursor:
+                for row in cursor:
+                    pipe_catalogue.append(PipeSize(row[1], row[2], row[3]))
+
+        mike_urban_database = os.path.dirname(arcpy.Describe(msm_Node).catalogPath).replace("\mu_Geometry", "")
+        is_mike_plus = True if ".sqlite" in mike_urban_database else False
+        network = networker.NetworkLinks(mike_urban_database)
+        msm_HParA = os.path.join(mike_urban_database, "msm_HParA")
+        ms_Catchment = os.path.join(mike_urban_database, "msm_Catchment") if is_mike_plus else os.path.join(mike_urban_database, "ms_Catchment")
+        msm_HModA = os.path.join(mike_urban_database, "msm_HModA")
+        msm_CatchCon = os.path.join(mike_urban_database, "msm_CatchCon")
+
+        node_root = ET.Element("KnudeGroup")
+        node_root.set("xmlns", "http://www.danva.dk/xml/schemas/dandas/20120102")
+        Referencesys = ET.SubElement(node_root, "Referencesys")
+        ET.SubElement(Referencesys, "KoordinatsysKode").text = "9"
+        ET.SubElement(Referencesys, "KotesysKode").text = "1"
+
+        link_root = ET.Element("LedningGroup")
+        link_root.set("xmlns", "http://www.danva.dk/xml/schemas/dandas/20120102")
+        Referencesys = ET.SubElement(node_root, "Referencesys")
+        ET.SubElement(Referencesys, "KoordinatsysKode").text = "9"
+        ET.SubElement(Referencesys, "KotesysKode").text = "1"
+
+        nodes = {}
+
+        class Node:
+            def __init__(self, muid, x, y):
+                self.muid = muid
+                self.x = x
+                self.y = y
+                self.diameter = 1
+                self.type_no = 1
+                self.invert_level = 0
+                self.ground_level = 0
+                self.net_type_no = 2
+                self.description = ""
+                self.shape = None
+
+        outer_diameters_plastic = np.array([0.110, 0.160, 0.200, 0.250, 0.300, 0.400, 0.500, 0.600, 0.800, 0.900, 1.000, 1.200,
+                                   1.400, 1.500, 1.600])
+        links = {}
+
+        class Link:
+            def __init__(self, muid, shape):
+                self.muid = muid
+                self.shape = shape
+                self.diameter = 0.2
+                self.material_id = "Concrete (Normal)"
+                self.uplevel = None
+                self.dwlevel = None
+                self.net_type_no = 2
+                self.description = ""
+
+            @property
+            def outer_diameter(self):
+                if self.material_id == "Plastic" and self.diameter not in outer_diameters_plastic and self.diameter < 1.6:
+                    i = np.where(outer_diameters_plastic - self.diameter >= 0)[0][0]
+                    return outer_diameters_plastic[i]
+                else:
+                    return self.diameter
+
+            @property
+            def material_code(self):
+                if "concrete" in self.material_id.lower() or "beton" in self.material_id.lower():
+                    return 1
+                elif "plastic" in self.material_id.lower():
+                    return 4
+                elif "gap" in self.material_id.lower():
+                    return 8
+                else:
+                    return 5
+
+            def wall_thickness(self, pipe_catalogue):
+                if "concrete" in self.material_id.lower() or "beton" in self.material_id.lower():
+                    material = "Concrete"
+                elif "plastic" in self.material_id.lower():
+                    material = "Plastic"
+                elif "gap" in self.material_id.lower():
+                    material = "GAP"
+                else:
+                    material = "None"
+
+                wall_thickness = [pipe_size.wall_thickness for pipe_size in pipe_catalogue if pipe_size.material.lower() == material.lower() and pipe_size.internal_diameter == self.diameter*1e3]
+                if wall_thickness:
+                    return wall_thickness[0]
+                else:
+                    return None
+
+        catchments_dict = {}
+        if True:
+            hParA_dict = {}
+            with arcpy.da.SearchCursor(msm_HParA, ["MUID", "RedFactor", "ConcTime"]) as cursor:
+                for row in cursor:
+                    hParA_dict[row[0]] = HParA(row[0])
+                    hParA_dict[row[0]].reduction_factor = row[1]
+                    hParA_dict[row[0]].concentration_time = row[2]
+
+            msm_HModA_without_ms_Catchment = []
+            if is_mike_plus:
+                with arcpy.da.SearchCursor(ms_Catchment,
+                                           ['MUID', 'SHAPE@AREA', 'Area', 'Persons', "NetTypeNo", "ModelAImpArea",
+                                            "ModelAParAID", "ModelALocalNo", "ModelARFactor",
+                                            "ModelAConcTime", "SHAPE@"]) as cursor:
+                    for row in cursor:
+                        catchments_dict[row[0]] = Catchment(row[0])
+                        catchments_dict[row[0]].persons = row[3] if row[3] is not None else 0
+                        catchments_dict[row[0]].area = row[2] if row[2] is not None else abs(row[1])
+                        catchments_dict[row[0]].nettypeno = row[4]
+                        catchments_dict[row[0]].use_local_parameters = not bool(row[7])
+                        catchments_dict[row[0]].imperviousness = row[5] * 1e2
+                        catchments_dict[row[0]].shape = row[10]
+
+                        try:
+                            catchments_dict[row[0]].reduction_factor = (hParA_dict[row[6]].reduction_factor
+                                                                             if not row[7] == 0 else row[8])
+                            catchments_dict[row[0]].concentration_time = (hParA_dict[row[6]].concentration_time / 60.0
+                                                                               if not row[7] == 0 else row[9] / 60.0)
+
+                        except Exception as e:
+                            catchments_dict[row[0]].concentration_time = 7
+                            catchments_dict[row[0]].reduction_factor = 0
+                            warnings.warn("%s not found in msm_HParA" % (row[6]))
+
+                with arcpy.da.SearchCursor(msm_CatchCon, ["CatchID", "NodeID"]) as cursor:
+                    for row in cursor:
+                        catchments_dict[row[0]].nodeID = row[1]
+
+            else:
+                with arcpy.da.SearchCursor(msm_HModA,
+                                           ["CatchID", "ImpArea", "ParAID", "LocalNo", "RFactor", "ConcTime"]) as cursor:
+                    for row in cursor:
+                        catchments_dict[row[0]] = Catchment(row[0])
+                        catchments_dict[row[0]].imperviousness = row[1]
+
+                        try:
+                            catchments_dict[row[0]].reduction_factor = (hParA_dict[row[2]].reduction_factor
+                                                                             if row[3] == 0 else row[4])
+                            catchments_dict[row[0]].concentration_time = (hParA_dict[row[2]].concentration_time
+                                                                               if row[3] == 0 else row[5])
+                        except Exception as e:
+                            catchments_dict[row[0]].concentration_time = 7
+                            catchments_dict[row[0]].reduction_factor = 0
+                            warnings.warn("%s not found in msm_HParA" % (row[2]))
+
+                with arcpy.da.SearchCursor(msm_CatchCon, ["CatchID", "NodeID"]) as cursor:
+                    for row in cursor:
+                        if row[0] in catchments_dict:
+                            catchments_dict[row[0]].nodeID = row[1]
+
+                with arcpy.da.SearchCursor(ms_Catchment,
+                                           ['MUID', 'SHAPE@AREA', 'Area', 'Persons', "NetTypeNo", "SHAPE@"]) as cursor:
+                    for row in cursor:
+                        if row[0] not in catchments_dict:
+                            catchments_dict[row[0]] = Catchment(row[0])
+                        catchments_dict[row[0]].muid = row[0]
+                        catchments_dict[row[0]].persons = row[3] if row[3] is not None else 0
+                        catchments_dict[row[0]].area = row[2] * 1e4 if row[2] is not None else row[1]
+                        catchments_dict[row[0]].nettypeno = row[4]
+                        catchments_dict[row[0]].shape = row[5]
+
+        with arcpy.da.SearchCursor(msm_Node,
+                                   ["MUID", "SHAPE@XY", "Diameter", "TypeNo", "InvertLevel", "GroundLevel", "NetTypeNo",
+                                    "Description"]) as cursor:
+            for row in cursor:
+                if row[1] is not None:
+                    nodes[row[0]] = Node(row[0], row[1][0], row[1][1])
+                    node = nodes[row[0]]
+                    if row[2]: node.diameter = row[2]
+                    if row[3]: node.type_no = row[3]
+                    if row[4]: node.invert_level = row[4]
+                    if row[5]: node.ground_level = row[5]
+                    if row[6]: node.net_type_no = row[6]
+                    if row[7]: node.description = row[7]
+
+        with arcpy.da.SearchCursor(msm_Link,
+                                   ["MUID", "SHAPE@", "Diameter", "MaterialID", "UpLevel", "DwLevel", "NetTypeNo",
+                                    "Description"]) as cursor:
+            for row in cursor:
+                links[row[0]] = Link(row[0], row[1])
+                link = links[row[0]]
+                if row[2]: link.diameter = row[2]
+                if row[3]: link.material_id = row[3]
+                if row[4]: link.uplevel = row[4]
+                if row[5]: link.dwlevel = row[5]
+                if row[6] and row[6] in [1,2,3]: link.net_type_no = row[6]
+                if row[7]: link.description = row[7]
+
+        for node in nodes.values():
+            node_dds = ET.SubElement(node_root, "Knude")
+            node_dds.set("Knudenavn", node.muid)
+            ET.SubElement(node_dds, "Bundkote").text = "%1.2f" % node.invert_level
+            ET.SubElement(node_dds, "DiameterBredde").text = "%d" % (node.diameter * 1e3)
+            ET.SubElement(node_dds, "KategoriAfloebKode").text = "1"
+            ET.SubElement(node_dds, "KnudeKode").text = "1"
+            ET.SubElement(node_dds, "Bemaerkning").text = node.description
+            ET.SubElement(node_dds, "Terraenkote").text = "%1.2f" % node.ground_level
+            ET.SubElement(node_dds, "TypeAfloebKode").text = "%d" % node.net_type_no
+            ET.SubElement(node_dds, "XKoordinat").text = "%1.2f" % node.x
+            ET.SubElement(node_dds, "YKoordinat").text = "%1.2f" % node.y
+            ET.SubElement(node_dds, "XLabel").text = "%1.2f" % (node.x + 5)
+            ET.SubElement(node_dds, "YLabel").text = "%1.2f" % (node.y + 5)
+
+            if catchments_dict and dandas_deloplande:
+                catchment_items = ET.SubElement(node_dds, "DeloplandItems")
+                arcpy.AddMessage(([catchment.MUID for catchment in catchments_dict.values() if catchment.nodeID == node.muid], node.muid))
+                for catchment_no, catchment in enumerate([catchment for catchment in catchments_dict.values() if catchment.nodeID == node.muid and catchment.shape.getPart()]):
+                    try:
+                        catchment_item = ET.SubElement(catchment_items, "Delopland")
+                        catchment_item.set("Deloplandnr", "%d" % (catchment_no + 1))
+
+                        ET.SubElement(catchment_item, "Areal").text = "%1.4f" % (catchment.area / 10000)
+                        ET.SubElement(catchment_item, "BefaestelsePct").text = "%1.4f" % catchment.imperviousness
+                        ET.SubElement(catchment_item, "TekstjusteringKode").text = "4"
+                        ET.SubElement(catchment_item, "Tekstvinkel").text = "0"
+                        if not catchment.persons == None:
+                            ET.SubElement(catchment_item, "PE").text = "%1.1f" % catchment.persons
+                        ET.SubElement(catchment_item, "XLabel").text = "%1.3f" % catchment.shape.centroid.X
+                        ET.SubElement(catchment_item, "YLabel").text = "%1.3f" % catchment.shape.centroid.Y
+                        ET.SubElement(catchment_item, "TekstFaktor").text = "1.00"
+
+                        catchment_item_coord_items = ET.SubElement(catchment_item, "DeloplandKoordItems")
+                        for coordi, coord in enumerate(catchment.shape.getPart()[0]):
+                            catchment_item_coord_item = ET.SubElement(catchment_item_coord_items, "DeloplandKoord")
+                            catchment_item_coord_item.set("Sortering", "%d" % (coordi + 1))
+                            ET.SubElement(catchment_item_coord_item, "Xkoordinat").text = "%1.2f" % coord.X
+                            ET.SubElement(catchment_item_coord_item, "Ykoordinat").text = "%1.2f" % coord.Y
+                    except Exception as e:
+                        arcpy.AddMessage("Error on catchment %s" % (catchment.muid))
+                        arcpy.AddError(traceback.format_exc())
+                    
+
+
+        for link in links.values():
+            # arcpy.AddMessage(links.values())
+            if link.muid in network.links and network.links[link.muid].fromnode in nodes and network.links[link.muid].tonode in nodes:
+                link_dds = ET.SubElement(link_root, "Ledning")
+                link_dds.set("NedstroemKnudenavn", network.links[link.muid].tonode)
+                link_dds.set("OpstroemKnudenavn", network.links[link.muid].fromnode)
+                ET.SubElement(link_dds, "KategoriAfloebKode").text = "1"
+                ET.SubElement(link_dds, "TransportKode").text = "1"
+                ET.SubElement(link_dds, "TypeAfloebKode").text = "%d" % link.net_type_no
+
+                link_dds_parts = ET.SubElement(link_dds, 'DelLedningItems')
+                link_dds_part = ET.SubElement(link_dds_parts, 'DelLedning')
+                link_dds_part.set("NedstroemKnudenavn", network.links[link.muid].tonode)
+                link_dds_part.set("OpstroemKnudenavn", network.links[link.muid].fromnode)
+                if link.uplevel:
+                    ET.SubElement(link_dds_part,
+                              'BundloebskoteOpst').text = "%1.2f" % link.uplevel if link.uplevel else "%1.2f" % nodes[
+                                network.links[link.muid].fromnode].invert_level
+
+                if link.dwlevel:
+                    ET.SubElement(link_dds_part,
+                                  'BundloebskoteNedst').text = "%1.2f" % link.dwlevel if link.dwlevel else "%1.2f" % nodes[
+                        network.links[link.muid].tonode].invert_level
+                ET.SubElement(link_dds_part, "MaterialeKode").text = "%d" % link.material_code
+                ET.SubElement(link_dds_part, 'Handelsmaal').text = "%d" % (link.outer_diameter * 1e3)
+                ET.SubElement(link_dds_part, 'DiameterIndv').text = "%d" % (link.diameter * 1e3)
+                wall_thickness = link.wall_thickness(pipe_catalogue)
+                if wall_thickness:
+                    ET.SubElement(link_dds_part, 'Godstykkelse').text = "%1.1f" % wall_thickness
+
+                if len(link.shape.getPart()[0]) > 2:
+                    bends = ET.SubElement(link_dds_part, 'KnaekpunktItems')
+                    for part_i, part in enumerate(link.shape.getPart()[0][1:-1]):
+                        bend = ET.SubElement(bends, 'Knaekpunkt')
+                        bend.set('Sortering', '%d' % (part_i + 1))
+                        ET.SubElement(bend, 'XKoordinat').text = "%1.2f" % (part.X)
+                        ET.SubElement(bend, 'YKoordinat').text = "%1.2f" % (part.Y)
+
+                link_dds_part_labels = ET.SubElement(link_dds_part, 'LabelDelledningItems')
+                link_dds_part_label = ET.SubElement(link_dds_part_labels, 'LabelDelledning')
+                centroid = link.shape.positionAlongLine(link.shape.length / 2)
+                ET.SubElement(link_dds_part_label, 'PunktPaaLednKode').text = "0"
+                ET.SubElement(link_dds_part_label, 'TekstjusteringKode').text = "4"
+                ET.SubElement(link_dds_part_label, 'XLabel').text = "%1.2f" % centroid.firstPoint.X
+                ET.SubElement(link_dds_part_label, 'YLabel').text = "%1.2f" % centroid.firstPoint.Y
+
+        # Skriv XML-fil
+        with open(dandas_knuder, "w+") as f:
+            f.write(xml.dom.minidom.parseString(ET.tostring(node_root, encoding="UTF-8")).toprettyxml().encode("utf-8"))
+
+        with open(dandas_ledninger, "w+") as f:
+            f.write(xml.dom.minidom.parseString(ET.tostring(link_root, encoding="UTF-8")).toprettyxml().encode("utf-8"))
+
+        
