@@ -87,6 +87,7 @@ class SummarizeButton(object):
             concentration_time = 0
             connection = None
             nettypeno = None
+            parameter_set = None
             
             def __init__(self, MUID):
                 self.MUID = MUID
@@ -141,15 +142,18 @@ class SummarizeButton(object):
                             catchments[row[0]].concentration_time = row[6]
                             
                         elif row[4] in HParA_redfactor:
+                            catchments[row[0]].parameter_set = row[4]
                             catchments[row[0]].reduction_factor = HParA_redfactor[row[4]]
                             catchments[row[0]].initial_loss = HParA_initloss[row[4]]
                             catchments[row[0]].concentration_time = HParA_conctime[row[4]]
 
                 connected_node = None
+                parameter_set = None
                 if len(MUIDs) == 1:
                     matches = [row[0] for row in arcpy.da.SearchCursor(msm_CatchCon, ["NodeID"], where_clause = "CatchID = '%s'" % (MUIDs[0]))]
                     if matches:
                         connected_node = matches[0]
+                        parameter_set = catchments.values()[0].parameter_set
                     
                 with arcpy.da.SearchCursor(arcpy.Describe(catchmentLayer).catalogPath, ["MUID", "SHAPE@AREA", "Area"], where_clause = where_clause) as cursor:
                     for row in cursor:
@@ -203,6 +207,7 @@ class SummarizeButton(object):
             message_text = "Total area: %1.2f ha\nImpervious area: %1.2f ha (%1.0f%s)\nReduced area: %1.2f ha" % (
                             catchment_area/1e4, catchment_impervious_area/1e4, catchment_impervious_area/catchment_area*1e2, "%", catchment_reduced_area/1e4)
             message_text += "\nConnection: %s" % (connected_node) if connected_node else ""
+            message_text += "\nParameter Set: %s" % (parameter_set) if parameter_set else ""
             # message_text += "\nInitial loss: %s mm\nConcentration time: %s min\n" % ("%d",
             #                                                                               np.min([catchment.concentration_time for catchment in catchments.values()]),
             #                                                                               np.max([catchment.concentration_time for catchment in catchments.values()]))
