@@ -38,7 +38,7 @@ class Toolbox(object):
         self.alias = "Compare MIKE Models"
         self.canRunInBackground = True
         # List of tool classes associated with this toolbox
-        self.tools = [CompareMikeModels]
+        self.tools = [CompareMikeModels, FixSimulationModelName]
 
 
 class CompareMikeModels(object):
@@ -283,3 +283,88 @@ class CompareMikeModels(object):
             arcpy.mapping.AddLayerToGroup(df, empty_group_layer, newlayer, "TOP")
 
         return
+
+class FixSimulationModelName(object):
+    def __init__(self):
+        self.label = "Fix MIKE Urban Model Name"
+        self.description = "Fix MIKE Urban Model Name"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+        
+        MU_database = arcpy.Parameter(
+            displayName="Mike Urban database",
+            name="database",
+            datatype="DEWorkspace",
+            parameterType="Required",
+            direction="Input")
+            
+        pattern = arcpy.Parameter(
+            displayName="String to rename:",
+            name="pattern",
+            datatype="GPString",
+            parameterType="Optional",
+            direction="Input")
+            
+        replacement= arcpy.Parameter(
+            displayName="Replacement for string:",
+            name="replacement",
+            datatype="GPString",
+            parameterType="Optional",
+            direction="Input")
+        
+        parameters = [MU_database, pattern, replacement]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):
+        if not parameters[0].Value:
+            mxd = arcpy.mapping.MapDocument("CURRENT")
+            layers = arcpy.mapping.ListLayers(mxd)
+            for layer in layers:
+                try:
+                    if ".mdb" in layer.workspacePath:
+                        MU_database = layer.workspacePath
+                        break
+                except Exception as e:
+                    pass
+            parameters[0].Value = MU_database
+        return
+
+    def updateMessages(self, parameters):  # optional
+        return
+
+    def execute(self, parameters, messages):
+        MU_database = parameters[0].ValueAsText
+        pattern = parameters[1].ValueAsText
+        replacement = parameters[2].ValueAsText
+        msm_Project = os.path.join(MU_database, "msm_Project")
+        
+        if not pattern:
+        
+            model_name, model_version = re.findall(r'\\(?:Model)*(?:MIKE)*\\([\w]+)_(\d+)\\', MU_database)[0]
+            # model_name = "KOM"
+            arcpy.AddMessage((model_name, model_version))
+            with arcpy.da.UpdateCursor(msm_Project, ["MUID", "PRFHotStartFileName", "CRFFileName", "CatchmentDischargeFileName"]) as cursor:
+                for row in cursor:
+                    for val_i, val in enumerate(row):
+                        # arcpy.AddMessage((r"LIS_008", model_name + "_" + model_version, val))
+                        arcpy.AddMessage((r"%s_\d+" % model_name, r"%s_%s" % (model_name, model_version) , val))
+                        if val:
+                            val = re.sub("%s_\d+" % model_name, r"%s_%s" % (model_name, model_version) , val)
+                        row[val_i] = val
+                        arcpy.AddMessage((row[val_i], val))
+                    cursor.updateRow(row)
+        else:
+            with arcpy.da.UpdateCursor(msm_Project, ["MUID", "PRFHotStartFileName", "CRFFileName", "CatchmentDischargeFileName"]) as cursor:
+                for row in cursor:
+                    for val_i, val in enumerate(row):
+                        # arcpy.AddMessage((r"LIS_008", model_name + "_" + model_version, val))
+                        if val:
+                            val = re.sub(pattern, replacement, val)
+                        row[val_i] = val
+                        arcpy.AddMessage((row[val_i], val))
+                    cursor.updateRow(row)
