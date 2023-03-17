@@ -367,7 +367,7 @@ class PipeDimensionToolTAPro(object):
         ms_TabD = os.path.join(MU_database, "ms_TabD")
 
         arcpy.SetProgressorLabel("Mapping Network")
-        graph = mikegraph.Graph(MU_database)
+        graph = mikegraph.Graph(MU_database, useMaxInFlow = useMaxInflow)
         graph.map_network()
 
         if breakChainOnNodes:
@@ -378,24 +378,27 @@ class PipeDimensionToolTAPro(object):
                 arcpy.AddMessage(
                     "Removed edge %s-%s because %s is included in list of nodes to end trace at" % (edge[0], edge[1]))
 
-        if useMaxInflow:
-            maxInflow = {}
-            with arcpy.da.SearchCursor(msm_Node, ["MUID", "InletControlNo", "MaxInlet"],
-                                       where_clause="[MaxInlet] IS NOT NULL AND [InletControlNo] = 0") as cursor:
-                for row in cursor:
-                    maxInflow[row[0]] = row[2]
-                    arcpy.AddMessage("Added additional discharge %1.3f m3/s to node %s" % (row[2], row[0]))
-                    breakEdges = [edge for edge in graph.graph.edges if edge[1] == row[0]]
-                    graph.graph.remove_edges_from(breakEdges)
-                    for edge in breakEdges:
-                        arcpy.AddMessage(
-                            "Removed edge %s-%s because of additional discharge" % (
-                            edge[0], edge[1]))
+        # if useMaxInflow:
+        #     maxInflow = {}
+        #     with arcpy.da.SearchCursor(msm_Node, ["MUID", "InletControlNo", "MaxInlet"],
+        #                                where_clause="[MaxInlet] IS NOT NULL AND [InletControlNo] = 0") as cursor:
+        #         for row in cursor:
+        #             maxInflow[row[0]] = row[2]
+        #             arcpy.AddMessage("Added additional discharge %1.3f m3/s to node %s" % (row[2], row[0]))
+        #             breakEdges = [edge for edge in graph.graph.edges if edge[1] == row[0]]
+        #             graph.graph.remove_edges_from(breakEdges)
+        #             for edge in breakEdges:
+        #                 arcpy.AddMessage(
+        #                     "Removed edge %s-%s because of additional discharge" % (
+        #                     edge[0], edge[1]))
+
+
+        arcpy.AddMessage(graph.maxInflow)
 
         arcpy.SetProgressorLabel("Reading Rain Series")
         rainseries = timearea.TimeArea(runoff_file)
 
-        rainseries.additional_discharge = maxInflow
+        rainseries.additional_discharge = graph.maxInflow
         rainseries.scaling_factor = scaling_factor
 
         target_manholes = [graph.network.links[link].fromnode for link in selected_pipes]
@@ -561,6 +564,7 @@ class PipeDimensionToolTAPro(object):
                                     graph.network.links[row[3]].fromnode] and Di + 1 < len(D):
                                     Di += 1
                                     QFull = ColebrookWhite.QFull(D[Di] / 1e3, slope, row[2])
+                                    # arcpy.AddMessage((D[Di], QFull))
                                     # arcpy.AddMessage(QFull)
                             diameter = D[Di] / 1.0e3
 
