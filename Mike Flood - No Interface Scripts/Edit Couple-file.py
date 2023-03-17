@@ -8,10 +8,10 @@ import re
 import os
 import arcpy
 
-mdb_filepath = r"C:\Offline\VOR_Plan_023\VOR_Plan_023.mdb"
+mdb_filepath = r"C:\Papirkurv\VOR_Plan_023.mdb"
 msm_Node = os.path.join(mdb_filepath, "msm_Node")
 
-couple_filepaths = ['C:\Offline\VOR_Plan_023\VOR_Plan_CDS5_2dCDS5.couple', 'C:\Offline\VOR_Plan_023\VOR_Plan_CDS10_2dCDS10.couple', 'C:\Offline\VOR_Plan_023\VOR_Plan_CDS20_2dCDS20.couple']
+couple_filepaths = ["C:\Papirkurv\VOR_Plan_CDS5_2dCDS5.couple"]
 
 for couple_filepath in couple_filepaths:
 # couple_filepath = couple_filepaths[0]
@@ -42,24 +42,22 @@ for couple_filepath in couple_filepaths:
 
     for muid in nodes:
         node = nodes[muid]
-        if "Kanal23" in muid or "Kanal_" in muid:
-            txt_output[node.points_x_lineno-1] = txt_output[node.points_x_lineno-1].replace("1", "4")
-            txt_output[node.points_x_lineno] = txt_output[node.points_x_lineno].replace("0.0", "%1.2f, %1.2f, %1.2f, %1.2f" %
-                                                                                        (
+        if muid in ['Node_177', 'Node_178', 'Node_179', 'Node_180']:
+            txt_output[node.points_x_lineno-1] = re.sub(r"(.+=).+", r"\1 4", txt_output[node.points_x_lineno-1])
+            txt_output[node.points_x_lineno] = re.sub(r"(.+=).+", r"\1 %1.2f, %1.2f, %1.2f, %1.2f" % (
                                                                                             node.x - 1,
                                                                                             node.x + 1,
                                                                                             node.x + 1,
                                                                                             node.x -1
-                                                                                        ))
-            txt_output[node.points_x_lineno+1] = txt_output[node.points_x_lineno+1].replace("0.0",
-                                                                                        "%1.2f, %1.2f, %1.2f, %1.2f" %
-                                                                                        (
+                                                                                        ), txt_output[node.points_x_lineno])
+            txt_output[node.points_x_lineno+1] = re.sub(r"(.+=).+", r"\1 %1.2f, %1.2f, %1.2f, %1.2f" % (
                                                                                             node.y - 1,
                                                                                             node.y - 1,
                                                                                             node.y + 1,
                                                                                             node.y + 1
-                                                                                        ))
-            txt_output[node.points_x_lineno+2] = txt_output[node.points_x_lineno+2].replace("0.0", "0.0, 0.0, 0.0, 0.0")
+                                                                                        ), txt_output[node.points_x_lineno+1])
+
+            txt_output[node.points_x_lineno+2] = re.sub(r"(.+=).+", r"\1 0.0, 0.0, 0.0, 0.0", txt_output[node.points_x_lineno+2])
 
     with open(couple_filepath, 'w') as f:
         f.writelines(txt_output)
