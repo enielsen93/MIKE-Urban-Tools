@@ -123,7 +123,10 @@ class InterpolateToMesh(object):
 
         statusUpdate("Interpolating raster to mesh (nearest neighbor)",tic)
         for row in range(int(len(bedLevelFlat))):
-            bedLevelFlat[row] = DHMRaster[bisect.bisect_left(DHMRasterYs, data[row,1]),bisect.bisect_left(DHMRasterXs, data[row,0])]
+            try:
+                bedLevelFlat[row] = DHMRaster[bisect.bisect_left(DHMRasterYs, data[row,1]),bisect.bisect_left(DHMRasterXs, data[row,0])]
+            except Exception as e:
+                bedLevelFlat[row] = 0
 
         statusUpdate("Saving mesh",tic)
         dfs.zn = bedLevelFlat
