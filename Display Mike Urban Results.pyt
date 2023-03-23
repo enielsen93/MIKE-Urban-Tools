@@ -324,6 +324,7 @@ class DisplayFloodReturnPeriodFun(object):
                     MUIDsTCrit[MUID] = np.interp(MUIDsHCrit[MUID],
                           np.flipud(nodeH),
                           np.flipud(float(observationPeriod)/(np.array(range(len(nodeH)))+1)))
+                    arcpy.AddMessage((MUIDsHCrit[MUID], nodeH))
                 if critical_return_period:
                     try:
                         MUIDs_elevation_at_crit[MUID] = np.interp(critical_return_period,
@@ -1256,10 +1257,13 @@ class DisplayWeirReturnPeriod(object):
 
 
         results = mousereader.readERF(erf_file, "Total_Discharge_Ranked", [weir.name for weir in weirs.values()])
+        arcpy.AddMessage((erf_file, "Total_Discharge_Ranked", [weir.name for weir in weirs.values()]))
 
         for result, weir in zip(results, weirs.values()):
-            weir.result = result
-            print(weir.critical_discharge)
+            arcpy.AddMessage((weir,result))
+            if result is not None:
+                weir.result = result
+                print(weir.critical_discharge)
         
         empty_group_mapped = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\EmptyGroup.lyr")
         empty_group = arcpy.mapping.AddLayer(df, empty_group_mapped, "TOP")
@@ -1290,10 +1294,11 @@ class DisplayWeirReturnPeriod(object):
         
         with arcpy.da.UpdateCursor(msm_WeirNew, ["MUID", "TCrit", "QCrit"]) as cursor:
             for row in cursor:
-                # arcpy.AddMessage((row[0], weirs[row[0]].events_count, weirs[row[0]].result["col2"]))
-                row[1] = return_period / weirs[row[0]].events_count
-                row[2] = weirs[row[0]].critical_discharge
-                cursor.updateRow(row)
+                if weir.result:
+                    # arcpy.AddMessage((row[0], weirs[row[0]].events_count, weirs[row[0]].result["col2"]))
+                    row[1] = return_period / weirs[row[0]].events_count
+                    row[2] = weirs[row[0]].critical_discharge
+                    cursor.updateRow(row)
                 
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
