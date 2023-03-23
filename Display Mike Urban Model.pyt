@@ -5,13 +5,13 @@
 
 import arcpy
 if "mapping" in dir(arcpy):
-    import arcpy.mapping as apmapping
-    from arcpy.mapping  import MapDocument as MapDocument
-    from arcpy.mapping  import MapDocument as MapDocument
-else: 
-    import arcpy.mp as apmapping
-    from arcpy.mp import ArcGISProject as MapDocument
-    from arcpy.mapping  import MapDocument as MapDocument
+    arcgis_pro = False
+    import arcpy.mapping as arcpymapping
+    from arcpy.mapping import MapDocument as arcpyMapDocument
+else:
+    arcgis_pro = True
+    import arcpy.mp as arcpymapping
+    from arcpy.mp import ArcGISProject as arcpyMapDocument
 import numpy as np
 import csv
 import os
@@ -52,7 +52,7 @@ class Toolbox(object):
         self.alias  = "Display Mike Urban Model"
 
         # List of tool classes associated with this toolbox
-        self.tools = [DisplayMikeUrban, DimensionAnalysis, DisplayPipeElevation]
+        self.tools = [DisplayMikeUrban] #DimensionAnalysis, DisplayPipeElevation
 
 class DisplayMikeUrban(object):
     def __init__(self):
@@ -154,8 +154,8 @@ class DisplayMikeUrban(object):
         boundaryItem = MU_database + "\msm_BItem"
         msm_PasReg = MU_database + "\msm_PasReg"
         ms_TabD = MU_database + "\ms_TabD"
-        mxd = MapDocument("CURRENT")
-        df = apmapping.ListDataFrames(mxd)[0]
+        mxd = arcpyMapDocument("CURRENT")
+        df = mxd.listMaps()[0] if arcgis_pro else arcpymapping.ListDataFrames(mxd)[0]
 
         is_sqlite_database = True if ".sqlite" in MU_database else False
         
@@ -165,9 +165,9 @@ class DisplayMikeUrban(object):
             arcpy.AddMessage("%s - %d" % (txt, time.time() - start_time))
         
         printStepAndTime("Adding Empty Group")
-        empty_group_mapped = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\EmptyGroup.lyr")
-        empty_group = apmapping.AddLayer(df, empty_group_mapped, "TOP")
-        empty_group_layer = apmapping.ListLayers(mxd, "Empty Group", df)[0]
+        empty_group_mapped = arcpymapping.LayerFile(os.path.dirname(os.path.realpath(__file__)) + r"\Data\EmptyGroup.lyr") if arcgis_pro else arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\EmptyGroup.lyr")
+        empty_group = df.addLayer(empty_group_mapped) if arcgis_pro else arcpymapping.AddLayer(df, empty_group_mapped, "TOP")
+        empty_group_layer = df.listLayers('Empty Group')[0] if arcgis_pro else arcpymapping.ListLayers(mxd, "Empty Group", df)[0]
         empty_group_layer.name = os.path.splitext(os.path.basename(MU_database))[0]
         
         MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
@@ -188,11 +188,11 @@ class DisplayMikeUrban(object):
         arcpy.env.scratchWorkspace = MIKE_gdb        
 
         arcpy.env.addOutputsToMap = False
-        # addLayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"))        
+        # addLayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"))        
         
         def addLayer(layer_source, source, group = None, workspace_type = "ACCESS_WORKSPACE", new_name = None, definition_query = None):
             if ".sqlite" in source:
-                source_layer = apmapping.Layer(source)
+                source_layer = arcpymapping.LayerFile(source) if arcgis_pro else arcpy.mapping.Layer(source)
                 # if not "objectid" in [field.name.lower() for field in arcpy.ListFields(source)]:
                 #     import sqlite3
                 #     with sqlite3.connect(MU_database) as connection:
@@ -227,14 +227,20 @@ class DisplayMikeUrban(object):
 
 
                 if group:
-                    apmapping.AddLayerToGroup(df, group, source_layer, "BOTTOM")
+                    if arcgis_pro:
+                        df.addLayerToGroup(group, source_layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayerToGroup(df, group, source_layer, "BOTTOM")
                 else:
-                    apmapping.AddLayer(df, source_layer, "BOTTOM")
-                update_layer = apmapping.ListLayers(mxd, source_layer.name, df)[0]
+                    if arcgis_pro:
+                        df.addLayer(source_layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayer(df, source_layer, "BOTTOM")
+                update_layer = arcpymapping.ListLayers(mxd, source_layer.name, df)[0]
                 
                 layer_source_mike_plus = layer_source.replace("MOUSE", "MIKE+") if "MOUSE" in layer_source and os.path.exists(layer_source.replace("MOUSE", "MIKE+")) else None
                 layer_source = layer_source_mike_plus if layer_source_mike_plus else layer_source
-                layer = apmapping.Layer(layer_source)
+                layer = arcpymapping.Layer(layer_source)
                 update_layer.visible = layer.visible
                 update_layer.labelClasses = layer.labelClasses
                 update_layer.showLabels = layer.showLabels
@@ -242,25 +248,35 @@ class DisplayMikeUrban(object):
                 update_layer.definitionQuery = definition_query
                 
                 try:
-                    arcpy.mapping.UpdateLayer(df, update_layer, layer, symbology_only = True)
+                    arcpymapping.UpdateLayer(df, update_layer, layer, symbology_only = True)
                 except Exception as e:
                     arcpy.AddWarning(source)
                     pass
             else:
-                layer = apmapping.Layer(layer_source)
+                layer = arcpymapping.LayerFile(layer_source) if arcgis_pro else arcpymapping.Layer(layer_source)
                 if group:
-                    apmapping.AddLayerToGroup(df, group, layer, "BOTTOM")
+                    if arcgis_pro:
+                        df.addLayerToGroup(group, layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayerToGroup(df, group, layer, "BOTTOM")
                 else:
-                    apmapping.AddLayer(df, layer, "BOTTOM")
-                update_layer = apmapping.ListLayers(mxd, layer.name, df)[0]
+                    if arcgis_pro:
+                        df.addLayer(layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayer(df, layer, "BOTTOM")
+                update_layer = df.listLayers(layer.listLayers()[0].name)[0] if arcgis_pro else arcpymapping.ListLayers(mxd, layer.name, df)[0]
                 if definition_query:
                     update_layer.definitionQuery = definition_query
                 if new_name:
                     update_layer.name = new_name
-                update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, unicode(os.path.basename(source)))
+
+                if arcgis_pro:
+                    df.updateConnectionProperties(update_layer.connectionProperties['connection_info']['database'], os.path.dirname(source.replace(r"\mu_Geometry","")))
+                else:
+                    update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, os.path.basename(source))
                 
             if "msm_Node" in source:
-                for label_class in update_layer.labelClasses:
+                for label_class in (update_layer.listLabelClasses() if arcgis_pro else update_layer.labelClasses):
                     if show_depth:
                         label_class.expression = label_class.expression.replace("return labelstr", 'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
 
@@ -815,7 +831,7 @@ class DisplayMikeUrban(object):
             annotation_classes = [os.path.join(MU_database, fc) for fc in arcpy.ListFeatureClasses(feature_type = "Annotation")]
             for annotation_class in annotation_classes:
                 try:
-                    #apmapping.AddLayerToGroup(df, empty_group_layer, apmapping.Layer(annotation_class), "BOTTOM")
+                    #arcpymapping.AddLayerToGroup(df, empty_group_layer, arcpymapping.Layer(annotation_class), "BOTTOM")
                     addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Annotation.lyr", 
                             annotation_class, group = empty_group_layer, new_name = empty_group_layer.name + " " + os.path.basename(annotation_class))
                 except Exception as e:
@@ -865,21 +881,21 @@ class DimensionAnalysis(object):
         manholes = MU_database + "\mu_Geometry\msm_Node"
         links = MU_database + "\mu_Geometry\msm_Link"
         catchcons = MU_database + "\mu_Geometry\msm_CatchConLink"
-        mxd = MapDocument("CURRENT")
-        df = apmapping.ListDataFrames(mxd)[0]
+        mxd = arcpyMapDocument("CURRENT")
+        df = arcpymapping.ListDataFrames(mxd)[0]
         arcpy.env.addOutputsToMap = False
-        addLayer = apmapping.Layer(manholes)
-        apmapping.AddLayer(df, addLayer)
-        updatelayer = apmapping.ListLayers(mxd, "msm_Node", df)[0]
-        sourcelayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Manholes.lyr")
-        apmapping.UpdateLayer(df,updatelayer,sourcelayer,False)
+        addLayer = arcpymapping.Layer(manholes)
+        arcpymapping.AddLayer(df, addLayer)
+        updatelayer = arcpymapping.ListLayers(mxd, "msm_Node", df)[0]
+        sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Manholes.lyr")
+        arcpymapping.UpdateLayer(df,updatelayer,sourcelayer,False)
         updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'ACCESS_WORKSPACE', unicode(addLayer.datasetName))
         
-        addLayer = apmapping.Layer(links)   
-        apmapping.AddLayer(df, addLayer)
-        updatelayer = apmapping.ListLayers(mxd, "msm_Link", df)[0]
-        sourcelayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links W QFull.lyr")
-        apmapping.UpdateLayer(df,updatelayer,sourcelayer,False)
+        addLayer = arcpymapping.Layer(links)   
+        arcpymapping.AddLayer(df, addLayer)
+        updatelayer = arcpymapping.ListLayers(mxd, "msm_Link", df)[0]
+        sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links W QFull.lyr")
+        arcpymapping.UpdateLayer(df,updatelayer,sourcelayer,False)
         updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'ACCESS_WORKSPACE', unicode(addLayer.datasetName))
         #arcpy.ApplySymbologyFromLayer_management (addLayer, "Template.lyr")
         
@@ -888,29 +904,29 @@ class DimensionAnalysis(object):
         ms_CatchmentImpLayer = arcpy.MakeFeatureLayer_management(ms_CatchmentImp, getAvailableFilename(arcpy.env.scratchGDB + "\ms_CatchmentImpLayer")).getOutput(0).name
         arcpy.JoinField_management(in_data=ms_CatchmentImpLayer, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_HModA", join_field="CatchID", fields="ImpArea")
         arcpy.JoinField_management(in_data=ms_CatchmentImpLayer, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_CatchCon", join_field="CatchID", fields="NodeID")
-        addLayer = apmapping.Layer(ms_CatchmentImpLayer)
-        apmapping.AddLayer(df, addLayer)
-        updatelayer = apmapping.ListLayers(mxd, ms_CatchmentImpLayer, df)[0]
-        sourcelayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments W Imp Area.lyr")
-        apmapping.UpdateLayer(df,updatelayer,sourcelayer,False)
+        addLayer = arcpymapping.Layer(ms_CatchmentImpLayer)
+        arcpymapping.AddLayer(df, addLayer)
+        updatelayer = arcpymapping.ListLayers(mxd, ms_CatchmentImpLayer, df)[0]
+        sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments W Imp Area.lyr")
+        arcpymapping.UpdateLayer(df,updatelayer,sourcelayer,False)
         updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'FILEGDB_WORKSPACE', unicode(addLayer.datasetName))
         
-        # addLayer = apmapping.Layer(MU_database + r"\mu_Geometry\ms_Catchment")   
-        # apmapping.AddLayer(df, addLayer)
-        # updatelayer = apmapping.ListLayers(mxd, "ms_Catchment", df)[0]
-        # sourcelayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments W Imp Area.lyr")
-        # apmapping.UpdateLayer(df,updatelayer,sourcelayer,False)
-        # arcpy.AddJoin_management(apmapping.ListLayers(mxd, "Delopland", df)[0], "MUID", MU_database + r"\msm_HModA", "CatchID")
+        # addLayer = arcpymapping.Layer(MU_database + r"\mu_Geometry\ms_Catchment")   
+        # arcpymapping.AddLayer(df, addLayer)
+        # updatelayer = arcpymapping.ListLayers(mxd, "ms_Catchment", df)[0]
+        # sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments W Imp Area.lyr")
+        # arcpymapping.UpdateLayer(df,updatelayer,sourcelayer,False)
+        # arcpy.AddJoin_management(arcpymapping.ListLayers(mxd, "Delopland", df)[0], "MUID", MU_database + r"\msm_HModA", "CatchID")
         # updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'ACCESS_WORKSPACE', unicode(addLayer.datasetName))
-        # for lblClass in apmapping.ListLayers(mxd, "Delopland", df)[0].labelClasses:
+        # for lblClass in arcpymapping.ListLayers(mxd, "Delopland", df)[0].labelClasses:
             # lblClass.expression = '"%1.2f bef. ha (%1.0f%s)" % (float( [ms_Catchment.SHAPE_Area])/1e4*float([msm_HModA.ImpArea])/1e2,round(float([msm_HModA.ImpArea])/5,0)*5,"%")'
 
         
-        addLayer = apmapping.Layer(catchcons)
-        apmapping.AddLayer(df, addLayer)
-        updatelayer = apmapping.ListLayers(mxd, "msm_CatchConLink", df)[0]
-        sourcelayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchment Connections.lyr")
-        apmapping.UpdateLayer(df,updatelayer,sourcelayer,False)
+        addLayer = arcpymapping.Layer(catchcons)
+        arcpymapping.AddLayer(df, addLayer)
+        updatelayer = arcpymapping.ListLayers(mxd, "msm_CatchConLink", df)[0]
+        sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchment Connections.lyr")
+        arcpymapping.UpdateLayer(df,updatelayer,sourcelayer,False)
         updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'ACCESS_WORKSPACE', unicode(addLayer.datasetName))
         
         arcpy.RefreshTOC()
@@ -952,12 +968,12 @@ class DisplayPipeElevation(object):
     def execute(self, parameters, messages):
         MU_database = parameters[0].ValueAsText
         links = MU_database + "\mu_Geometry\msm_Link"
-        mxd = MapDocument("CURRENT")
-        df = apmapping.ListDataFrames(mxd)[0]
+        mxd = arcpyMapDocument("CURRENT")
+        df = arcpymapping.ListDataFrames(mxd)[0]
         arcpy.env.addOutputsToMap = False
-        groupLayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links Elevation Error.lyr")
-        groupLayer = apmapping.AddLayer(df, groupLayer)
-        groupLayer = apmapping.ListLayers(mxd, groupLayer, df)[0]
+        groupLayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links Elevation Error.lyr")
+        groupLayer = arcpymapping.AddLayer(df, groupLayer)
+        groupLayer = arcpymapping.ListLayers(mxd, groupLayer, df)[0]
         #arcpy.AddMessage(groupLayer)
         for layer in groupLayer:
             arcpy.AddMessage(layer.datasetName)
