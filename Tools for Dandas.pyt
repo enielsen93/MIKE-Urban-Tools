@@ -162,7 +162,9 @@ class Dandas2MULinks(object):
         msm_Node_Cursor = arcpy.da.InsertCursor(msm_Node, ["SHAPE@XY"] + msm_Node_Fields)
         ID = 0
         knudenavn = []
-        
+
+        manhole_table_dict = {0: u"Uoplyst", 1: u"Brønd (standard)", 2: u"Rensebrønd", 3: u"Tømme-/aftapningsbrønd", 4: u"Spulebrønd", 5: u"Ventilbrønd", 6: u"Udluftningsbrønd", 7: u"Målerbrønd", 8: u"Sivebrønd", 9: u"Nedløbsbrønd", 10: u"Samlebrønd", 11: u"Rendestensbrønd", 12: u"Nedgangsbrønd", 13: u"Tilslutningsbrønd", 14: u"Etagebrønd", 50: u"Andet"}
+
         statusUpdate("Reading manholes", tic)
         nodesDict = {}
         afloebkode = ["Waste Water", "Storm Drain", "Combined Sewer", "Drainage"]
@@ -175,7 +177,7 @@ class Dandas2MULinks(object):
                 skip = False
                 
                 msm_Node_Table["MUID"] = nodes[nodei].attrib['Knudenavn']
-                
+                # arcpy.AddMessage(dir(nodes[nodei]))
                 knudekode = int(nodes[nodei].find("KnudeKode").text) if nodes[nodei].find("KnudeKode") is not None else 0
                 
                 if knudekode == 3:
@@ -184,6 +186,16 @@ class Dandas2MULinks(object):
                     msm_Node_Table["TypeNo"] = 3
                 else:
                     msm_Node_Table["TypeNo"] = 1
+                    
+                owner = re.sub(r'[^\d\w]+', "", nodes[nodei].find("Ejerfordelingsnavn").text) if nodes[nodei].find("Ejerfordelingsnavn") is not None else ""
+                msm_Node_Table["Ejer"] = owner
+
+                if nodes[nodei].find("Broend/BroendKode") is not None:
+                    broendkode = int(nodes[nodei].find("Broend/BroendKode").text)
+                    msm_Node_Table["Broendkode"] = manhole_table_dict[broendkode] if broendkode in manhole_table_dict else broendkode
+                    # arcpy.AddMessage((msm_Node_Table["Broendkode"], broendkode))
+                # if not nodes[nodei].find()
+                # msm_Node_Table["Broendkode"] = manhole_table_dict[nodes[nodei].attrib['Broendkode']]
                 
                 statuskode = (int(nodes[nodei].find("KnudeKode").text) if nodes[nodei].find("KnudeKode") is not None else 0)                
                 if statuskode == 8:
@@ -198,7 +210,7 @@ class Dandas2MULinks(object):
                 
                 msm_Node_Table["Diameter"] = float(nodes[nodei].find("DiameterBredde").text)/1e3 if nodes[nodei].find("DiameterBredde") is not None else 1
                 
-                msm_Node_Table["NetTypeNo"] = int(nodes[nodei].find("TypeAfloebKode").text) if nodes[nodei].find("TypeAfloebKode").text is not None else None
+                msm_Node_Table["NetTypeNo"] = int(nodes[nodei].find("TypeAfloebKode").text) if nodes[nodei].find("TypeAfloebKode") is not None else None
                 
                 if msm_Node_Table["NetTypeNo"] is not None and msm_Node_Table["NetTypeNo"] in range(1,5) and afloebkode[msm_Node_Table["NetTypeNo"]-1] in afloebkodeparameter:
                     if ((nodes[nodei].find("KategoriAfloebKode") is not None and int(nodes[nodei].find("KategoriAfloebKode").text) == 4)  # hvis KategoriAfloebKode er stik
@@ -336,6 +348,7 @@ class Dandas2MULinks(object):
                     linkDictionary["MUID"] = MUID[:40]
                     
                     linkDictionary["NetTypeNo"] = int(link.find("TypeAfloebKode").text) if link.find("TypeAfloebKode") is not None else 1
+
                     
                     if link.find("DelLedningItems") is not None and link.find("DelLedningItems").find("DelLedning") is not None:
                         link_delledning = link.find("DelLedningItems").find("DelLedning")
@@ -344,7 +357,10 @@ class Dandas2MULinks(object):
                             linkDictionary["Diameter"] = float(link_delledning.find("DiameterIndv").text)/1.0e3
                         elif link_delledning.find("Handelsmaal") is not None:
                             linkDictionary["Diameter"] = float(link_delledning.find("Handelsmaal").text)/1.0e3
-                            
+
+                        linkDictionary["YearEst"] = int(link.find("DatoEtableret").text[:4]) if link.find(
+                            "DatoEtableret") is not None else None
+
                         if link_delledning.find("MaterialeKode") is not None:
                             material = int(link_delledning.find("MaterialeKode").text)
                             linkDictionary["MaterialID"] = materialList[material] if material in materialList else 'Concrete (Normal)'
@@ -392,7 +408,9 @@ class Dandas2MULinks(object):
         empty_group_mapped = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\Dandas Import.lyr")
         empty_group = arcpy.mapping.AddLayer(df, empty_group_mapped, "TOP")
         empty_group_layer = arcpy.mapping.ListLayers(mxd, "Dandas Import", df)[0]
-        
+        empty_group_layer.name = os.path.splitext(os.path.basename(dandas_knuder))[0]
+        if dandas_ledninger:
+            empty_group_layer.name = empty_group_layer.name + " " + os.path.splitext(os.path.basename(dandas_ledninger))[0]
         # msm_Node_reprojected = arcpy.management.Project(msm_Node, 
                                                         # getAvailableFilename(arcpy.env.scratchGDB + "\msm_Node_reprojected"),
                                                         # arcpy.SpatialReference("ETRS 1989 UTM Zone 32N"),
@@ -878,7 +896,13 @@ class CopyMikeUrbanFeatures(object):
                             arcpy.AddWarning(errorMessage)
                         if not errorMessage or pythonaddins.MessageBox("%s\nTransfer catchments anyway?" % (errorMessage), "Confirm Transfer", 1) == "OK":
                             arcpy.Append_management(selected, os.path.join(MU_database,"ms_Catchment"), schema_type = "NO_TEST")
-                            with arcpy.da.SearchCursor(selected,["MUID","ImpArea","NodeID"]) as catchmentCursor:
+                            fields = [field.name.lower() for field in arcpy.ListFields(selected)]
+                            def readField(field):
+                                if field.lower() in fields:
+                                    return field
+                                else:
+                                    return "SHAPE@XY"
+                            with arcpy.da.SearchCursor(selected,["MUID","ImpArea","NodeID", readField("ParAID"), readField("RedFactor"), readField("ConcTime"), readField("InitLoss")]) as catchmentCursor:
                                 with arcpy.da.InsertCursor(os.path.join(MU_database,"msm_CatchCon"),["CatchID","NodeID","TypeNo"]) as cursor:
                                     for row in catchmentCursor:
                                         nID = 0 if not row[2] else row[2]
@@ -887,7 +911,12 @@ class CopyMikeUrbanFeatures(object):
                                 with arcpy.da.InsertCursor(os.path.join(MU_database,"msm_HModA"),["CatchID","ImpArea","ParAID","LocalNo","ConcTime","RFactor","ILoss","CoeffNo","TACoeff"]) as cursor:
                                     for row in catchmentCursor:
                                         iArea = 0 if not row[1] else row[1]
-                                        cursor.insertRow((row[0],iArea,"-DEFAULT-",0,7,0.9,0.0006,0,0.33))
+                                        cursor.insertRow((row[0],iArea,"-DEFAULT-" if not row[3] or type(row[3]) is tuple else row[3],
+                                                          0,
+                                                          7 if not row[5] or type(row[5]) is tuple else row[5],
+                                                          0.9 if not row[4] or type(row[4]) is tuple else row[4],
+                                                          0.0006 if not row[6] or type(row[6]) is tuple else row[6],
+                                                          0,0.33))
                     else:
                         input_database = arcpy.Describe(ms_Catchment).catalogPath.split(".mdb")[0] + ".mdb"
                         selected = arcpy.Select_analysis(ms_Catchment, "in_memory\ms_Catchment_%d" % (i))

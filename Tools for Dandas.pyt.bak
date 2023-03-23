@@ -162,7 +162,9 @@ class Dandas2MULinks(object):
         msm_Node_Cursor = arcpy.da.InsertCursor(msm_Node, ["SHAPE@XY"] + msm_Node_Fields)
         ID = 0
         knudenavn = []
-        
+
+        manhole_table_dict = {0: u"Uoplyst", 1: u"Brønd (standard)", 2: u"Rensebrønd", 3: u"Tømme-/aftapningsbrønd", 4: u"Spulebrønd", 5: u"Ventilbrønd", 6: u"Udluftningsbrønd", 7: u"Målerbrønd", 8: u"Sivebrønd", 9: u"Nedløbsbrønd", 10: u"Samlebrønd", 11: u"Rendestensbrønd", 12: u"Nedgangsbrønd", 13: u"Tilslutningsbrønd", 14: u"Etagebrønd", 50: u"Andet"}
+
         statusUpdate("Reading manholes", tic)
         nodesDict = {}
         afloebkode = ["Waste Water", "Storm Drain", "Combined Sewer", "Drainage"]
@@ -175,7 +177,7 @@ class Dandas2MULinks(object):
                 skip = False
                 
                 msm_Node_Table["MUID"] = nodes[nodei].attrib['Knudenavn']
-                
+                # arcpy.AddMessage(dir(nodes[nodei]))
                 knudekode = int(nodes[nodei].find("KnudeKode").text) if nodes[nodei].find("KnudeKode") is not None else 0
                 
                 if knudekode == 3:
@@ -184,6 +186,16 @@ class Dandas2MULinks(object):
                     msm_Node_Table["TypeNo"] = 3
                 else:
                     msm_Node_Table["TypeNo"] = 1
+                    
+                owner = re.sub(r'[^\d\w]+', "", nodes[nodei].find("Ejerfordelingsnavn").text) if nodes[nodei].find("Ejerfordelingsnavn") is not None else ""
+                msm_Node_Table["Ejer"] = nodes[nodei].attrib[owner]
+
+                if nodes[nodei].find("Broend/BroendKode") is not None:
+                    broendkode = int(nodes[nodei].find("Broend/BroendKode").text)
+                    msm_Node_Table["Broendkode"] = manhole_table_dict[broendkode]
+                    # arcpy.AddMessage((msm_Node_Table["Broendkode"], broendkode))
+                # if not nodes[nodei].find()
+                # msm_Node_Table["Broendkode"] = manhole_table_dict[nodes[nodei].attrib['Broendkode']]
                 
                 statuskode = (int(nodes[nodei].find("KnudeKode").text) if nodes[nodei].find("KnudeKode") is not None else 0)                
                 if statuskode == 8:
@@ -392,7 +404,9 @@ class Dandas2MULinks(object):
         empty_group_mapped = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\Dandas Import.lyr")
         empty_group = arcpy.mapping.AddLayer(df, empty_group_mapped, "TOP")
         empty_group_layer = arcpy.mapping.ListLayers(mxd, "Dandas Import", df)[0]
-        
+        empty_group_layer.name = os.path.splitext(os.path.basename(dandas_knuder))[0]
+        if dandas_ledninger:
+            empty_group_layer.name = empty_group_layer.name + " " + os.path.splitext(os.path.basename(dandas_ledninger))[0]
         # msm_Node_reprojected = arcpy.management.Project(msm_Node, 
                                                         # getAvailableFilename(arcpy.env.scratchGDB + "\msm_Node_reprojected"),
                                                         # arcpy.SpatialReference("ETRS 1989 UTM Zone 32N"),
@@ -780,7 +794,7 @@ class CopyMikeUrbanFeatures(object):
                 for i, msm_Node in enumerate(msm_Nodes):
                     reference_MU_database = os.path.dirname(arcpy.Describe(msm_Node).catalogPath)
                     nodes_in_database = [row[0] for row in arcpy.da.SearchCursor(MU_database + "\msm_Node", ["MUID"])]
-                    selected = arcpy.Select_analysis(msm_Node, "in_memory\msm_Node_%d" % (i))
+                    selected = arcpy.Select_analysis(msm_Node, "in_memory\msm_Node_%d" % (i+1))
                     nodes_in_msm_Node = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
                     duplicate_nodes = np.intersect1d(nodes_in_database, nodes_in_msm_Node)
                     if duplicate_nodes.size > 0:
@@ -878,7 +892,13 @@ class CopyMikeUrbanFeatures(object):
                             arcpy.AddWarning(errorMessage)
                         if not errorMessage or pythonaddins.MessageBox("%s\nTransfer catchments anyway?" % (errorMessage), "Confirm Transfer", 1) == "OK":
                             arcpy.Append_management(selected, os.path.join(MU_database,"ms_Catchment"), schema_type = "NO_TEST")
-                            with arcpy.da.SearchCursor(selected,["MUID","ImpArea","NodeID"]) as catchmentCursor:
+                            fields = [field.name.lower() for field in arcpy.ListFields(selected)]
+                            def readField(field):
+                                if field.lower() in fields:
+                                    return field
+                                else:
+                                    return "SHAPE@XY"
+                            with arcpy.da.SearchCursor(selected,["MUID","ImpArea","NodeID", readField("ParAID"), readField("RedFactor"), readField("ConcTime"), readField("InitLoss")]) as catchmentCursor:
                                 with arcpy.da.InsertCursor(os.path.join(MU_database,"msm_CatchCon"),["CatchID","NodeID","TypeNo"]) as cursor:
                                     for row in catchmentCursor:
                                         nID = 0 if not row[2] else row[2]
@@ -887,7 +907,12 @@ class CopyMikeUrbanFeatures(object):
                                 with arcpy.da.InsertCursor(os.path.join(MU_database,"msm_HModA"),["CatchID","ImpArea","ParAID","LocalNo","ConcTime","RFactor","ILoss","CoeffNo","TACoeff"]) as cursor:
                                     for row in catchmentCursor:
                                         iArea = 0 if not row[1] else row[1]
-                                        cursor.insertRow((row[0],iArea,"-DEFAULT-",0,7,0.9,0.0006,0,0.33))
+                                        cursor.insertRow((row[0],iArea,"-DEFAULT-" if not row[3] or type(row[3]) is tuple else row[3],
+                                                          0,
+                                                          7 if not row[5] or type(row[5]) is tuple else row[5],
+                                                          0.9 if not row[4] or type(row[4]) is tuple else row[4],
+                                                          0.0006 if not row[6] or type(row[6]) is tuple else row[6],
+                                                          0,0.33))
                     else:
                         input_database = arcpy.Describe(ms_Catchment).catalogPath.split(".mdb")[0] + ".mdb"
                         selected = arcpy.Select_analysis(ms_Catchment, "in_memory\ms_Catchment_%d" % (i))
