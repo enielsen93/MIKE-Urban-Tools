@@ -87,30 +87,35 @@ class GroupComboBoxClass1(object):
          "Ledning" in layer.name or "msm_Link" in layer.name]
         print(msm_Link_layer)
         self.msm_Link = msm_Link_layer[0] if msm_Link_layer else None
-        if msm_Link_layer:
-            self.map_only += ", link" if self.map_only else "link"
+        self.map_only = "link"
+        # if msm_Link_layer:
+            # self.map_only += ", link" if self.map_only else "link"
 
         ms_Catchment_layer = [layer for layer in self.layers_in_group if
          "Delopland" in layer.name or "Catchment" in layer.name]
         print(ms_Catchment_layer)
         self.ms_Catchment = ms_Catchment_layer[0] if ms_Catchment_layer else None
 
-        link_layers = {"msm_Weir": "weir", "msm_Orifice":"orifice", "msm_Pump":"pump"}
+        link_layers = {"msm_Link": "link", "msm_Weir": "weir", "msm_Orifice":"orifice", "msm_Pump":"pump"}
         for link_layer in link_layers.keys():
             matching_layers = [layer for layer in self.layers_in_group if layer.isFeatureLayer and link_layer in layer.datasetName and layer.visible]
+            print(matching_layers)
             if matching_layers:
                 self.map_only += ", %s" % link_layers[link_layer] if self.map_only else "%s" % link_layers[link_layer]
-        
+
+        if any(["Passive Regulations" in [layer.name for layer in self.layers_in_group if layer.visible and layer.isFeatureLayer]]):
+            ignore_regulations = True
+        else:
+            ignore_regulations = False
+
         links_MUID = [row[0] for row in arcpy.da.SearchCursor(self.msm_Link, ["MUID"])]
-        print(links_MUID)
         duplicate_links = [MUID for MUID in links_MUID if links_MUID.count(MUID)>1]
-        print(duplicate_links)
         if duplicate_links:
             pythonaddins.MessageBox("Error: Links with identical MUIDs: ('%s')" % ("', '".join(duplicate_links)), "Error: Identical MUIDs", 0)
         
         import mikegraph
         print("Graphing %s" % (self.msm_Node.workspacePath)) 
-        self.graph = mikegraph.Graph(self.msm_Node.workspacePath, map_only = self.map_only)
+        self.graph = mikegraph.Graph(self.msm_Node.workspacePath, map_only = self.map_only, ignore_regulations=ignore_regulations)
         self.graph.map_network()
         pass
     def onEditChange(self, text):
