@@ -26,7 +26,7 @@ class Toolbox(object):
         self.alias  = "Catchments"
 
         # List of tool classes associated with this toolbox
-        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, AlteredCatchments, CheckCatchments, FAS2Deloplande, TransferCatchments, GetImperviousness, GetImperviousnessFlora, DuplicateCatchments, GenerateCatchmentConnections]
+        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, AlteredCatchments, CheckCatchments, FAS2Deloplande, TransferCatchments, GetImperviousness, GetImperviousnessFlora, DuplicateCatchments, GenerateCatchmentConnections, SetImperviousness]
 
 class CatchmentProcessing(object):
     def __init__(self):
@@ -1434,4 +1434,79 @@ class GenerateCatchmentConnections(object):
                 arcpy.SetProgressorPosition(link_i)
 
                 
+        return
+
+
+class SetImperviousness(object):
+    def __init__(self):
+        self.label = "Set Imperviousness"
+        self.description = "Set Imperviousness"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+        catchments = arcpy.Parameter(
+            displayName="Catchment layer",
+            name="catchments",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+        catchments.filter.list = ["Polygon"]
+
+        imperviousness = arcpy.Parameter(
+            displayName="Imperviousness:",
+            name="imperviousness",
+            datatype="double",
+            parameterType="Required",
+            direction="Input")
+
+        parameters = [catchments, imperviousness]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):  # optional
+        return
+
+    def updateMessages(self, parameters):  # optional
+        return
+
+    def execute(self, parameters, messages):
+        # imparea = os.path.join(arcpy.env.scratchGDB,"ImpArea")
+        # catchintsec = os.path.join(arcpy.env.scratchGDB,"catchintsec")
+        # catchspatialjoin = os.path.join(arcpy.env.scratchGDB,"CatchSpatialJoin")
+        # ms_catchments = os.path.join(arcpy.env.scratchGDB, "ms_catchments")
+        catchments = parameters[0].ValueAsText
+        imperviousness = parameters[1].Value
+
+        MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchments, ["MUID"])]
+
+        userquery = pythonaddins.MessageBox(
+            "Assign imperviousness to %s catchments?" % (len(MUIDs)),
+            "Confirm Assignment", 4)
+        arcpy.AddMessage("MUIDs IN ('%s')" % ("', '".join(MUIDs)))
+        if userquery == "Yes":
+            if "OplandData_GDB" in arcpy.Describe(catchments).file:
+                catchmentcursor = arcpy.da.UpdateCursor(catchments, ["MUID", "BEF_GRAD"], where_clause = "MUIDs IN ('%s')" % ("', '".join(MUIDs)))
+            else:
+                catchmentcursor = arcpy.da.UpdateCursor(
+                    os.path.join(os.path.dirname(arcpy.Describe(catchments).path), "msm_HModA"), ["CatchID", "ImpArea"], where_clause = "CatchID IN ('%s')" % ("', '".join(MUIDs)))
+            for row in catchmentcursor:
+                oldValue = row[1]
+                row[1] = imperviousness
+                if abs(oldValue - row[1]) > 1:
+                    arcpy.AddMessage("Changed catchment %s from %1.0f to %1.0f" % (row[0], oldValue, row[1]))
+                    try:
+                        catchmentcursor.updateRow(row)
+                    except Exception as e:
+                        arcpy.AddError("Can't change %s from %d to %d" % (row[0], oldValue, row[1]))
+                        raise (e)
+
+            del catchmentcursor
+            # if True in catchmentsWithoutModelParameters:
+            #     arcpy.AddWarning(
+            #         "Catchments without Model Records [msm_HModA] (imperviousness not set): '" + "', '".join(
+            #             np.array(MUIDs)[np.where(catchmentsWithoutModelParameters)]) + "'")
+                # arcpy.CopyFeatures_management(catchspatialjoin,r"C:/Dokumenter/catchspatialjoin")
         return
