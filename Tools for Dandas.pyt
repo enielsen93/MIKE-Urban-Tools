@@ -345,6 +345,7 @@ class Dandas2MULinks(object):
                     while MUID in MUIDsUsed:
                         i += 1
                         MUID = linkDictionary["FROMNODE"] + "_" + linkDictionary["TONODE"] + "l%d" % (i)
+                    MUIDsUsed.append(MUID)
                     linkDictionary["MUID"] = MUID[:40]
                     
                     linkDictionary["NetTypeNo"] = int(link.find("TypeAfloebKode").text) if link.find("TypeAfloebKode") is not None else 1
