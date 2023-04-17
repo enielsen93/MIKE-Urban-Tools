@@ -93,7 +93,7 @@ class CompressFolder(object):
                     break
             file_extensions = list(file_extensions)
             file_extensions.sort()
-            parameters[2].filter.list = file_extensions
+            parameters[2].filter.list = [str(ext) for ext in file_extensions if ext]
             # if not parameters[2].value:
             #     default_formats = [".mdb", ".dfs0", ".mjl"]
             #     parameters[2].value = [format for format in default_formats if format in file_extensions]
