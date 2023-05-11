@@ -122,6 +122,7 @@ class Dandas2MULinks(object):
 
     def execute(self, parameters, messages):
         arcpy.env.outputCoordinateSystem = arcpy.SpatialReference("ETRS 1989 UTM Zone 32N")
+        
         tic = time.time()
         arcpy.SetProgressor("default","Reading Knuder .XML file")        
         dandas_knuder = parameters[0].ValueAsText
@@ -159,6 +160,7 @@ class Dandas2MULinks(object):
             for row in cursor:
                 for i in range(len(msm_Node_Fields)):
                     msm_Node_Template[msm_Node_Fields[i]] = row[i]
+
         msm_Node_Cursor = arcpy.da.InsertCursor(msm_Node, ["SHAPE@XY"] + msm_Node_Fields)
         ID = 0
         knudenavn = []
@@ -179,6 +181,15 @@ class Dandas2MULinks(object):
                 msm_Node_Table["MUID"] = nodes[nodei].attrib['Knudenavn']
                 # arcpy.AddMessage(dir(nodes[nodei]))
                 knudekode = int(nodes[nodei].find("KnudeKode").text) if nodes[nodei].find("KnudeKode") is not None else 0
+
+                statuskode_transformer = {0: 'Uoplyst', 1: 'I brug/drift', 2: 'Ikke I brug', 3: 'Afproppet',
+                                          4: 'Opfyldt', 5: u'Død', 6: 'Projekteret / planlagt', 7: 'Anlagt',
+                                          8: 'Fjernet', 50: 'Andet'}
+
+                
+                msm_Node_Table["Status"] = statuskode_transformer[int(nodes[nodei].find("StatusKode").text)] if nodes[nodei].find(
+                    "StatusKode") is not None and int(nodes[nodei].find(
+                    "StatusKode").text) in statuskode_transformer else None
                 
                 if knudekode == 3:
                     msm_Node_Table["TypeNo"] = 2
@@ -199,7 +210,7 @@ class Dandas2MULinks(object):
                 
                 statuskode = (int(nodes[nodei].find("KnudeKode").text) if nodes[nodei].find("KnudeKode") is not None else 0)                
                 if statuskode == 8:
-                    msm_Node_Table["Description"] = u"Sl�jfet"
+                    msm_Node_Table["Description"] = u"Sløjfet"
                 
                 msm_Node_Table["GroundLevel"] = float(nodes[nodei].find("DaekselItems").find("Daeksel").find("Daekselkote").text) if nodes[nodei].find("DaekselItems") is not None and nodes[nodei].find("DaekselItems").find("Daeksel") is not None and nodes[nodei].find("DaekselItems").find("Daeksel").find("Daekselkote") is not None else None
                 if msm_Node_Table["GroundLevel"] is None:
@@ -231,7 +242,8 @@ class Dandas2MULinks(object):
                         skip = True 
                     else:
                         msm_Node_Table["Description"] = "Ukendt" if not msm_Node_Table["Description"] else msm_Node_Table["Description"] + ", Ukendt"              
-                    if not skip:                                
+                    if not skip:
+                        
                         msm_Node_Cursor.insertRow([(float(nodes[nodei].find("XKoordinat").text),float(nodes[nodei].find("YKoordinat").text))]+msm_Node_Table.values())
                         nodesDict[nodes[nodei].attrib['Knudenavn']] = (float(nodes[nodei].find("XKoordinat").text),float(nodes[nodei].find("YKoordinat").text), msm_Node_Table["InvertLevel"])
                     ID = ID+1
@@ -301,6 +313,7 @@ class Dandas2MULinks(object):
             msm_Link_Template = OrderedDict()
             templateFile = os.path.dirname(os.path.realpath(__file__)) + "\Data\Templates.mdb\msm_Link_Template"
             fields = [a.name for a in arcpy.ListFields(templateFile) if a.name not in [u"FID",u"SHAPE",u"OBJECTID","SHAPE_Length"]]
+
             with arcpy.da.SearchCursor(templateFile,fields) as cursor:
                 for row in cursor:
                     for i in range(len(fields)):
@@ -338,6 +351,11 @@ class Dandas2MULinks(object):
                     linkDictionary = msm_Link_Template.copy()
                     linkDictionary["FROMNODE"] = link.attrib["OpstroemKnudenavn"]
                     linkDictionary["TONODE"] = link.attrib["NedstroemKnudenavn"]
+
+
+                    statuskode_transformer = {0: 'Uoplyst', 1: 'I brug/drift', 2: 'Ikke I brug', 3: 'Afproppet', 4: 'Opfyldt', 5: u'Død', 6: 'Projekteret / planlagt', 7: 'Anlagt', 8: 'Fjernet', 50: 'Andet'}
+            
+                    linkDictionary["Status"] = statuskode_transformer[int(link.find("StatusKode").text)] if link.find("StatusKode") is not None and int(link.find("StatusKode").text) in statuskode_transformer else None
                     #arcpy.AddMessage("Link %s-%s"% (link.attrib["OpstroemKnudenavn"],link.attrib["NedstroemKnudenavn"]))
                     
                     i = 1
@@ -350,7 +368,6 @@ class Dandas2MULinks(object):
                     
                     linkDictionary["NetTypeNo"] = int(link.find("TypeAfloebKode").text) if link.find("TypeAfloebKode") is not None else 1
 
-                    
                     if link.find("DelLedningItems") is not None and link.find("DelLedningItems").find("DelLedning") is not None:
                         link_delledning = link.find("DelLedningItems").find("DelLedning")
                         
@@ -420,7 +437,8 @@ class Dandas2MULinks(object):
         addLayer = arcpy.mapping.Layer(msm_Node)
         arcpy.mapping.AddLayerToGroup(df, empty_group_layer, addLayer, "TOP")
         updatelayer = arcpy.mapping.ListLayers(mxd, msm_Node.split("\\")[-1], df)[0]
-        sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Manholes.lyr")
+        
+        sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Node.lyr")
         arcpy.mapping.UpdateLayer(df,updatelayer,sourcelayer,False)
         updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'FILEGDB_WORKSPACE', unicode(addLayer.datasetName))
         
@@ -428,7 +446,7 @@ class Dandas2MULinks(object):
             addLayer = arcpy.mapping.Layer(msm_Link)
             arcpy.mapping.AddLayerToGroup(df, empty_group_layer, addLayer, "BOTTOM")   
             updatelayer = arcpy.mapping.ListLayers(mxd, msm_Link.split("\\")[-1], df)[0]
-            sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links.lyr")
+            sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Link.lyr")
             arcpy.mapping.UpdateLayer(df,updatelayer,sourcelayer,False)
             updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'FILEGDB_WORKSPACE', unicode(addLayer.datasetName))
            
