@@ -1,6 +1,7 @@
 import os
 import zipfile
 import numpy as np
+import re
 
 class Toolbox(object):
     def __init__(self):
@@ -16,6 +17,8 @@ class CompressFolder(object):
         self.label = "Compress Folder to Zip"
         self.description = "Compress Folder to Zip"
         self.canRunInBackground = False
+
+
 
     def getParameterInfo(self):
         # Define parameter definitions
@@ -83,17 +86,24 @@ class CompressFolder(object):
 
     def updateParameters(self, parameters):
         folder = parameters[0].ValueAsText
-        if folder:
+        if folder and not parameters[2].filter.list:
             include_subfolders = parameters[1].Value
             file_extensions = set()
+            file_extensions_total_filesize = {}
             for (dir_path, dir_names, filenames) in os.walk(folder):
                 for filename in filenames:
-                    file_extensions.add(os.path.splitext(filename)[-1].lower())
+                    extension = os.path.splitext(filename)[-1].lower()
+                    if extension in file_extensions_total_filesize:
+                        file_extensions_total_filesize[extension] += os.path.getsize(os.path.join(dir_path, filename))
+                    else:
+                        file_extensions_total_filesize[extension] = os.path.getsize(os.path.join(dir_path, filename))
+                    file_extensions.add(extension)
+
                 if not include_subfolders:
                     break
             file_extensions = list(file_extensions)
             file_extensions.sort()
-            parameters[2].filter.list = [str(ext) for ext in file_extensions if ext]
+            parameters[2].filter.list = ["%s (%d MB)" % (ext, file_extensions_total_filesize[ext]/1e6) for ext in file_extensions if ext]
             # if not parameters[2].value:
             #     default_formats = [".mdb", ".dfs0", ".mjl"]
             #     parameters[2].value = [format for format in default_formats if format in file_extensions]
@@ -112,7 +122,8 @@ class CompressFolder(object):
     def execute(self, parameters, messages):
         folder = parameters[0].ValueAsText
         include_subfolders = parameters[1].Value
-        file_formats = parameters[2].ValueAsText.split(";")
+        file_formats = [re.findall("^.(.+) \([^)]+\)", ext)[0] for ext in parameters[2].ValueAsText.split(";")]
+        arcpy.AddMessage(file_formats)
         output_file = parameters[3].ValueAsText
         delete_files = parameters[4].Value
         separate_archives = parameters[5].Value
