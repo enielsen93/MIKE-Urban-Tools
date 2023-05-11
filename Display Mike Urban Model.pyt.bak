@@ -5,13 +5,13 @@
 
 import arcpy
 if "mapping" in dir(arcpy):
-    import arcpy.mapping as apmapping
-    from arcpy.mapping  import MapDocument as MapDocument
-    from arcpy.mapping  import MapDocument as MapDocument
-else: 
-    import arcpy.mp as apmapping
-    from arcpy.mp import ArcGISProject as MapDocument
-    from arcpy.mapping  import MapDocument as MapDocument
+    arcgis_pro = False
+    import arcpy.mapping as arcpymapping
+    from arcpy.mapping import MapDocument as arcpyMapDocument
+else:
+    arcgis_pro = True
+    import arcpy.mp as arcpymapping
+    from arcpy.mp import ArcGISProject as arcpyMapDocument
 import numpy as np
 import csv
 import os
@@ -52,7 +52,7 @@ class Toolbox(object):
         self.alias  = "Display Mike Urban Model"
 
         # List of tool classes associated with this toolbox
-        self.tools = [DisplayMikeUrban, DimensionAnalysis, DisplayPipeElevation]
+        self.tools = [DisplayMikeUrban] #DimensionAnalysis, DisplayPipeElevation
 
 class DisplayMikeUrban(object):
     def __init__(self):
@@ -89,9 +89,9 @@ class DisplayMikeUrban(object):
             category="Additional Settings",
             direction="Input")
         features_to_display.filter.type = "ValueList"
-        features_to_display.filter.list = ["Manholes", "Pipes", "Basins", "Weirs", "Pumps", "Network Loads",
+        features_to_display.filter.list = ["Manholes", "Pipes", "Basins", "Weirs", "Orifices", "Pumps", "Network Loads",
                                            "Boundary Water Levels", "Catchment Connections", "Catchments", "Annotations"]
-        features_to_display.value = ["Manholes", "Pipes", "Basins", "Weirs", "Pumps", "Network Loads",
+        features_to_display.value = ["Manholes", "Pipes", "Basins", "Weirs", "Orifices", "Pumps", "Network Loads",
                                      "Boundary Water Levels", "Catchment Connections", "Catchments", "Annotations"]
         
         show_loss_par = arcpy.Parameter(
@@ -154,8 +154,8 @@ class DisplayMikeUrban(object):
         boundaryItem = MU_database + "\msm_BItem"
         msm_PasReg = MU_database + "\msm_PasReg"
         ms_TabD = MU_database + "\ms_TabD"
-        mxd = MapDocument("CURRENT")
-        df = apmapping.ListDataFrames(mxd)[0]
+        mxd = arcpyMapDocument("CURRENT")
+        df = mxd.listMaps()[0] if arcgis_pro else arcpymapping.ListDataFrames(mxd)[0]
 
         is_sqlite_database = True if ".sqlite" in MU_database else False
         
@@ -165,9 +165,9 @@ class DisplayMikeUrban(object):
             arcpy.AddMessage("%s - %d" % (txt, time.time() - start_time))
         
         printStepAndTime("Adding Empty Group")
-        empty_group_mapped = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\EmptyGroup.lyr")
-        empty_group = apmapping.AddLayer(df, empty_group_mapped, "TOP")
-        empty_group_layer = apmapping.ListLayers(mxd, "Empty Group", df)[0]
+        empty_group_mapped = arcpymapping.LayerFile(os.path.dirname(os.path.realpath(__file__)) + r"\Data\EmptyGroup.lyr") if arcgis_pro else arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\EmptyGroup.lyr")
+        empty_group = df.addLayer(empty_group_mapped) if arcgis_pro else arcpymapping.AddLayer(df, empty_group_mapped, "TOP")
+        empty_group_layer = df.listLayers('Empty Group')[0] if arcgis_pro else arcpymapping.ListLayers(mxd, "Empty Group", df)[0]
         empty_group_layer.name = os.path.splitext(os.path.basename(MU_database))[0]
         
         MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
@@ -188,82 +188,132 @@ class DisplayMikeUrban(object):
         arcpy.env.scratchWorkspace = MIKE_gdb        
 
         arcpy.env.addOutputsToMap = False
-        # addLayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"))        
+        # addLayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"))
+
+        templates_folder = os.path.dirname(os.path.realpath(__file__)) + "\Data\Templates\MIKE Plus" if arcgis_pro and is_sqlite_database else os.path.dirname(os.path.realpath(__file__)) + "\Data"
+        templates_extension = ".lyrx" if arcgis_pro and is_sqlite_database else ".lyr"
+
         
         def addLayer(layer_source, source, group = None, workspace_type = "ACCESS_WORKSPACE", new_name = None, definition_query = None):
             if ".sqlite" in source:
-                source_layer = apmapping.Layer(source)
-                if not "objectid" in [field.name.lower() for field in arcpy.ListFields(source)]:
-                    import sqlite3
-                    with sqlite3.connect(MU_database) as connection:
-                        update_cursor = connection.cursor()
-                        sql_expression = """
-                        PRAGMA foreign_keys=off;
-                        BEGIN TRANSACTION;
-                        
-                        ALTER TABLE %s RENAME TO delete_table;
-                        
-                        CREATE TABLE %s
-                        (
-                          column1 datatype [ NULL | NOT NULL ],
-                          column2 datatype [ NULL | NOT NULL ],
-                          ...
-                          CONSTRAINT constraint_name UNIQUE (uc_col1, uc_col2, ... uc_col_n)
-                        );
-                        
-                        INSERT INTO table_name SELECT * FROM old_table;
-                        
-                        COMMIT;
-                        
-                        PRAGMA foreign_keys=on;
-                        """
-                        update_cursor.execute("ALTER TABLE %s ADD COLUMN OBJECTID INTEGER" % os.path.basename(source))
-                        sql_expression = "CREATE INDEX OBJECTID ON %s(OBJECTID)" % os.path.basename(source)
-                        update_cursor.execute(sql_expression)
+                source_layer = arcpymapping.LayerFile(layer_source) if arcgis_pro else arcpy.mapping.Layer(source)
+                # if not "objectid" in [field.name.lower() for field in arcpy.ListFields(source)]:
+                #     import sqlite3
+                #     with sqlite3.connect(MU_database) as connection:
+                #         update_cursor = connection.cursor()
+                #         sql_expression = """
+                #         PRAGMA foreign_keys=off;
+                #         BEGIN TRANSACTION;
+                #
+                #         ALTER TABLE %s RENAME TO delete_table;
+                #
+                #         CREATE TABLE %s
+                #         (
+                #           column1 datatype [ NULL | NOT NULL ],
+                #           column2 datatype [ NULL | NOT NULL ],
+                #           ...
+                #           CONSTRAINT constraint_name UNIQUE (uc_col1, uc_col2, ... uc_col_n)
+                #         );
+                #
+                #         INSERT INTO table_name SELECT * FROM old_table;
+                #
+                #         COMMIT;
+                #
+                #         PRAGMA foreign_keys=on;
+                #         """
+                #         try:
+                #             update_cursor.execute("ALTER TABLE %s ADD COLUMN OBJECTID INTEGER" % os.path.basename(source))
+                #             sql_expression = "CREATE INDEX OBJECTID ON %s(OBJECTID)" % os.path.basename(source)
+                #             update_cursor.execute(sql_expression)
+                #         except Exception as e:
+                #             arcpy.AddMessage(source)
+                #             raise(e)
 
 
                 if group:
-                    apmapping.AddLayerToGroup(df, group, source_layer, "BOTTOM")
+                    if arcgis_pro:
+                        update_layer = df.addLayerToGroup(group, source_layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayerToGroup(df, group, source_layer, "BOTTOM")
                 else:
-                    apmapping.AddLayer(df, source_layer, "BOTTOM")
-                update_layer = apmapping.ListLayers(mxd, source_layer.name, df)[0]
-                
-                layer_source_mike_plus = layer_source.replace("MOUSE", "MIKE+") if "MOUSE" in layer_source and os.path.exists(layer_source.replace("MOUSE", "MIKE+")) else None
-                layer_source = layer_source_mike_plus if layer_source_mike_plus else layer_source
-                layer = apmapping.Layer(layer_source)
-                update_layer.visible = layer.visible
-                update_layer.labelClasses = layer.labelClasses
-                update_layer.showLabels = layer.showLabels
-                update_layer.name = layer.name
-                update_layer.definitionQuery = definition_query
+                    if arcgis_pro:
+                        update_layer = df.addLayer(source_layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayer(df, source_layer, "BOTTOM")
+
+                if not arcgis_pro: update_layer = df.listLayers(mxd, source_layer.name, df)[0] if arcgis_pro else arcpy.mapping.ListLayers(mxd, source_layer.name, df)[0]
+
+                if arcgis_pro:
+                    new_connection_properties = update_layer.connectionProperties
+                    new_connection_properties["workspace_factory"] = 'Sql'
+                    new_connection_properties["connection_info"]["database"] = os.path.dirname(source)
+                    update_layer.updateConnectionProperties()
+                else:
+                    if ".sqlite" in source:
+                        layer = arcpymapping.Layer(layer_source)
+                        update_layer.visible = layer.visible
+                        update_layer.labelClasses = layer.labelClasses
+                        update_layer.showLabels = layer.showLabels
+                        update_layer.name = layer.name
+                        update_layer.definitionQuery = definition_query
+
+                        try:
+                            arcpymapping.UpdateLayer(df, update_layer, layer, symbology_only=True)
+                        except Exception as e:
+                            arcpy.AddWarning(source)
+                            pass
+                    else:
+                        update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))),
+                                                   workspace_type, os.path.basename(source))
+
+                # layer_source_mike_plus = layer_source.replace("MOUSE", "MIKE+") if "MOUSE" in layer_source and os.path.exists(layer_source.replace("MOUSE", "MIKE+")) else None
+                # layer_source = layer_source_mike_plus if layer_source_mike_plus else layer_source
+                # layer = arcpymapping.Layer(layer_source)
+                # update_layer.visible = layer.visible
+                # update_layer.labelClasses = layer.labelClasses
+                # update_layer.showLabels = layer.showLabels
+                # update_layer.name = layer.name
+                # update_layer.definitionQuery = definition_query
                 
                 try:
-                    arcpy.mapping.UpdateLayer(df, update_layer, layer, symbology_only = True)
+                    arcpymapping.UpdateLayer(df, update_layer, layer, symbology_only = True)
                 except Exception as e:
                     arcpy.AddWarning(source)
                     pass
             else:
-                layer = apmapping.Layer(layer_source)
+                # arcpy.AddMessage(layer_source)
+                layer = arcpymapping.LayerFile(layer_source) if arcgis_pro else arcpymapping.Layer(layer_source)
                 if group:
-                    apmapping.AddLayerToGroup(df, group, layer, "BOTTOM")
+                    if arcgis_pro:
+                        df.addLayerToGroup(group, layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayerToGroup(df, group, layer, "BOTTOM")
                 else:
-                    apmapping.AddLayer(df, layer, "BOTTOM")
-                update_layer = apmapping.ListLayers(mxd, layer.name, df)[0]
+                    if arcgis_pro:
+                        df.addLayer(layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayer(df, layer, "BOTTOM")
+                update_layer = df.listLayers(layer.listLayers()[0].name)[0] if arcgis_pro else arcpymapping.ListLayers(mxd, layer.name, df)[0]
                 if definition_query:
                     update_layer.definitionQuery = definition_query
                 if new_name:
                     update_layer.name = new_name
-                update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, unicode(os.path.basename(source)))
+
+                if arcgis_pro:
+                    df.updateConnectionProperties(update_layer.connectionProperties['connection_info']['database'], os.path.dirname(source.replace(r"\mu_Geometry","")))
+                else:
+                    update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry",""))), workspace_type, os.path.basename(source))
                 
             if "msm_Node" in source:
-                for label_class in update_layer.labelClasses:
+                for label_class in (update_layer.listLabelClasses() if arcgis_pro else update_layer.labelClasses):
                     if show_depth:
                         label_class.expression = label_class.expression.replace("return labelstr", 'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
 
         if "Manholes" in features_to_display:
             printStepAndTime("Adding nodes to map")
             arcpy.SetProgressor("default", "Adding nodes to map")
-            layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"),
+
+            layer = addLayer(os.path.join(templates_folder, "msm_Node" + templates_extension if not show_loss_par else "msm_Node with LossPar" + templates_extension),
                     manholes, group = empty_group_layer, definition_query = sql_query)
                 
         
@@ -273,6 +323,7 @@ class DisplayMikeUrban(object):
                 self.value1 = []
                 self.value3 = []
                 self.edges = []
+                self.permanent_level = None
 
             class Edge:
                 def __init__(self, name, uplevel):
@@ -322,7 +373,10 @@ class DisplayMikeUrban(object):
                 elevations = [elevation for elevation in elevations if elevation < self.critical_level] + [
                     self.critical_level]
                 surface_areas = np.interp(elevations, np.sort(self.elevations), surface_areas)
-                return np.interp(level, elevations, [0] + list(scipy.integrate.cumtrapz(surface_areas, elevations)))
+                if self.permanent_level:
+                    return np.interp(level, elevations, [0] + list(scipy.integrate.cumtrapz(surface_areas, elevations))) - np.interp(self.permanent_level, elevations, [0] + list(scipy.integrate.cumtrapz(surface_areas, elevations)))
+                else:
+                    return np.interp(level, elevations, [0] + list(scipy.integrate.cumtrapz(surface_areas, elevations)))
 
         if "Basins" in features_to_display:
             basins = {}
@@ -339,6 +393,7 @@ class DisplayMikeUrban(object):
                     tonode_fieldname = "tonode" if not is_sqlite_database else "tonodeid"
                     outlet_feature_classes = {links: ["UpLevel", "DwLevel"], orifices: ["InvertLevel"]*2, weirs: ["CrestLevel"]*2}
                     tonodes = {}
+
                     for feature_class, edgelevel_fieldname in zip(outlet_feature_classes.keys(),
                                                                 outlet_feature_classes.values()):
                         if fromnode_fieldname in [field.name.lower() for field in arcpy.ListFields(feature_class)]:
@@ -451,13 +506,19 @@ class DisplayMikeUrban(object):
             links_sql_query = sql_query
 
         if "Pipes" in features_to_display:
-            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links.lyr",
+            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Link.lyr",
                     links, group = empty_group_layer, definition_query = links_sql_query)
 
         if "Weirs" in features_to_display:
             # arcpy.AddMessage(weirs)
             # if len([row[0] for row in arcpy.da.SearchCursor(weirs,["MUID"])])>0:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Weir.lyr",
+                    weirs, group = empty_group_layer, definition_query = sql_query)
+                    
+        if "Orifices" in features_to_display:
+            # arcpy.AddMessage(weirs)
+            # if len([row[0] for row in arcpy.da.SearchCursor(weirs,["MUID"])])>0:
+            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Orifice.lyr",
                     weirs, group = empty_group_layer, definition_query = sql_query)
 
         if "Pumps" in features_to_display:
@@ -699,6 +760,7 @@ class DisplayMikeUrban(object):
                 arcpy.management.AddField(ms_Catchment, "ConcTime", "FLOAT")
                 arcpy.management.AddField(ms_Catchment, "InitLoss", "FLOAT")
                 arcpy.management.AddField(ms_Catchment, "NodeID", "TEXT")
+                arcpy.management.AddField(ms_Catchment, "NodeNT", "SHORT")
 
                 class HParA:
                     reduction_factor = None
@@ -722,6 +784,7 @@ class DisplayMikeUrban(object):
                     concentration_time = None
                     initial_loss = None
                     node_ID = None
+                    node_id_net_type_no = None
 
                 if "mdb" in MU_database:
                     cursor = arcpy.da.SearchCursor(MU_database + r"\msm_HModA",
@@ -737,12 +800,15 @@ class DisplayMikeUrban(object):
                         catchments_dict[row[0]].local_parameters = row[3] if "mdb" in MU_database else 1 - row[3]
                         catchments_dict[row[0]].imperviousness = row[1]
                         catchments_dict[row[0]].ParAID = row[2] if not catchments_dict[row[0]].local_parameters else ""
-                        catchments_dict[row[0]].reduction_factor = (hParA_dict[row[2]].reduction_factor
-                                                                         if not catchments_dict[row[0]].local_parameters else row[4])
-                        catchments_dict[row[0]].concentration_time = (hParA_dict[row[2]].concentration_time
-                                                                           if not catchments_dict[row[0]].local_parameters else row[5])
-                        catchments_dict[row[0]].initial_loss = (hParA_dict[row[2]].initial_loss
-                                                                      if not catchments_dict[row[0]].local_parameters else row[6])
+                        if catchments_dict[row[0]].local_parameters or row[2] in hParA_dict:
+                            catchments_dict[row[0]].reduction_factor = (hParA_dict[row[2]].reduction_factor
+                                                                             if not catchments_dict[row[0]].local_parameters else row[4])
+                            catchments_dict[row[0]].concentration_time = (hParA_dict[row[2]].concentration_time
+                                                                               if not catchments_dict[row[0]].local_parameters else row[5])
+                            catchments_dict[row[0]].initial_loss = (hParA_dict[row[2]].initial_loss
+                                                                          if not catchments_dict[row[0]].local_parameters else row[6])
+                        else:
+                            arcpy.AddWarning("%s not in msm_HParA" % row[2])
                         # arcpy.AddMessage((catchments_dict[row[0]].ParAID, catchments_dict[row[0]], catchments_dict[row[0]].local_parameters))
                     # except Exception as e:
                     #     catchments_dict[row[0]].concentration_time = 7
@@ -752,12 +818,22 @@ class DisplayMikeUrban(object):
 
                 del cursor
 
+                nodes_net_type_no = {row[0]:row[1] for row in arcpy.da.SearchCursor(manholes, ["MUID", "NetTypeNo"])}
+
                 with arcpy.da.SearchCursor(os.path.join(MU_database, "msm_CatchCon"), ["CatchID", "NodeID"]) as cursor:
                     for row in cursor:
-                        catchments_dict[row[0]].node_ID = row[1]
+                        if row[0] in catchments_dict:
+                            catchments_dict[row[0]].node_ID = row[1]
+
+                            if row[1] in nodes_net_type_no:
+                                catchments_dict[row[0]].node_id_net_type_no = nodes_net_type_no[row[1]]
+                        else:
+                            arcpy.AddWarning("Catchment connection registers connection to nonexisting catchment %s" % row[0])
 
 
-                with arcpy.da.UpdateCursor(ms_Catchment, ["MUID", "ImpArea", "ParAID", "RedFactor", "ConcTime", "InitLoss", "NodeID"]) as cursor:
+
+
+                with arcpy.da.UpdateCursor(ms_Catchment, ["MUID", "ImpArea", "ParAID", "RedFactor", "ConcTime", "InitLoss", "NodeID", "NodeNT"]) as cursor:
                     for row in cursor:
                         try:
                             catchment = catchments_dict[row[0]]
@@ -770,6 +846,7 @@ class DisplayMikeUrban(object):
                             row[4] = catchment.concentration_time
                             row[5] = catchment.initial_loss
                             row[6] = catchment.node_ID
+                            row[7] = catchment.node_id_net_type_no
                             cursor.updateRow(row)
 
                 # arcpy.JoinField_management(in_data=ms_Catchment, in_field="MUID", join_table=MU_database + r"\msm_CatchCon", join_field="CatchID", fields="NodeID")
@@ -785,12 +862,12 @@ class DisplayMikeUrban(object):
                         catchments, group = empty_group_layer)
         
         old_workspace = arcpy.env.workspace
-        if if "Annotations" in features_to_display and not is_sqlite_database:
+        if "Annotations" in features_to_display and not is_sqlite_database:
             arcpy.env.workspace = os.path.join(MU_database, "mu_Geometry")
             annotation_classes = [os.path.join(MU_database, fc) for fc in arcpy.ListFeatureClasses(feature_type = "Annotation")]
             for annotation_class in annotation_classes:
                 try:
-                    #apmapping.AddLayerToGroup(df, empty_group_layer, apmapping.Layer(annotation_class), "BOTTOM")
+                    #arcpymapping.AddLayerToGroup(df, empty_group_layer, arcpymapping.Layer(annotation_class), "BOTTOM")
                     addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Annotation.lyr", 
                             annotation_class, group = empty_group_layer, new_name = empty_group_layer.name + " " + os.path.basename(annotation_class))
                 except Exception as e:
@@ -840,21 +917,21 @@ class DimensionAnalysis(object):
         manholes = MU_database + "\mu_Geometry\msm_Node"
         links = MU_database + "\mu_Geometry\msm_Link"
         catchcons = MU_database + "\mu_Geometry\msm_CatchConLink"
-        mxd = MapDocument("CURRENT")
-        df = apmapping.ListDataFrames(mxd)[0]
+        mxd = arcpyMapDocument("CURRENT")
+        df = arcpymapping.ListDataFrames(mxd)[0]
         arcpy.env.addOutputsToMap = False
-        addLayer = apmapping.Layer(manholes)
-        apmapping.AddLayer(df, addLayer)
-        updatelayer = apmapping.ListLayers(mxd, "msm_Node", df)[0]
-        sourcelayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Manholes.lyr")
-        apmapping.UpdateLayer(df,updatelayer,sourcelayer,False)
+        addLayer = arcpymapping.Layer(manholes)
+        arcpymapping.AddLayer(df, addLayer)
+        updatelayer = arcpymapping.ListLayers(mxd, "msm_Node", df)[0]
+        sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Manholes.lyr")
+        arcpymapping.UpdateLayer(df,updatelayer,sourcelayer,False)
         updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'ACCESS_WORKSPACE', unicode(addLayer.datasetName))
         
-        addLayer = apmapping.Layer(links)   
-        apmapping.AddLayer(df, addLayer)
-        updatelayer = apmapping.ListLayers(mxd, "msm_Link", df)[0]
-        sourcelayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links W QFull.lyr")
-        apmapping.UpdateLayer(df,updatelayer,sourcelayer,False)
+        addLayer = arcpymapping.Layer(links)   
+        arcpymapping.AddLayer(df, addLayer)
+        updatelayer = arcpymapping.ListLayers(mxd, "msm_Link", df)[0]
+        sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links W QFull.lyr")
+        arcpymapping.UpdateLayer(df,updatelayer,sourcelayer,False)
         updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'ACCESS_WORKSPACE', unicode(addLayer.datasetName))
         #arcpy.ApplySymbologyFromLayer_management (addLayer, "Template.lyr")
         
@@ -863,29 +940,29 @@ class DimensionAnalysis(object):
         ms_CatchmentImpLayer = arcpy.MakeFeatureLayer_management(ms_CatchmentImp, getAvailableFilename(arcpy.env.scratchGDB + "\ms_CatchmentImpLayer")).getOutput(0).name
         arcpy.JoinField_management(in_data=ms_CatchmentImpLayer, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_HModA", join_field="CatchID", fields="ImpArea")
         arcpy.JoinField_management(in_data=ms_CatchmentImpLayer, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_CatchCon", join_field="CatchID", fields="NodeID")
-        addLayer = apmapping.Layer(ms_CatchmentImpLayer)
-        apmapping.AddLayer(df, addLayer)
-        updatelayer = apmapping.ListLayers(mxd, ms_CatchmentImpLayer, df)[0]
-        sourcelayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments W Imp Area.lyr")
-        apmapping.UpdateLayer(df,updatelayer,sourcelayer,False)
+        addLayer = arcpymapping.Layer(ms_CatchmentImpLayer)
+        arcpymapping.AddLayer(df, addLayer)
+        updatelayer = arcpymapping.ListLayers(mxd, ms_CatchmentImpLayer, df)[0]
+        sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments W Imp Area.lyr")
+        arcpymapping.UpdateLayer(df,updatelayer,sourcelayer,False)
         updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'FILEGDB_WORKSPACE', unicode(addLayer.datasetName))
         
-        # addLayer = apmapping.Layer(MU_database + r"\mu_Geometry\ms_Catchment")   
-        # apmapping.AddLayer(df, addLayer)
-        # updatelayer = apmapping.ListLayers(mxd, "ms_Catchment", df)[0]
-        # sourcelayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments W Imp Area.lyr")
-        # apmapping.UpdateLayer(df,updatelayer,sourcelayer,False)
-        # arcpy.AddJoin_management(apmapping.ListLayers(mxd, "Delopland", df)[0], "MUID", MU_database + r"\msm_HModA", "CatchID")
+        # addLayer = arcpymapping.Layer(MU_database + r"\mu_Geometry\ms_Catchment")   
+        # arcpymapping.AddLayer(df, addLayer)
+        # updatelayer = arcpymapping.ListLayers(mxd, "ms_Catchment", df)[0]
+        # sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments W Imp Area.lyr")
+        # arcpymapping.UpdateLayer(df,updatelayer,sourcelayer,False)
+        # arcpy.AddJoin_management(arcpymapping.ListLayers(mxd, "Delopland", df)[0], "MUID", MU_database + r"\msm_HModA", "CatchID")
         # updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'ACCESS_WORKSPACE', unicode(addLayer.datasetName))
-        # for lblClass in apmapping.ListLayers(mxd, "Delopland", df)[0].labelClasses:
+        # for lblClass in arcpymapping.ListLayers(mxd, "Delopland", df)[0].labelClasses:
             # lblClass.expression = '"%1.2f bef. ha (%1.0f%s)" % (float( [ms_Catchment.SHAPE_Area])/1e4*float([msm_HModA.ImpArea])/1e2,round(float([msm_HModA.ImpArea])/5,0)*5,"%")'
 
         
-        addLayer = apmapping.Layer(catchcons)
-        apmapping.AddLayer(df, addLayer)
-        updatelayer = apmapping.ListLayers(mxd, "msm_CatchConLink", df)[0]
-        sourcelayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchment Connections.lyr")
-        apmapping.UpdateLayer(df,updatelayer,sourcelayer,False)
+        addLayer = arcpymapping.Layer(catchcons)
+        arcpymapping.AddLayer(df, addLayer)
+        updatelayer = arcpymapping.ListLayers(mxd, "msm_CatchConLink", df)[0]
+        sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchment Connections.lyr")
+        arcpymapping.UpdateLayer(df,updatelayer,sourcelayer,False)
         updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'ACCESS_WORKSPACE', unicode(addLayer.datasetName))
         
         arcpy.RefreshTOC()
@@ -927,12 +1004,12 @@ class DisplayPipeElevation(object):
     def execute(self, parameters, messages):
         MU_database = parameters[0].ValueAsText
         links = MU_database + "\mu_Geometry\msm_Link"
-        mxd = MapDocument("CURRENT")
-        df = apmapping.ListDataFrames(mxd)[0]
+        mxd = arcpyMapDocument("CURRENT")
+        df = arcpymapping.ListDataFrames(mxd)[0]
         arcpy.env.addOutputsToMap = False
-        groupLayer = apmapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links Elevation Error.lyr")
-        groupLayer = apmapping.AddLayer(df, groupLayer)
-        groupLayer = apmapping.ListLayers(mxd, groupLayer, df)[0]
+        groupLayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links Elevation Error.lyr")
+        groupLayer = arcpymapping.AddLayer(df, groupLayer)
+        groupLayer = arcpymapping.ListLayers(mxd, groupLayer, df)[0]
         #arcpy.AddMessage(groupLayer)
         for layer in groupLayer:
             arcpy.AddMessage(layer.datasetName)

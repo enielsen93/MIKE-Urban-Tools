@@ -89,9 +89,9 @@ class DisplayMikeUrban(object):
             category="Additional Settings",
             direction="Input")
         features_to_display.filter.type = "ValueList"
-        features_to_display.filter.list = ["Manholes", "Pipes", "Basins", "Weirs", "Pumps", "Network Loads",
+        features_to_display.filter.list = ["Manholes", "Pipes", "Basins", "Weirs", "Orifices", "Pumps", "Network Loads",
                                            "Boundary Water Levels", "Catchment Connections", "Catchments", "Annotations"]
-        features_to_display.value = ["Manholes", "Pipes", "Basins", "Weirs", "Pumps", "Network Loads",
+        features_to_display.value = ["Manholes", "Pipes", "Basins", "Weirs", "Orifices", "Pumps", "Network Loads",
                                      "Boundary Water Levels", "Catchment Connections", "Catchments", "Annotations"]
         
         show_loss_par = arcpy.Parameter(
@@ -188,11 +188,15 @@ class DisplayMikeUrban(object):
         arcpy.env.scratchWorkspace = MIKE_gdb        
 
         arcpy.env.addOutputsToMap = False
-        # addLayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"))        
+        # addLayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"))
+
+        templates_folder = os.path.dirname(os.path.realpath(__file__)) + "\Data\Templates\MIKE Plus" if arcgis_pro and is_sqlite_database else os.path.dirname(os.path.realpath(__file__)) + "\Data"
+        templates_extension = ".lyrx" if arcgis_pro and is_sqlite_database else ".lyr"
+
         
         def addLayer(layer_source, source, group = None, workspace_type = "ACCESS_WORKSPACE", new_name = None, definition_query = None):
             if ".sqlite" in source:
-                source_layer = arcpymapping.LayerFile(source) if arcgis_pro else arcpy.mapping.Layer(source)
+                source_layer = arcpymapping.LayerFile(layer_source) if arcgis_pro else arcpy.mapping.Layer(source)
                 # if not "objectid" in [field.name.lower() for field in arcpy.ListFields(source)]:
                 #     import sqlite3
                 #     with sqlite3.connect(MU_database) as connection:
@@ -228,24 +232,48 @@ class DisplayMikeUrban(object):
 
                 if group:
                     if arcgis_pro:
-                        df.addLayerToGroup(group, source_layer, "BOTTOM")
+                        update_layer = df.addLayerToGroup(group, source_layer, "BOTTOM")
                     else:
                         arcpymapping.AddLayerToGroup(df, group, source_layer, "BOTTOM")
                 else:
                     if arcgis_pro:
-                        df.addLayer(source_layer, "BOTTOM")
+                        update_layer = df.addLayer(source_layer, "BOTTOM")
                     else:
                         arcpymapping.AddLayer(df, source_layer, "BOTTOM")
-                update_layer = arcpymapping.ListLayers(mxd, source_layer.name, df)[0]
-                
-                layer_source_mike_plus = layer_source.replace("MOUSE", "MIKE+") if "MOUSE" in layer_source and os.path.exists(layer_source.replace("MOUSE", "MIKE+")) else None
-                layer_source = layer_source_mike_plus if layer_source_mike_plus else layer_source
-                layer = arcpymapping.Layer(layer_source)
-                update_layer.visible = layer.visible
-                update_layer.labelClasses = layer.labelClasses
-                update_layer.showLabels = layer.showLabels
-                update_layer.name = layer.name
-                update_layer.definitionQuery = definition_query
+
+                if not arcgis_pro: update_layer = df.listLayers(mxd, source_layer.name, df)[0] if arcgis_pro else arcpy.mapping.ListLayers(mxd, source_layer.name, df)[0]
+
+                if arcgis_pro:
+                    new_connection_properties = update_layer.connectionProperties
+                    new_connection_properties["workspace_factory"] = 'Sql'
+                    new_connection_properties["connection_info"]["database"] = os.path.dirname(source)
+                    update_layer.updateConnectionProperties()
+                else:
+                    if ".sqlite" in source:
+                        layer = arcpymapping.Layer(layer_source)
+                        update_layer.visible = layer.visible
+                        update_layer.labelClasses = layer.labelClasses
+                        update_layer.showLabels = layer.showLabels
+                        update_layer.name = layer.name
+                        update_layer.definitionQuery = definition_query
+
+                        try:
+                            arcpymapping.UpdateLayer(df, update_layer, layer, symbology_only=True)
+                        except Exception as e:
+                            arcpy.AddWarning(source)
+                            pass
+                    else:
+                        update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))),
+                                                   workspace_type, os.path.basename(source))
+
+                # layer_source_mike_plus = layer_source.replace("MOUSE", "MIKE+") if "MOUSE" in layer_source and os.path.exists(layer_source.replace("MOUSE", "MIKE+")) else None
+                # layer_source = layer_source_mike_plus if layer_source_mike_plus else layer_source
+                # layer = arcpymapping.Layer(layer_source)
+                # update_layer.visible = layer.visible
+                # update_layer.labelClasses = layer.labelClasses
+                # update_layer.showLabels = layer.showLabels
+                # update_layer.name = layer.name
+                # update_layer.definitionQuery = definition_query
                 
                 try:
                     arcpymapping.UpdateLayer(df, update_layer, layer, symbology_only = True)
@@ -253,6 +281,7 @@ class DisplayMikeUrban(object):
                     arcpy.AddWarning(source)
                     pass
             else:
+                # arcpy.AddMessage(layer_source)
                 layer = arcpymapping.LayerFile(layer_source) if arcgis_pro else arcpymapping.Layer(layer_source)
                 if group:
                     if arcgis_pro:
@@ -283,7 +312,8 @@ class DisplayMikeUrban(object):
         if "Manholes" in features_to_display:
             printStepAndTime("Adding nodes to map")
             arcpy.SetProgressor("default", "Adding nodes to map")
-            layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + ("\Data\MOUSE Manholes with LossPar.lyr" if show_loss_par else "\Data\MOUSE Manholes.lyr"),
+
+            layer = addLayer(os.path.join(templates_folder, "msm_Node" + templates_extension if not show_loss_par else "msm_Node with LossPar" + templates_extension),
                     manholes, group = empty_group_layer, definition_query = sql_query)
                 
         
@@ -476,7 +506,7 @@ class DisplayMikeUrban(object):
             links_sql_query = sql_query
 
         if "Pipes" in features_to_display:
-            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links.lyr",
+            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Link.lyr" if not is_sqlite_database else os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE+ Links.lyr",
                     links, group = empty_group_layer, definition_query = links_sql_query)
 
         if "Weirs" in features_to_display:
@@ -484,6 +514,12 @@ class DisplayMikeUrban(object):
             # if len([row[0] for row in arcpy.da.SearchCursor(weirs,["MUID"])])>0:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Weir.lyr",
                     weirs, group = empty_group_layer, definition_query = sql_query)
+                    
+        if "Orifices" in features_to_display:
+            # arcpy.AddMessage(weirs)
+            # if len([row[0] for row in arcpy.da.SearchCursor(weirs,["MUID"])])>0:
+            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Orifice.lyr",
+                    orifices, group = empty_group_layer, definition_query = sql_query)
 
         if "Pumps" in features_to_display:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Pumps.lyr",
