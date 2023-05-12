@@ -120,7 +120,9 @@ class SummarizeButton(object):
             else:
                 where_clause = ""
                 filter_catchments = True
-            
+
+            connected_node = None
+            parameter_set = None
             if ".mdb" in arcpy.Describe(catchmentLayer).path:
                 msm_HModA = os.path.join(os.path.dirname(arcpy.Describe(catchmentLayer).path), "msm_HModA")
                 msm_HParA = os.path.join(os.path.dirname(arcpy.Describe(catchmentLayer).path), "msm_HParA")
@@ -147,8 +149,6 @@ class SummarizeButton(object):
                             catchments[row[0]].initial_loss = HParA_initloss[row[4]]
                             catchments[row[0]].concentration_time = HParA_conctime[row[4]]
 
-                connected_node = None
-                parameter_set = None
                 if len(MUIDs) == 1:
                     matches = [row[0] for row in arcpy.da.SearchCursor(msm_CatchCon, ["NodeID"], where_clause = "CatchID = '%s'" % (MUIDs[0]))]
                     if matches:
