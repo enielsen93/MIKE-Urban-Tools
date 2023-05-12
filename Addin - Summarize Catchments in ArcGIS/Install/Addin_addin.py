@@ -206,8 +206,11 @@ class SummarizeButton(object):
             
             message_text = "Total area: %1.2f ha\nImpervious area: %1.2f ha (%1.0f%s)\nReduced area: %1.2f ha" % (
                             catchment_area/1e4, catchment_impervious_area/1e4, catchment_impervious_area/catchment_area*1e2, "%", catchment_reduced_area/1e4)
-            message_text += "\nConnection: %s" % (connected_node) if connected_node else ""
-            message_text += "\nParameter Set: %s" % (parameter_set) if parameter_set else ""
+            try:
+                message_text += "\nConnection: %s" % (connected_node) if connected_node else ""
+                message_text += "\nParameter Set: %s" % (parameter_set) if parameter_set else ""
+            except Exception as e:
+                pass
             # message_text += "\nInitial loss: %s mm\nConcentration time: %s min\n" % ("%d",
             #                                                                               np.min([catchment.concentration_time for catchment in catchments.values()]),
             #                                                                               np.max([catchment.concentration_time for catchment in catchments.values()]))
