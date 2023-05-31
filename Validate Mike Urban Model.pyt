@@ -50,7 +50,7 @@ class Toolbox(object):
         self.alias  = "Validate Mike Urban Database"
 
         # List of tool classes associated with this toolbox
-        self.tools = [CheckMikeUrbanDatabase]
+        self.tools = [CheckMikeUrbanDatabase, CleanupMUS]
 
 class CheckMikeUrbanDatabase(object):
     def __init__(self):
@@ -293,6 +293,15 @@ class CheckMikeUrbanDatabase(object):
         linksBadName = [row[0] for row in arcpy.da.SearchCursor(msm_Link, "MUID", where_clause = "MUID LIKE 'Link_*'")]
         if len(linksBadName)>0:
             arcpy.AddWarning("Warning: Pipes with unoriginal names found (not suitable for FLORA): '" + "', '".join(linksBadName) + "'")
+
+        links_different_length = []
+        with arcpy.da.SearchCursor(msm_Link, ["MUID", "Length", "SHAPE@LENGTH"]) as cursor:
+            for row in cursor:
+                if row[1] and row[2] and row[2]>10 and row[1] != 10 and abs(row[2]-row[1])/row[2]>0.1:
+                    links_different_length.append(row[0])
+        if links_different_length:
+            arcpy.AddWarning("Pipes with length set that's different from geometric length: ('" + "', '".join(links_different_length) + "')")
+
         
         linksDiameterPlastic = [row[0] for row in arcpy.da.SearchCursor(msm_Link,"Diameter",where_clause = "MaterialID = 'Plastic'")]
         outerDiametersFound = set()
@@ -407,4 +416,64 @@ class CheckMikeUrbanDatabase(object):
                     cursor.deleteRow()
                     
         
+        return
+
+
+class CleanupMUS(object):
+    def __init__(self):
+        self.label = "Cleanup missing elements from MUS files"
+        self.description = "Cleanup missing elements from MUS files"
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        reference_feature_class = arcpy.Parameter(
+            displayName="Reference Feature Class",
+            name="reference_feature_class",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+
+        selection_files = arcpy.Parameter(
+            displayName="Selection Files",
+            name="selection_files",
+            datatype="file",
+            parameterType="Required",
+            multiValue=True,
+            direction="Input")
+        selection_files.filter.list = ["mus"]
+
+        parameters = [reference_feature_class, selection_files]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):  # optional
+        return
+
+    def updateMessages(self, parameters):  # optional
+        return
+
+    def execute(self, parameters, messages):
+        reference_feature_class = parameters[0].Value
+        selection_files = parameters[1].ValueAsText.split(";")
+
+        to_ignore = ["msm_Node", "msm_Link", "ms_Catchment", "msm_Catchment", "msm_Orifice", "msm_Weir"]
+
+        MUIDs = [row[0] for row in arcpy.da.SearchCursor(reference_feature_class, ["MUID"])]
+
+        for selection_file in selection_files:
+            with open(selection_file, 'r') as f:
+                selection_file_lines = f.readlines()
+                selection_file_lines_cleaned = []
+                for line in selection_file_lines:
+                    line_MUID = line[:-1]
+                    if len(line_MUID) > 1 and not line_MUID in to_ignore and not line_MUID in MUIDs:
+                        arcpy.AddMessage((selection_file, line_MUID))
+                    else:
+                        selection_file_lines_cleaned.append(line)
+            with open(selection_file, 'w') as f:
+                for line in selection_file_lines:
+                    f.write(line)
         return
