@@ -241,10 +241,11 @@ class DFSUFloodStatisticsToRaster(object):
         dfs_read = dfs.read(items=[i for i,a in enumerate(dfs.items) if DFSUField == a.name])
         dfs_read_data = dfs_read.to_numpy()
         np.nan_to_num(dfs_read_data, copy = False)
+        # arcpy.AddMessage((dfs_read_data, dfs_read_data.shape))
         
         statusUpdate("Isolating DFSU Elements with value",tic)
         
-        elements_with_water = np.where(dfs_read_data[0, :] > 0.003)[0] if DFSUField == "Maximum water depth" else np.where(dfs_read_data[0,:] != 0)[0]
+        elements_with_water = np.where(dfs_read_data[0, 0, :] > 0.003)[0] if DFSUField == "Maximum water depth" else np.where(dfs_read_data[0, 0, :] != 0)[0]
         no_elements = False if len(elements_with_water)>0 else True
         
         if no_elements:
@@ -254,6 +255,7 @@ class DFSUFloodStatisticsToRaster(object):
                    np.max(element_coordinates[elements_with_water,0]) + searchDistance]
             y_limit = [np.min(element_coordinates[elements_with_water,1]) - searchDistance, 
                    np.max(element_coordinates[elements_with_water,1]) + searchDistance]
+            # arcpy.AddMessage((x_limit, y_limit))
             raster_xs_vector = np.arange(x_limit[0],x_limit[1],raster_cell_size)
             raster_ys_vector = np.arange(y_limit[0],y_limit[1],raster_cell_size)
             
@@ -296,7 +298,7 @@ class DFSUFloodStatisticsToRaster(object):
             statusUpdate("Interpolating DFSU to Raster (nearest neighbor)", tic)
             for i in idx:
                 element_i = dfsu_cKDTree.query([raster_x_flat[i],raster_y_flat[i]])[1]
-                raster_depth_flat[i] = dfs_read_data[0,elements_searchable[element_i]]
+                raster_depth_flat[i] = dfs_read_data[0,0,elements_searchable[element_i]]
                 
             statusUpdate("Saving Raster", tic)
             raster_depth = raster_depth_flat.reshape(raster_depth.shape[0:2] + tuple([1]))
