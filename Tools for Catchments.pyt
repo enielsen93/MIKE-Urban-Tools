@@ -1214,6 +1214,8 @@ class DuplicateCatchments(object):
         msm_CatchCon = os.path.join(MU_database, "msm_CatchCon")
         MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchments, ["MUID"])]
 
+        max_catchcon_MUID = np.max([row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database, 'ms_Catchment'), ["MUID"])])
+
         arcpy.SetProgressorLabel("Creating Workspace")
         MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
         if not os.path.exists(MIKE_folder):
