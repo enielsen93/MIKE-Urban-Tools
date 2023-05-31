@@ -951,7 +951,16 @@ class ExportToDDS(object):
             direction="Input")
         use_pipe_catalogue.value = os.path.dirname(os.path.realpath(__file__)) + r"\Data\ExportToCad\Pipe_Catalogue.dbf"
 
-        parameters = [msm_Node, msm_Link, dandas_knuder, dandas_ledninger, dandas_deloplande, use_pipe_catalogue]
+        use_thickness = arcpy.Parameter(
+            displayName="For concrete pipes assume wall thickness corresponding to:",
+            name="use_thickness",
+            datatype="GPString",
+            parameterType="Optional",
+            direction="Input")
+
+        use_thickness.filter.list = ["Top", "Bottom", "Side"]
+
+        parameters = [msm_Node, msm_Link, dandas_knuder, dandas_ledninger, dandas_deloplande, use_pipe_catalogue, use_thickness]
 
         return parameters
 
@@ -985,6 +994,7 @@ class ExportToDDS(object):
         dandas_ledninger = parameters[3].ValueAsText
         dandas_deloplande = parameters[4].ValueAsText
         use_pipe_catalogue = parameters[5].Value
+        use_thickness = parameters[6].Value
 
         pipe_catalogue = []
         class PipeSize:
@@ -994,9 +1004,10 @@ class ExportToDDS(object):
                 self.wall_thickness = wall_thickness
 
         if use_pipe_catalogue:
-            with arcpy.da.SearchCursor(use_pipe_catalogue, ["*"]) as cursor:
+            thickness_field = {"Top": "Thick_top", "Bottom": "Thick_bot", "Side": "Thick_wid"}[use_thickness]
+            with arcpy.da.SearchCursor(use_pipe_catalogue, ["Material", "Intern_dia", thickness_field]) as cursor:
                 for row in cursor:
-                    pipe_catalogue.append(PipeSize(row[1], row[2], row[3]))
+                    pipe_catalogue.append(PipeSize(row[0], row[1], row[2]))
 
         mike_urban_database = os.path.dirname(arcpy.Describe(msm_Node).catalogPath).replace("\mu_Geometry", "")
         is_mike_plus = True if ".sqlite" in mike_urban_database else False
