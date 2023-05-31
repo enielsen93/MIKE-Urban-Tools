@@ -1005,7 +1005,7 @@ class CopyDiameter(object):
     def execute(self, parameters, messages):
         reference_feature_layer = parameters[0].Value
         target_feature_layer = parameters[1].Value
-        copy_field = parameters[2].ValueAsText
+        copy_field = parameters[2].ValueAsText.split(";")
         match_by = parameters[3].ValueAsText
         MU_database = os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath).replace("mu_Geometry","")
         reference_MU_database = os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath).replace("mu_Geometry","")
@@ -1019,7 +1019,7 @@ class CopyDiameter(object):
             if "shape" in match_by.lower():
                 arcpy.AddError("Match field %s is not supported for sqlite" % (match_by))
         
-        field_for_where_clause = "OBJECTID" if not is_sqlite else "MUID"
+        field_for_where_clause = "objectid" if not is_sqlite else "muid"
         check_other_layer = True
         try:
             if arcpy.Describe(reference_feature_layer).fidSet:
@@ -1068,15 +1068,15 @@ class CopyDiameter(object):
             
         def changeShapeFieldname(fields):
             for i in range(len(fields)):
-                if fields[i] == "SHAPE":
-                    fields[i] = "SHAPE@"
+                if fields[i].lower() == "shape":
+                    fields[i] = "shape@"
             return fields
 
         references = []
-        fields = changeShapeFieldname([field.name for field in arcpy.ListFields(reference_feature_layer)])
-        if "ESRI_OID" in fields:
-            fields.remove("ESRI_OID")
-        # arcpy.AddMessage(fields)
+        fields = changeShapeFieldname([field.name.lower() for field in arcpy.ListFields(reference_feature_layer)])
+        if "esri_oid" in fields:
+            fields.remove("esri_oid")
+        arcpy.AddMessage(fields)
         
         with arcpy.da.SearchCursor(arcpy.Describe(reference_feature_layer).catalogPath, fields, where_clause = reference_where_clause) as cursor:
             for row in cursor:
@@ -1088,7 +1088,7 @@ class CopyDiameter(object):
         # arcpy.AddMessage([reference.muid for reference in references])
         # arcpy.AddMessage([reference.diameter for reference in references])
         
-        fields = changeShapeFieldname([field.name for field in arcpy.ListFields(target_feature_layer)])
+        fields = changeShapeFieldname([field.name.lower() for field in arcpy.ListFields(target_feature_layer)])
         if "ESRI_OID" in fields:
             fields.remove("ESRI_OID")
         
@@ -1142,18 +1142,19 @@ class CopyDiameter(object):
                     match = [reference for reference in references if getattr(reference, match_by.lower()) == row[match_by_field_i]]
                     # arcpy.AddMessage(match)
                     # arcpy.AddMessage(row[match_by_field_i])
-                    
                     if match:
                         reference = match[0]
                         for field_i, field in enumerate(fields):
-                            if field in copy_field:
+                            # arcpy.AddMessage(copy_field)
+                            if field.lower() in [f.lower() for f in copy_field]:
+                                # arcpy.AddMessage(field)
                                 arcpy.AddMessage(
                                     "Changed %s field %s from %s to %s" % (row[match_by_field_i], field, row[field_i], getattr(reference, field.lower())))
                                 row[field_i] = getattr(reference, field.lower())
                             elif field == "SHAPE":
                                 shape = deepcopy(row[field_i])
                                 row[field_i] = shape
-                        
+                        arcpy.AddMessage(row)
                         cursor.updateRow(row)
 
 
