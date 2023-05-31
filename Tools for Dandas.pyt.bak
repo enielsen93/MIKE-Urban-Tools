@@ -122,7 +122,7 @@ class Dandas2MULinks(object):
 
     def execute(self, parameters, messages):
         arcpy.env.outputCoordinateSystem = arcpy.SpatialReference("ETRS 1989 UTM Zone 32N")
-        arcpy.AddMessage((os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Node.lyr"))
+        
         tic = time.time()
         arcpy.SetProgressor("default","Reading Knuder .XML file")        
         dandas_knuder = parameters[0].ValueAsText
@@ -186,7 +186,7 @@ class Dandas2MULinks(object):
                                           4: 'Opfyldt', 5: u'Død', 6: 'Projekteret / planlagt', 7: 'Anlagt',
                                           8: 'Fjernet', 50: 'Andet'}
 
-                arcpy.AddMessage(int(nodes[nodei].find("StatusKode").text))
+                
                 msm_Node_Table["Status"] = statuskode_transformer[int(nodes[nodei].find("StatusKode").text)] if nodes[nodei].find(
                     "StatusKode") is not None and int(nodes[nodei].find(
                     "StatusKode").text) in statuskode_transformer else None
@@ -243,7 +243,7 @@ class Dandas2MULinks(object):
                     else:
                         msm_Node_Table["Description"] = "Ukendt" if not msm_Node_Table["Description"] else msm_Node_Table["Description"] + ", Ukendt"              
                     if not skip:
-                        arcpy.AddMessage([(float(nodes[nodei].find("XKoordinat").text),float(nodes[nodei].find("YKoordinat").text))]+msm_Node_Table.values())
+                        
                         msm_Node_Cursor.insertRow([(float(nodes[nodei].find("XKoordinat").text),float(nodes[nodei].find("YKoordinat").text))]+msm_Node_Table.values())
                         nodesDict[nodes[nodei].attrib['Knudenavn']] = (float(nodes[nodei].find("XKoordinat").text),float(nodes[nodei].find("YKoordinat").text), msm_Node_Table["InvertLevel"])
                     ID = ID+1

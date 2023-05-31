@@ -201,6 +201,9 @@ class Dandas2MULinks(object):
                 owner = re.sub(r'[^\d\w]+', "", nodes[nodei].find("Ejerfordelingsnavn").text) if nodes[nodei].find("Ejerfordelingsnavn") is not None else ""
                 msm_Node_Table["Ejer"] = owner
 
+                msm_Node_Table["Description"] = nodes[nodei].find("Bemaerkning").text[:50] if nodes[nodei].find(
+                    "Bemaerkning") is not None else ""
+
                 if nodes[nodei].find("Broend/BroendKode") is not None:
                     broendkode = int(nodes[nodei].find("Broend/BroendKode").text)
                     msm_Node_Table["Broendkode"] = manhole_table_dict[broendkode] if broendkode in manhole_table_dict else broendkode
@@ -329,7 +332,7 @@ class Dandas2MULinks(object):
                             12:'Iron (wrought)',
                             4:'Plastic',
                             5:'Plastic',
-                            8:'Plastic',
+                            8:'GAP',
                             9:'Plastic',
                             10:'Plastic',
                             18:'Plastic',
@@ -378,6 +381,9 @@ class Dandas2MULinks(object):
 
                         linkDictionary["YearEst"] = int(link.find("DatoEtableret").text[:4]) if link.find(
                             "DatoEtableret") is not None else None
+
+                        linkDictionary["Description"] = link.find("Bemaerkning").text[:50] if link.find(
+                            "Bemaerkning") is not None else ""
 
                         if link_delledning.find("MaterialeKode") is not None:
                             material = int(link_delledning.find("MaterialeKode").text)
