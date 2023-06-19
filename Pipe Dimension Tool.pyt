@@ -1096,7 +1096,7 @@ class CopyDiameter(object):
         # arcpy.AddMessage(fields)
         # arcpy.AddMessage(match_by_field_i)
         
-        target_where_clause = target_where_clause if target_where_clause else reference_where_clause
+        target_where_clause = target_where_clause if target_where_clause else ""
         # arcpy.AddMessage(reference_where_clause)
 
         if is_sqlite:
@@ -1138,10 +1138,11 @@ class CopyDiameter(object):
             edit.startOperation()
             with arcpy.da.UpdateCursor(arcpy.Describe(target_feature_layer).catalogPath, fields, where_clause = target_where_clause) as cursor:
                 for row in cursor:
-                    
+
                     match = [reference for reference in references if getattr(reference, match_by.lower()) == row[match_by_field_i]]
                     # arcpy.AddMessage(match)
                     # arcpy.AddMessage(row[match_by_field_i])
+                    # arcpy.AddMessage([getattr(reference, match_by.lower()) for reference in references])
                     if match:
                         reference = match[0]
                         for field_i, field in enumerate(fields):
