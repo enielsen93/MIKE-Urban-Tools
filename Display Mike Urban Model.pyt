@@ -313,8 +313,14 @@ class DisplayMikeUrban(object):
             printStepAndTime("Adding nodes to map")
             arcpy.SetProgressor("default", "Adding nodes to map")
 
-            layer = addLayer(os.path.join(templates_folder, "msm_Node" + templates_extension if not show_loss_par else "msm_Node with LossPar" + templates_extension),
-                    manholes, group = empty_group_layer, definition_query = sql_query)
+
+            if is_sqlite_database:
+                layer = addLayer(os.path.join(templates_folder,
+                                              "msm_Node" + templates_extension if not show_loss_par else "msm_Node+ with LossPar" + templates_extension),
+                                 manholes, group=empty_group_layer, definition_query=sql_query)
+            else:
+                layer = addLayer(os.path.join(templates_folder, "msm_Node" + templates_extension if not show_loss_par else "msm_Node with LossPar" + templates_extension),
+                        manholes, group = empty_group_layer, definition_query = sql_query)
                 
         
         class Basin:
