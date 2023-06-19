@@ -165,18 +165,19 @@ with arcpy.da.InsertCursor(output_filepath, ["SHAPE@", "MUID", "Diameter", "Inve
         node.max_level = np.max(df.get_node_values(muid, "WaterLevel"))
         if muid in [reach.tonode for reach in reaches.values()] and muid in [reach.fromnode for reach in reaches.values()]:
             try:
-                water_levels = [np.max(df.get_reach_end_values(reach.muid, "WaterLevel")) for reach in reaches.values() if reach.tonode == muid and reach.type == "Link"]
+                water_levels = [np.max(df.get_reach_end_values(reach.muid, "WaterLevel")) for reach in reaches.values() if reach.tonode == muid and reach.type == "Link" and hasattr(reach, "muid")]
                 node.inlet_waterlevel = np.max(water_levels) if water_levels else 0
-                water_levels = [np.max(df.get_reach_start_values(reach.muid, "WaterLevel")) for reach in reaches.values() if reach.fromnode == muid and reach.type == "Link"]
+                water_levels = [np.max(df.get_reach_start_values(reach.muid, "WaterLevel")) for reach in reaches.values() if reach.fromnode == muid and reach.type == "Link" and hasattr(reach, "muid")]
                 node.outlet_waterlevel = np.max(water_levels) if water_levels else 0
                 node.max_headloss = node.inlet_waterlevel - node.outlet_waterlevel
-                inlet_velocities = [np.max(df.get_reach_end_values(reach.muid, "FlowVelocity")) for reach in reaches.values() if reach.tonode == muid and reach.type == "Link"]
+                inlet_velocities = [np.max(df.get_reach_end_values(reach.muid, "FlowVelocity")) for reach in reaches.values() if reach.tonode == muid and reach.type == "Link" and hasattr(reach, "muid")]
                 node.max_inlet_velocity = np.max(inlet_velocities)
-                if node.id == "D08089XR":
-                    print([np.max(df.get_reach_end_values(reach.muid, "WaterLevel")) for reach in reaches.values() if reach.tonode == muid and reach.type == "Link"])
-                    print(muid, node.max_headloss, node.outlet_waterlevel, node.inlet_waterlevel)
+
             except Exception as e:
                 print(muid)
+                # if node.id == "D08089XR":
+                #     print([np.max(df.get_reach_end_values(reach.muid, "WaterLevel")) for reach in reaches.values() if reach.tonode == muid and reach.type == "Link" and hasattr(reach, "muid")])
+                #     print(muid, node.max_headloss, node.outlet_waterlevel, node.inlet_waterlevel)
                 print(traceback.format_exc())
                 print(e)
         # print(node.max_headloss)
