@@ -201,7 +201,7 @@ class Dandas2MULinks(object):
                 owner = re.sub(r'[^\d\w]+', "", nodes[nodei].find("Ejerfordelingsnavn").text) if nodes[nodei].find("Ejerfordelingsnavn") is not None else ""
                 msm_Node_Table["Ejer"] = owner
 
-                msm_Node_Table["Description"] = nodes[nodei].find("Bemaerkning").text[:50] if nodes[nodei].find(
+                msm_Node_Table["Bemaerkning"] = nodes[nodei].find("Bemaerkning").text[:50] if nodes[nodei].find(
                     "Bemaerkning") is not None else ""
 
                 if nodes[nodei].find("Broend/BroendKode") is not None:
@@ -211,9 +211,9 @@ class Dandas2MULinks(object):
                 # if not nodes[nodei].find()
                 # msm_Node_Table["Broendkode"] = manhole_table_dict[nodes[nodei].attrib['Broendkode']]
                 
-                statuskode = (int(nodes[nodei].find("KnudeKode").text) if nodes[nodei].find("KnudeKode") is not None else 0)                
-                if statuskode == 8:
-                    msm_Node_Table["Description"] = u"Sløjfet"
+                # statuskode = (int(nodes[nodei].find("KnudeKode").text) if nodes[nodei].find("KnudeKode") is not None else 0)
+                # if statuskode == 8:
+                #     msm_Node_Table["Description"] = u"Sløjfet"
                 
                 msm_Node_Table["GroundLevel"] = float(nodes[nodei].find("DaekselItems").find("Daeksel").find("Daekselkote").text) if nodes[nodei].find("DaekselItems") is not None and nodes[nodei].find("DaekselItems").find("Daeksel") is not None and nodes[nodei].find("DaekselItems").find("Daeksel").find("Daekselkote") is not None else None
                 if msm_Node_Table["GroundLevel"] is None:
