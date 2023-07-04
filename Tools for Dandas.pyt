@@ -373,17 +373,27 @@ class Dandas2MULinks(object):
 
                     if link.find("DelLedningItems") is not None and link.find("DelLedningItems").find("DelLedning") is not None:
                         link_delledning = link.find("DelLedningItems").find("DelLedning")
-                        
+
+                        if link_delledning.find("TvaersnitKode") is not None:
+                            k = int(link_delledning.find("TvaersnitKode").text)
+                            crosssection_catalogue = {0: 1, 1: 1, 5: 2, 6: 2, 8: 2, 9: 2, 10: 2, 50: 2, 99: 2, 3: 3, 4: 3, 7: 4, 2: 5}
+                            linkDictionary["TypeNo"] = crosssection_catalogue[k]
+
+
                         if link_delledning.find("DiameterIndv") is not None:
                             linkDictionary["Diameter"] = float(link_delledning.find("DiameterIndv").text)/1.0e3
                         elif link_delledning.find("Handelsmaal") is not None:
                             linkDictionary["Diameter"] = float(link_delledning.find("Handelsmaal").text)/1.0e3
+
+                        if link_delledning.find("Handelsmaal") is not None:
+                            linkDictionary["Handmaal"] = float(link_delledning.find("Handelsmaal").text) / 1.0e3
 
                         linkDictionary["YearEst"] = int(link.find("DatoEtableret").text[:4]) if link.find(
                             "DatoEtableret") is not None else None
 
                         linkDictionary["Description"] = link.find("Bemaerkning").text[:50] if link.find(
                             "Bemaerkning") is not None else ""
+
 
                         if link_delledning.find("MaterialeKode") is not None:
                             material = int(link_delledning.find("MaterialeKode").text)
