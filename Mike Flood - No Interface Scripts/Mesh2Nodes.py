@@ -13,7 +13,7 @@ import mikeio
 import arcpy
 arcpy.env.overwriteOutput = True
 
-mesh_file = r"C:\Users\ELNN\Downloads\Mesh_UTM32_2.mesh"
+mesh_file = r"\\Aarhusfil\userdata\1101189_Forsyning_og_Klimatilpasning\Bruger\TBBS\Tvis\Grid_med_terrain_groeft_udfyldt_new.mesh"
 dfs = mikeio.dfsu.Mesh(mesh_file)
 element_coordinates = dfs.element_coordinates
 
