@@ -31,7 +31,7 @@ class Toolbox(object):
         self.alias  = "Tools for Mike Urban Flood"
 
         # List of tool classes associated with this toolbox
-        self.tools = [InterpolateToMesh, DFSUFloodStatisticsToRaster, DFSUToRaster, DFSUPlumeStatistics, DFSUToPolygons, DFS2ToRaster, CutFromMesh, CutFromDFSU] 
+        self.tools = [InterpolateToMesh, DFSUFloodStatisticsToRaster, DFSUToRaster, DFSUPlumeStatistics, DFSUToPolygons, DFS2ToRaster, CutFromMesh, CutFromDFSU, MeshToTIN]
 
     
         
@@ -822,18 +822,17 @@ class DFSUToPolygons(object):
         minimum_water_depth = float(parameters[2].valueAsText)
         
         statusUpdate("Reading DFSU-file",tic)
-        dfs = mikeio.dfsu.Dfsu(DFSUFile, dtype=np.float32)
+        dfs = mikeio.dfsu.Dfsu2DH(DFSUFile)
         DFSUField = "Total water depth"
 
         element_coordinates = dfs.element_coordinates
                 
         dfs_read = dfs.read(items=[i for i,item in enumerate(dfs.items) if item.name in DFSUField])
 
-        dfs_read_data = dfs_read.data[0]
-        np.nan_to_num(dfs_read_data, copy = False)
+        dfs_read_data = np.nan_to_num(dfs_read.to_numpy(), copy = False)
         
         statusUpdate("Finding wet elements",tic)
-        elements_with_water = np.where(dfs_read_data[-1,:]>minimum_water_depth)[0]
+        elements_with_water = np.where(dfs_read_data[0,-1,:]>minimum_water_depth)[0]
         
         statusUpdate("Retrieving element table",tic)
         element_table = dfs.element_table
@@ -851,7 +850,7 @@ class DFSUToPolygons(object):
             for element_i, element in enumerate(elements_with_water):
                     node_coordinates = nodes_coordinates[element_table[element],:-1]
                     triangle = arcpy.Polygon(arcpy.Array([arcpy.Point(coords[0],coords[1]) for coords in node_coordinates]))
-                    cursor.insertRow([triangle, dfs_read_data[-1,element]])
+                    cursor.insertRow([triangle, dfs_read_data[0,-1,element]])
                     arcpy.SetProgressorPosition(element_i)
         arcpy.CopyFeatures_management(output_file, output_shape_file)
         return
@@ -976,7 +975,7 @@ class CutFromDFSU(object):
 
     def updateParameters(self, parameters): #optional
         if parameters[0].ValueAsText and not parameters[2].ValueAsText:
-            parameters[2].value = parameters[0].ValueAsText.replace(".dfsu","_cropped.dfsu")
+            parameters[2].value = os.path.join(os.path.dirname(parameters[0].ValueAsText), "TIN")
         return
 
     def updateMessages(self, parameters): #optional
@@ -1057,3 +1056,93 @@ class CutFromDFSU(object):
 #     # statusUpdate("Saving mesh", tic)
 #     dfs.zn = bedLevelFlat
 #     dfs.write(MeshFileOutput)
+
+class MeshToTIN(object):
+    def __init__(self):
+        self.label = "Convert Mesh to TIN (ArcGIS Pro only)"
+        self.description = "Convert Mesh to TIN (ArcGIS Pro only)"
+        self.canRunInBackground = True
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        # Input Features parameter
+        MeshFile = arcpy.Parameter(
+            displayName="Input Mesh File",
+            name="MeshFile",
+            datatype="File",
+            parameterType="Required",
+            direction="Input")
+        MeshFile.filter.list = ["mesh"]
+
+        TIN = arcpy.Parameter(
+            displayName="Output TIN",
+            name="TIN",
+            datatype="DETin",
+            parameterType="Required",
+            direction="Output")
+
+        clip_TIN = arcpy.Parameter(
+            displayName="Clip TIN to boundary polylines?",
+            name="clip_TIN",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+
+        parameters = [MeshFile, TIN, clip_TIN]
+
+        return parameters
+
+    def isLicensed(self):  # optional
+        return True
+
+    def updateParameters(self, parameters):  # optional
+        if parameters[0].ValueAsText and not parameters[1].ValueAsText:
+            parameters[1].value = parameters[0].ValueAsText.replace(".mesh","")
+        return
+
+    def updateMessages(self, parameters):  # optional
+        return
+
+    def execute(self, parameters, messages):
+        arcpy.SetProgressorLabel("Loading Mesh File")
+        mesh_file = parameters[0].ValueAsText
+        TIN = parameters[1].ValueAsText
+        arcpy.AddMessage(TIN)
+        clip_TIN = parameters[2].Value
+        dfs = mikeio.dfsu.Mesh(mesh_file)
+        arcpy.SetProgressorLabel("Reading Mesh File Element Coordinates")
+        node_coordinates = dfs.node_coordinates
+
+        arcpy.SetProgressorLabel("Creating Feature Class")
+        arcpy.CreateFeatureclass_management("in_memory", "nodes_Z", "POINT", has_z="Enabled")
+        # arcpy.AddField_management(os.path.join(nodesPath, nodesName), "Z", "DOUBLE")
+
+        arcpy.SetProgressorLabel("Adding each element to the feature class")
+        with arcpy.da.InsertCursor(os.path.join("in_memory", "nodes_Z"), ["SHAPE@"]) as cursor:
+            for node in node_coordinates:
+                cursor.insertRow([arcpy.Point(node[0], node[1], node[2])])
+
+        if clip_TIN:
+            arcpy.CreateFeatureclass_management("in_memory", "ClipPolygon", "POLYGON")
+            boundary_xy_table = dfs.boundary_polylines[1][0].xy
+            polygons = arcpy.Polygon(arcpy.Array([arcpy.Point(xy[0], xy[1]) for xy in boundary_xy_table]))
+            with arcpy.da.InsertCursor("in_memory\ClipPolygon", "SHAPE@") as cursor:
+                cursor.insertRow([polygons])
+
+            arcpy.CreateFeatureclass_management("in_memory", "CutPolygon", "POLYGON")
+            cut_polygons = dfs.boundary_polylines[3]
+            polygons = []
+            for cut_polygon in cut_polygons:
+                boundary_xy_table = cut_polygon.xy
+                polygons.append(arcpy.Polygon(arcpy.Array([arcpy.Point(xy[0], xy[1]) for xy in boundary_xy_table])))
+            with arcpy.da.InsertCursor("in_memory\CutPolygon", "SHAPE@") as cursor:
+                for polygon in polygons:
+                    cursor.insertRow([polygon])
+
+            arcpy.ddd.CreateTin(TIN, dfs.projection_string,
+                                r"in_memory\nodes_Z Shape.Z Mass_Points; in_memory\ClipPolygon <None> Hard_Clip")
+        else:
+            arcpy.ddd.CreateTin(TIN, dfs.projection_string,
+                                "%s Shape.Z Mass_Points")
+        return
