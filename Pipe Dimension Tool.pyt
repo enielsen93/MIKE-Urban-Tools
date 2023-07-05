@@ -980,6 +980,7 @@ class CopyDiameter(object):
                     if fields[i] == "SHAPE":
                         fields[i] = "SHAPE@"
                 return fields
+
         if parameters[0].altered:
             reference_feature_layer = parameters[0].ValueAsText
 
