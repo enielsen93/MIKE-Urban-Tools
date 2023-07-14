@@ -96,7 +96,7 @@ class Toolbox(object):
         self.alias  = "Pipe Dimension Tool"
         self.canRunInBackground = True
         # List of tool classes associated with this toolbox
-        self.tools = [PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope, CopyDiameter, CalculateSlopeOfPipe, ResetUpLevelDwlevel, SetDischargeRegulation]
+        self.tools = [PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope, CopyDiameter, CalculateSlopeOfPipe, ResetUpLevelDwlevel, SetDischargeRegulation, PipeDimensionToolResultFile]
 
 class PipeDimensionToolTAPro(object):
     def __init__(self):
@@ -713,6 +713,289 @@ class PipeDimensionToolTAPro(object):
         #     pickle.dump(save_parameters.parameters, f)
         return
 
+
+class PipeDimensionToolResultFile(object):
+    def __init__(self):
+        self.label = "Calculate minimum required pipe diameter through Result File"
+        self.description = "Calculate minimum required pipe diameter through Result File"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        pipe_layer = arcpy.Parameter(
+            displayName="Pipe feature layer",
+            name="pipe_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+
+        result_field = arcpy.Parameter(
+            displayName="Field to assign diameter to",
+            name="result_field",
+            datatype="GPString",
+            parameterType="Optional",
+            direction="Input")
+
+        result_layer = arcpy.Parameter(
+            displayName="Result Layer with Max Q",
+            name="result_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+
+        result_layer_field = arcpy.Parameter(
+            displayName="Field with Max_Q",
+            name="result_layer_field",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
+
+        slopeOverwrite = arcpy.Parameter(
+            displayName="Overwrite slope of pipes to:",
+            name="slopeOverwrite",
+            datatype="double",
+            parameterType="optional",
+            direction="Input")
+        slopeOverwrite.category = "Additional settings"
+
+        keep_largest_diameter = arcpy.Parameter(
+            displayName="Only change diameter if it's greater than existing",
+            name="keep_largest_diameter",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+        keep_largest_diameter.category = "Additional settings"
+        keep_largest_diameter.value = True
+
+        change_material = arcpy.Parameter(
+            displayName="Change material (Plastic if less than 500 mm, concrete if greater than or equal to 500 mm",
+            name="change_material",
+            datatype="Boolean",
+            parameterType="optional",
+            direction="Input")
+        change_material.category = "Additional settings"
+        change_material.value = True
+
+        parameters = [pipe_layer, result_field, result_layer, result_layer_field, slopeOverwrite, keep_largest_diameter, change_material]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):  # optional
+        pipe_layer = parameters[0].ValueAsText
+        if pipe_layer:
+            parameters[1].filter.list = [f.name for f in arcpy.Describe(pipe_layer).fields]
+        result_layer = parameters[2].ValueAsText
+        if result_layer:
+            parameters[3].filter.list = [f.name for f in arcpy.Describe(result_layer).fields]
+        return
+
+    def updateMessages(self, parameters):  # optional
+        return
+
+    def execute(self, parameters, messages):
+        pipe_layer = parameters[0].ValueAsText
+        MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry", "")
+        result_field = parameters[1].ValueAsText
+        result_layer = parameters[2].ValueAsText
+        result_layer_field = parameters[3].ValueAsText
+        slopeOverwrite = parameters[4].Value
+        keep_largest_diameter = parameters[5].Value
+        change_material = parameters[6].Value
+
+        MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
+        if not os.path.exists(MIKE_folder):
+            os.mkdir(MIKE_folder)
+        #
+        # config_folder = os.path.join(MIKE_folder, "Config")
+        # if not os.path.exists(config_folder):
+        #     os.mkdir(config_folder)
+        # config_file = os.path.join(config_folder, os.path.splitext(os.path.basename(MU_database))[0] + ".ini")
+        #
+        # config = Config(config_file)
+        # config.write(parameters)
+
+        MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
+        no_dir = True
+        dir_ext = 0
+        while no_dir:
+            try:
+                if arcpy.Exists(MIKE_gdb):
+                    os.rmdir(MIKE_gdb)
+                os.mkdir(MIKE_gdb)
+                no_dir = False
+            except Exception as e:
+                dir_ext += 1
+                MIKE_gdb = os.path.join(MIKE_folder,
+                                        "%s_%d" % (os.path.splitext(os.path.basename(MU_database))[0], dir_ext))
+        arcpy.env.scratchWorkspace = MIKE_gdb
+
+        arcpy.SetProgressorLabel("Preparing")
+        selected_pipes = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["muid"])]
+
+        mxd = arcpy.mapping.MapDocument("CURRENT")
+        df = arcpy.mapping.ListDataFrames(mxd)[0]
+
+        def addLayer(layer_source, source, group=None, workspace_type="ACCESS_WORKSPACE"):
+            layer = apmapping.Layer(layer_source)
+            if group:
+                apmapping.AddLayerToGroup(df, group, layer, "BOTTOM")
+            else:
+                apmapping.AddLayer(df, layer, "TOP")
+            updatelayer = apmapping.ListLayers(mxd, layer.name, df)[0]
+            updatelayer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))), workspace_type,
+                                          unicode(os.path.basename(source)))
+
+        is_sqlite = True if ".sqlite" in MU_database else False
+
+        msm_Link = os.path.join(MU_database, "msm_Link")
+        msm_Node = os.path.join(MU_database, "msm_Node")
+
+        arcpy.SetProgressorLabel("Calculating Pipe Dimensions")
+
+        def addField(shapefile, field_name, datatype):
+            i = 1
+            while field_name in [f.name for f in arcpy.Describe(shapefile).fields]:
+                field_name = "%s_%d" % (field_name, i)
+            arcpy.AddField_management(shapefile, field_name, datatype)
+            return field_name
+
+        # arcpy.SetProgressorLabel("Creating debug output")
+        # debug_output = True
+        # if debug_output:
+        # if len(target_manholes)==1:
+        # with open(r"C:\Papirkurv\Hydrograph.csv", 'w') as f:
+        # for discharge in runoffs:
+        # f.write("%s\n" % ("\t".join([str(d) for d in discharge])))
+        # debug_output_fc = str(arcpy.CopyFeatures_management(pipe_layer, getAvailableFilename(arcpy.env.scratchGDB + "\debug_output")))
+        # RedOpl_field = addField(debug_output_fc, "RedOpl", "FLOAT")
+        # QMax_field = addField(debug_output_fc, "QMax", "FLOAT")
+        # QMaxT_field = addField(debug_output_fc, "QMaxT", "FLOAT")
+        # with arcpy.da.UpdateCursor(debug_output_fc, ["MUID", RedOpl_field, QMax_field, QMaxT_field], where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
+        # for row in cursor:
+        # row[1] = total_red_opl[msm_Link_Network.links[row[0]].fromnode]
+        # row[2] = peak_discharge[msm_Link_Network.links[row[0]].fromnode]
+        # row[3] = peak_discharge_time[msm_Link_Network.links[row[0]].fromnode]
+        # cursor.updateRow(row)
+
+        peak_discharge = {row[0]:row[1]*1e3 for row in arcpy.da.SearchCursor(result_layer, ["MUID", result_layer_field])}
+        arcpy.AddMessage(peak_discharge)
+
+        if is_sqlite:
+            with sqlite3.connect(
+                    MU_database) as connection:
+                update_cursor = connection.cursor()
+                with arcpy.da.SearchCursor(msm_Link,
+                                           ["Slope" if is_sqlite else "Slope_C", "Diameter", "MaterialID", "MUID",
+                                            "SHAPE@",
+                                            "NetTypeNo",
+                                            "enabled"],
+                                           where_clause="MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
+                    for row_i, row in enumerate(cursor):
+                        arcpy.SetProgressorPosition(row_i)
+                        if change_material:
+                            D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                                diameter for diameter in diameters_concrete if diameter > 450]
+                        else:
+                            D = diameters_plastic if not "concrete" in row[1].lower() and not "beton" in row[
+                                1].lower() else diameters_concrete
+                        slope = slopeOverwrite if slopeOverwrite else row[0] * 1e-2
+                        # if writeDischargeInstead:
+                        #     diameter = # ins_row = (row[4], row[3], peak_discharge[msm_Link_Network.links[row[3]].fromnode], row[2], row[0], row[5], row[6])
+                        #     ins_cursor.insertRow(ins_row)
+                        QFull = 0
+                        Di = -1
+
+                        if peak_discharge[row[3]] == 0:
+                            Di = 0
+                        else:
+                            while QFull is not None and QFull * 1e3 < peak_discharge[row[3]] and Di + 1 < len(D):
+                                Di += 1
+                                QFull = ColebrookWhite.QFull(D[Di] / 1e3, slope, row[2])
+                        diameter = D[Di] / 1.0e3
+
+                        material = row[2]
+                        if keep_largest_diameter and diameter <= row[1]:
+                            diameter = row[1]
+                        else:
+                            if change_material:
+                                material = "Concrete (Normal)" if diameter > 0.45 else "Plastic"
+                            arcpy.AddMessage("Changed %s from %d to %d" % (row[3], row[1] * 1e3, D[Di]))
+                            # arcpy.AddMessage("UPDATE msm_Link SET Diameter = %1.3f, SET MaterialID = %s WHERE MUID = %s" % (diameter, material, row[3]))
+                            update_cursor.execute(
+                                "UPDATE msm_Link SET Diameter = %1.3f, MaterialID = '%s' WHERE MUID = '%s'" % (
+                                    diameter, material, row[3]))
+
+        else:
+            try:
+                edit = arcpy.da.Editor(MU_database)
+                edit.startEditing(False, True)
+                edit.startOperation()
+
+                fields = ["Slope_C", "MaterialID", "MUID", "Diameter"]
+                if result_field and result_field not in fields:
+                    result_field_index = len(fields) - 1
+                    fields.append(result_field)
+
+                arcpy.AddMessage(fields)
+                with arcpy.da.UpdateCursor(msm_Link, fields,
+                                           where_clause="MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
+                    for row_i, row in enumerate(cursor):
+                        # diameter_old = row[4]
+                        arcpy.SetProgressorPosition(row_i)
+                        if change_material:
+                            D = [diameter for diameter in diameters_plastic if diameter < 450] + [
+                                diameter for diameter in diameters_concrete if diameter > 450]
+                        else:
+                            D = diameters_plastic if not "concrete" in row[1].lower() and not "beton" in row[
+                                1].lower() else diameters_concrete
+                        slope = slopeOverwrite if slopeOverwrite else max(row[0] * 1e-2, 5e-3)
+                        QFull = 0
+                        Di = -1
+
+                        if peak_discharge[row[2]] == 0:
+                            Di = 0
+                        else:
+                            while QFull is not None and QFull * 1e3 < peak_discharge[row[2]] and Di + 1 < len(D):
+                                Di += 1
+                                QFull = ColebrookWhite.QFull(D[Di] / 1e3, slope, row[1])
+
+                        diameter = D[Di]
+                        if keep_largest_diameter and diameter / 1.0e3 <= row[3]:
+                            diameter = row[3]
+                        else:
+                            arcpy.AddMessage(
+                                "Changed %s from %d to %d" % (row[2], row[3] * 1e3 if row[3] else 0, D[Di]))
+                            row[-1] = D[Di] / 1.0e3
+                            if change_material:
+                                row[1] = "Concrete (Normal)" if row[-1] > 0.45 else "Plastic"
+                            # if diameter_old != row[1]:
+                            # arcpy.AddMessage("Changed diameter from %1.2f to %1.2f for pipe %s" % (diameter_old, row[1], row[3]))
+                        try:
+                            cursor.updateRow(row)
+                        except Exception as e:
+                            arcpy.AddWarning("Could not update row:")
+                            arcpy.AddWarning(row)
+                edit.stopOperation()
+                edit.stopEditing(True)
+            except Exception as e:
+                arcpy.AddError(row)
+                arcpy.AddError(traceback.format_exc())
+                raise (e)
+        # edit.stopOperation()
+        # edit.stopEditing(True)
+        # import pickle
+        # import saveParameters
+        # save_parameters = saveParameters.Parameters(parameters)
+        # arcpy.AddMessage(save_parameters.parameters)
+        # for parameter in save_parameters.parameters:
+        #     arcpy.AddMessage((type(parameter.Value), type(parameter.ValueAsText)))
+        # with open(r"C:\Papirkurv\Parameters",'w') as f:
+        #     pickle.dump(save_parameters.parameters, f)
+        return
+
 class upgradeDimensions(object):
     def __init__(self):
         self.label       = "Upgrade dimensions"
@@ -744,7 +1027,12 @@ class upgradeDimensions(object):
         return True
 
     def updateParameters(self, parameters):
-
+        if not parameters[0].value:
+            mxd = arcpy.mapping.MapDocument("CURRENT")
+            links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+            if links:
+                parameters[0].value = links
 
         return
 
@@ -853,7 +1141,12 @@ class downgradeDimensions(object):
         # for lyr in arcpy.mapping.ListLayers(mxd, df):
             # if lyr.supports("workspacepath"):
                 # workspaces.add(lyr.workspacePath)
-
+        if not parameters[0].value:
+            mxd = arcpy.mapping.MapDocument("CURRENT")
+            links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+            if links:
+                parameters[0].value = links
         return
 
     def updateMessages(self, parameters): #optional
