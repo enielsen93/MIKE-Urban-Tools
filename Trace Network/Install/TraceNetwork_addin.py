@@ -114,8 +114,13 @@ class GroupComboBoxClass1(object):
             pythonaddins.MessageBox("Error: Links with identical MUIDs: ('%s')" % ("', '".join(duplicate_links)), "Error: Identical MUIDs", 0)
         
         import mikegraph
+        pump_test = os.path.join(self.msm_Node.workspacePath, "msm_Pump")
         print("Graphing %s" % (self.msm_Node.workspacePath)) 
-        self.graph = mikegraph.Graph(self.msm_Node.workspacePath, map_only = self.map_only, ignore_regulations=ignore_regulations)
+        if arcpy.Exists(pump_test):
+            self.graph = mikegraph.Graph(self.msm_Node.workspacePath, map_only = self.map_only, ignore_regulations=ignore_regulations)
+        else:
+            print("Assuming it's not an MIKE Urban database as %s does not exist" % (pump_test))
+            self.graph = mikegraph.Graph(nodes_and_links = [self.msm_Node.dataSource, self.msm_Link.dataSource])
         self.graph.map_network()
         pass
     def onEditChange(self, text):
