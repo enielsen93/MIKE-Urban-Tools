@@ -26,7 +26,7 @@ class Toolbox(object):
         self.alias  = "Catchments"
 
         # List of tool classes associated with this toolbox
-        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, AlteredCatchments, CheckCatchments, FAS2Deloplande, TransferCatchments, GetImperviousness, GetImperviousnessFlora, DuplicateCatchments, GenerateCatchmentConnections, SetImperviousness]
+        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, AlteredCatchments, CheckCatchments, FAS2Deloplande, TransferCatchments, GetImperviousness, GetImperviousnessFlora, DuplicateCatchments, GenerateCatchmentConnections, SetImperviousness, CatchmentProcessingScalgo]
 
 class CatchmentProcessing(object):
     def __init__(self):
@@ -438,6 +438,149 @@ class CatchmentProcessingAlt(object):
             del catchmentcursor
 
             #arcpy.CopyFeatures_management(catchspatialjoin,r"C:/Dokumenter/catchspatialjoin")
+        return
+
+
+class CatchmentProcessingScalgo(object):
+    def __init__(self):
+        self.label = "Calculate imperviousness based on areal cover from SCALGO LIVE"
+        self.description = "Calculate imperviousness based on areal cover from SCALGO LIVE"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        # Input Features parameter
+        catchments = arcpy.Parameter(
+            displayName="Catchment layer",
+            name="catchments",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+        catchments.filter.list = ["Polygon"]
+
+        scalgo_raster = arcpy.Parameter(
+            displayName="Raster with areal cover",
+            name="DHMFile",
+            datatype="GPRasterLayer",
+            parameterType="Required",
+            direction="Input")
+
+        impervious_table = arcpy.Parameter(
+            displayName='Imperviousness of type of areal cover',
+            name='impervious_table',
+            datatype='GPValueTable',
+            parameterType='Required',
+            multiValue="True",
+            direction='Input')
+
+        gridcode_dict = {1: 'Bar jord', 2: 'Vand', 3: 'Andet befaestet', 6: 'Lav vegetation', 7: 'Hoej vegetation',
+                         9: 'Befaestet vej', 10: 'Ubefaestet vej', 16: 'Bygning'}
+
+        imperviousness_dict = {'Bar jord': 0, 'Vand': 0, 'Andet befaestet': 100, 'Lav vegetation': 0,
+                               'Hoej vegetation': 0, 'Befaestet vej': 100, 'Ubefaestet vej': 0, 'Bygning': 100}
+
+        impervious_table.columns = [['GPLong', 'GridCode'], ['String', 'Feature'], ['Double', 'Imperviousness']]
+        impervious_table.values = [[key, value, imperviousness_dict[value]] for key,value in gridcode_dict.iteritems()]
+
+        parameters = [catchments, scalgo_raster, impervious_table]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):  # optional
+        return
+
+    def updateMessages(self, parameters):  # optional
+        return
+
+    def execute(self, parameters, messages):
+        ms_Catchment = parameters[0].ValueAsText
+        raster = parameters[1].ValueAsText
+        impervious_table = parameters[2].Value
+        arcpy.AddMessage(impervious_table)
+
+        class Catchment:
+            def __init__(self, area):
+                self.area = area
+                self.impervious_area = 0
+
+            @property
+            def imperviousness(self):
+                return self.impervious_area / self.area * 100
+
+        catchments = {row[0]: Catchment(row[1]) for row in arcpy.da.SearchCursor(ms_Catchment, ["MUID", "SHAPE@Area"])}
+
+        # ms_Catchment_copy = arcpy.management.MinimumBoundingGeometry(ms_Catchment, r"C:\Papirkurv\ms_Catchment2", geometry_type = "RECTANGLE_BY_AREA", group_option = "ALL")[0]
+        # ms_Catchment_copy = arcpy.management.CopyFeatures(ms_Catchment, r"in_memory\ms_Catchment")[0]
+
+        userquery = pythonaddins.MessageBox(
+            "Assign imperviousness to %s catchments?" % (len(catchments)),
+            "Confirm Assignment", 4)
+
+        arcpy.AddMessage("MUIDs IN ('%s')" % ("', '".join(catchments.keys())))
+        if userquery == "Yes":
+            gridcode_dict = {row[0]: row[1] for row in impervious_table}
+            imperviousness_dict = {row[1]: row[2] for row in impervious_table}
+
+            gridcodes_impervious = [gridcode for gridcode, area_cover in gridcode_dict.iteritems() if
+                                    imperviousness_dict[area_cover] > 0]
+
+            # raster_class = arcpy.Raster(raster)
+            #
+            # raster_np_array = arcpy.RasterToNumPyArray(raster_class)
+            #
+            # lowerLeft = arcpy.Point(raster_class.extent.XMin, raster_class.extent.YMin)
+            # cellSize = raster_class.meanCellWidth
+            #
+            # raster_np_array[np.isin(raster_np_array, gridcodes_impervious, invert = True)] = 0
+            # raster_edited = arcpy.NumPyArrayToRaster(raster_np_array,lowerLeft,cellSize,
+            #                          value_to_nodata=0)
+
+            # raster_clipped = arcpy.management.Clip(raster, None, r"in_memory\raster_clipped", in_template_dataset = ms_Catchment_copy)[0]
+            raster_polygon = arcpy.RasterToPolygon_conversion(in_raster=raster, out_polygon_features=r"in_memory\raster_to_polygon",
+                                             simplify="SIMPLIFY", raster_field="Value",
+                                             create_multipart_features="SINGLE_OUTER_PART", max_vertices_per_feature="")[0]
+
+            # from alive_progress import alive_it
+            with arcpy.da.UpdateCursor(raster_polygon, ["gridcode"], where_clause = "gridcode NOT IN (%s)" % (", ".join([str(gridcode) for gridcode in gridcodes_impervious]))) as cursor:
+                for row in cursor:
+                    cursor.deleteRow()
+
+            intersect_polygon = arcpy.Intersect_analysis(in_features="%s #;%s #" % (raster_polygon, ms_Catchment),
+                                                         out_feature_class=r"in_memory\intersect", join_attributes="ALL",
+                                                         cluster_tolerance="-1 Unknown", output_type="INPUT")[0]
+
+
+
+
+            with arcpy.da.SearchCursor(intersect_polygon, ["MUID", "gridcode", "SHAPE@Area"]) as cursor:
+                for row in cursor:
+                    if row[1] in gridcode_dict and imperviousness_dict[gridcode_dict[row[1]]] > 0:
+                        catchments[row[0]].impervious_area += imperviousness_dict[gridcode_dict[row[1]]] * row[2] / 100.0
+
+            if "OplandData_GDB" in arcpy.Describe(ms_Catchment).file:
+                catchmentcursor = arcpy.da.UpdateCursor(catchments, ["MUID", "BEF_GRAD"],
+                                                        where_clause="MUIDs IN ('%s')" % ("', '".join(MUIDs)))
+            else:
+                catchmentcursor = arcpy.da.UpdateCursor(
+                    os.path.join(os.path.dirname(arcpy.Describe(ms_Catchment).path), "msm_HModA"), ["CatchID", "ImpArea"],
+                    where_clause="CatchID IN ('%s')" % ("', '".join(catchments.keys())))
+
+            for row in catchmentcursor:
+                oldValue = row[1]
+                row[1] = catchments[row[0]].imperviousness
+                if abs(oldValue - row[1]) > 1:
+                    arcpy.AddMessage("Changed catchment %s from %1.0f to %1.0f" % (row[0], oldValue, row[1]))
+                    try:
+                        catchmentcursor.updateRow(row)
+                    except Exception as e:
+                        arcpy.AddError("Can't change %s from %d to %d" % (row[0], oldValue, row[1]))
+                        raise (e)
+
+            del catchmentcursor
+
         return
 
 class AlteredCatchments(object):
@@ -1214,7 +1357,7 @@ class DuplicateCatchments(object):
         msm_CatchCon = os.path.join(MU_database, "msm_CatchCon")
         MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchments, ["MUID"])]
 
-        max_catchcon_MUID = np.max([row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database, 'ms_Catchment'), ["MUID"])])
+        # max_catchcon_MUID = np.max([row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database, 'ms_Catchment'), ["MUID"])])
 
         arcpy.SetProgressorLabel("Creating Workspace")
         MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
