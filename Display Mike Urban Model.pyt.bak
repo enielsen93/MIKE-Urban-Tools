@@ -313,8 +313,14 @@ class DisplayMikeUrban(object):
             printStepAndTime("Adding nodes to map")
             arcpy.SetProgressor("default", "Adding nodes to map")
 
-            layer = addLayer(os.path.join(templates_folder, "msm_Node" + templates_extension if not show_loss_par else "msm_Node with LossPar" + templates_extension),
-                    manholes, group = empty_group_layer, definition_query = sql_query)
+
+            if is_sqlite_database:
+                layer = addLayer(os.path.join(templates_folder,
+                                              "msm_Node" + templates_extension if not show_loss_par else "msm_Node+ with LossPar" + templates_extension),
+                                 manholes, group=empty_group_layer, definition_query=sql_query)
+            else:
+                layer = addLayer(os.path.join(templates_folder, "msm_Node" + templates_extension if not show_loss_par else "msm_Node with LossPar" + templates_extension),
+                        manholes, group = empty_group_layer, definition_query = sql_query)
                 
         
         class Basin:
@@ -387,13 +393,13 @@ class DisplayMikeUrban(object):
                 with arcpy.da.SearchCursor(manholes, ["MUID", "GeometryID"], where_clause = "TypeNo = 2") as cursor:
                     for row in cursor:
                         basins[row[0]] = Basin(row[1])
-
+                printStepAndTime("Calculating volume of basins2")
                 if len(basins)>0:
                     fromnode_fieldname = "fromnode" if not is_sqlite_database else "fromnodeid"
                     tonode_fieldname = "tonode" if not is_sqlite_database else "tonodeid"
                     outlet_feature_classes = {links: ["UpLevel", "DwLevel"], orifices: ["InvertLevel"]*2, weirs: ["CrestLevel"]*2}
                     tonodes = {}
-
+                    printStepAndTime("Calculating volume of basins3")
                     for feature_class, edgelevel_fieldname in zip(outlet_feature_classes.keys(),
                                                                 outlet_feature_classes.values()):
                         if fromnode_fieldname in [field.name.lower() for field in arcpy.ListFields(feature_class)]:
@@ -409,7 +415,7 @@ class DisplayMikeUrban(object):
                                             tonodes[row[0]] = [row[4]]
                                     if row[1]:
                                         basins[row[0]].edges.append(basins[row[0]].Edge(row[3], max(row[1], row[2])))
-
+                    printStepAndTime("Calculating volume of basins4")
                     for feature_class, edgelevel_fieldname in zip(outlet_feature_classes.keys(),
                                                                 outlet_feature_classes.values()):
                         if fromnode_fieldname in [field.name.lower() for field in arcpy.ListFields(feature_class)]:
@@ -422,7 +428,7 @@ class DisplayMikeUrban(object):
                                     basin_MUIDs = [a for a in tonodes if row[0] in tonodes[a]]
                                     for basin_MUID in basin_MUIDs:
                                         basins[basin_MUID].edges.append(basins[basin_MUID].Edge(row[3], max(row[1], row[2])))
-
+                    printStepAndTime("Calculating volume of basins5")
                     with arcpy.da.SearchCursor(os.path.join(MU_database, r"ms_TabD"), ["TabID", "Value1", "Value3"],
                                                 where_clause = "TabID IN ('%s')" % ("', '".join(
                                                     [basin.geometryID for basin in basins.values()]))) as cursor:
@@ -430,7 +436,7 @@ class DisplayMikeUrban(object):
                             basin = [basin for basin in basins.values() if basin.geometryID == row[0]][0]
                             basin.value1.append(row[1])
                             basin.value3.append(row[2])
-
+                    printStepAndTime("Calculating volume of basins6")
                     exportBasins = getAvailableFilename(arcpy.env.scratchGDB + r"\basins", parent = MU_database)
                     arcpy.Select_analysis(manholes, exportBasins, where_clause = "TypeNo = 2")
                     arcpy.management.AddField(exportBasins, "Volume", "FLOAT")
@@ -495,6 +501,7 @@ class DisplayMikeUrban(object):
 
                     printStepAndTime("Adding basins to map")
                     arcpy.SetProgressor("default","Adding basins to map")
+                    printStepAndTime("Calculating volume of basins7")
                     addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Basins.lyr",
                         exportBasins, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE", definition_query = sql_query)
 
@@ -506,7 +513,7 @@ class DisplayMikeUrban(object):
             links_sql_query = sql_query
 
         if "Pipes" in features_to_display:
-            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Link.lyr",
+            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Link.lyr" if not is_sqlite_database else os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE+ Links.lyr",
                     links, group = empty_group_layer, definition_query = links_sql_query)
 
         if "Weirs" in features_to_display:
@@ -519,7 +526,7 @@ class DisplayMikeUrban(object):
             # arcpy.AddMessage(weirs)
             # if len([row[0] for row in arcpy.da.SearchCursor(weirs,["MUID"])])>0:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Orifice.lyr",
-                    weirs, group = empty_group_layer, definition_query = sql_query)
+                    orifices, group = empty_group_layer, definition_query = sql_query)
 
         if "Pumps" in features_to_display:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Pumps.lyr",
