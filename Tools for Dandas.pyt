@@ -98,8 +98,16 @@ class Dandas2MULinks(object):
             datatype="GPCoordinateSystem",
             parameterType="Optional",
             direction="Input")
+
+        only_import_extent = arcpy.Parameter(
+            displayName="Only import elements located within the extent of the dataframe:",
+            name="only_import_extent",
+            category="Additional Settings",
+            datatype="Boolean",
+            parameterType="Optional",
+            direction="Input")
 		
-        params = [dandas_knuder, dandas_ledninger, afloebkodeparameter, afloebkategori, coordinate_system] 
+        params = [dandas_knuder, dandas_ledninger, afloebkodeparameter, afloebkategori, coordinate_system, only_import_extent]
         return params
 
     def isLicensed(self):
@@ -130,6 +138,11 @@ class Dandas2MULinks(object):
         afloebkodeparameter = parameters[2].ValueAsText
         afloebkategori = parameters[3].ValueAsText
         coordinate_system = parameters[4].Value
+        only_import_extent = parameters[5].Value
+
+        mxd = arcpy.mapping.MapDocument("CURRENT")
+        df = arcpy.mapping.ListDataFrames(mxd)[0]
+        extent = df.extent
         
         if afloebkategori is None:
             afloebkategori = []
@@ -175,9 +188,15 @@ class Dandas2MULinks(object):
         for nodei in range(len(nodes)):
             arcpy.SetProgressorPosition(nodei)  
             try:
+
+                if only_import_extent:
+                    x_coordinate, y_coordinate = float(nodes[nodei].find("XKoordinat").text), float(nodes[nodei].find("YKoordinat").text)
+                    if not all((x_coordinate > extent.lowerLeft.X, x_coordinate < extent.upperRight.X, y_coordinate > extent.lowerLeft, y_coordinate < extent.upperRight)):
+                        continue
+
                 msm_Node_Table = msm_Node_Template.copy()   
                 skip = False
-                
+
                 msm_Node_Table["MUID"] = nodes[nodei].attrib['Knudenavn']
                 # arcpy.AddMessage(dir(nodes[nodei]))
                 knudekode = int(nodes[nodei].find("KnudeKode").text) if nodes[nodei].find("KnudeKode") is not None else 0
@@ -435,9 +454,6 @@ class Dandas2MULinks(object):
                         arcpy.AddWarning(traceback.format_exc())
                         pass
             del msm_Link_Cursor
-            
-        mxd = arcpy.mapping.MapDocument("CURRENT")
-        df = arcpy.mapping.ListDataFrames(mxd)[0]
         
         empty_group_mapped = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\Dandas Import.lyr")
         empty_group = arcpy.mapping.AddLayer(df, empty_group_mapped, "TOP")
