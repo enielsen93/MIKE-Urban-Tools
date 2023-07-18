@@ -52,7 +52,7 @@ class Toolbox(object):
         self.alias  = "Display Mike Urban Model"
 
         # List of tool classes associated with this toolbox
-        self.tools = [DisplayMikeUrban] #DimensionAnalysis, DisplayPipeElevation
+        self.tools = [DisplayMikeUrban, CopyMUPTemplate] #DimensionAnalysis, DisplayPipeElevation
 
 class DisplayMikeUrban(object):
     def __init__(self):
@@ -1025,3 +1025,50 @@ class DisplayPipeElevation(object):
         arcpy.RefreshActiveView()
         return
 
+
+class CopyMUPTemplate(object):
+    def __init__(self):
+        self.label = "Copy MUP Template"
+        self.description = "Copy MUP Template"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        # Input Features parameter
+        MU_database = arcpy.Parameter(
+            displayName="Mike Urban database",
+            name="database",
+            datatype="DEFile",
+            parameterType="Required",
+            direction="Input")
+        MU_database.filter.list = ["mdb"]
+
+        parameters = [MU_database]
+
+        return parameters
+
+    def isLicensed(self):  # optional
+        return True
+
+    def updateParameters(self, parameters):  # optional
+        return
+
+    def updateMessages(self, parameters):  # optional
+
+        return
+
+    def execute(self, parameters, messages):
+        MU_database = parameters[0].ValueAsText
+        import shutil
+        shutil.copy2(os.path.dirname(os.path.realpath(__file__)) + "\Data\Template.mup", MU_database.replace(".mdb",".mup"))
+
+        with open(MU_database.replace(".mdb",".mup"), 'r') as fopen:
+            txt = fopen.read()
+
+        txt = txt.replace("Template.mdb", os.path.basename(MU_database))
+
+        with open(MU_database.replace(".mdb", ".mup"), 'w') as fopen:
+            fopen.write(txt)
+
+        return
