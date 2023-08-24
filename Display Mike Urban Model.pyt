@@ -142,16 +142,16 @@ class DisplayMikeUrban(object):
         show_depth = parameters[4].Value
         sql_query = parameters[5].Value
         
-        manholes = MU_database + "\msm_Node"
-        links = MU_database + "\mu_Geometry\msm_Link"
+        msm_Node = MU_database + "\msm_Node"
+        msm_Link = MU_database + "\mu_Geometry\msm_Link"
         # arcpy.AddMessage(MU_database)
-        catchments = MU_database + "\mu_Geometry\ms_Catchment" if not ".sqlite" in MU_database else MU_database + "\msm_Catchment"
-        catchcons = MU_database + "\mu_Geometry\msm_CatchConLink" if not ".sqlite" in MU_database else MU_database + "\msm_CatchCon"
-        weirs = MU_database + "\mu_Geometry\msm_Weir" if not ".sqlite" in MU_database else MU_database + "\msm_Weir"
-        orifices = MU_database + "\msm_Orifice"
-        networkLoad = MU_database + "\msm_BBoundary"
+        ms_Catchment = MU_database + "\mu_Geometry\ms_Catchment" if not ".sqlite" in MU_database else MU_database + "\msm_Catchment"
+        msm_CatchCon = MU_database + "\mu_Geometry\msm_CatchConLink" if not ".sqlite" in MU_database else MU_database + "\msm_CatchCon"
+        msm_Weir = MU_database + "\mu_Geometry\msm_Weir" if not ".sqlite" in MU_database else MU_database + "\msm_Weir"
+        msm_Orifice = MU_database + "\msm_Orifice"
+        msm_BBoundary = MU_database + "\msm_BBoundary"
         msm_Pump = MU_database + "\msm_Pump"
-        boundaryItem = MU_database + "\msm_BItem"
+        msm_BItem = MU_database + "\msm_BItem"
         msm_PasReg = MU_database + "\msm_PasReg"
         ms_TabD = MU_database + "\ms_TabD"
         mxd = arcpyMapDocument("CURRENT")
@@ -317,10 +317,10 @@ class DisplayMikeUrban(object):
             if is_sqlite_database:
                 layer = addLayer(os.path.join(templates_folder,
                                               "msm_Node" + templates_extension if not show_loss_par else "msm_Node+ with LossPar" + templates_extension),
-                                 manholes, group=empty_group_layer, definition_query=sql_query)
+                                 msm_Node, group=empty_group_layer, definition_query=sql_query)
             else:
                 layer = addLayer(os.path.join(templates_folder, "msm_Node" + templates_extension if not show_loss_par else "msm_Node with LossPar" + templates_extension),
-                        manholes, group = empty_group_layer, definition_query = sql_query)
+                        msm_Node, group = empty_group_layer, definition_query = sql_query)
                 
         
         class Basin:
@@ -390,14 +390,14 @@ class DisplayMikeUrban(object):
                 arcpy.SetProgressor("default", "Calculating volume of basins")
                 printStepAndTime("Calculating volume of basins")
                 # Import basins
-                with arcpy.da.SearchCursor(manholes, ["MUID", "GeometryID"], where_clause = "TypeNo = 2") as cursor:
+                with arcpy.da.SearchCursor(msm_Node, ["MUID", "GeometryID"], where_clause = "TypeNo = 2") as cursor:
                     for row in cursor:
                         basins[row[0]] = Basin(row[1])
 
                 if len(basins)>0:
                     fromnode_fieldname = "fromnode" if not is_sqlite_database else "fromnodeid"
                     tonode_fieldname = "tonode" if not is_sqlite_database else "tonodeid"
-                    outlet_feature_classes = {links: ["UpLevel", "DwLevel"], orifices: ["InvertLevel"]*2, weirs: ["CrestLevel"]*2}
+                    outlet_feature_classes = {msm_Link: ["UpLevel", "DwLevel"], msm_Orifice: ["InvertLevel"]*2, msm_Weir: ["CrestLevel"]*2}
                     tonodes = {}
 
                     for feature_class, edgelevel_fieldname in zip(outlet_feature_classes.keys(),
@@ -438,7 +438,7 @@ class DisplayMikeUrban(object):
                             basin.value3.append(row[2])
 
                     exportBasins = getAvailableFilename(arcpy.env.scratchGDB + r"\basins", parent = MU_database)
-                    arcpy.Select_analysis(manholes, exportBasins, where_clause = "TypeNo = 2")
+                    arcpy.Select_analysis(msm_Node, exportBasins, where_clause = "TypeNo = 2")
                     arcpy.management.AddField(exportBasins, "Volume", "FLOAT")
                     arcpy.management.AddField(exportBasins, "MaxArea", "FLOAT")
                     with arcpy.da.UpdateCursor(exportBasins, ["MUID","Volume", "CriticalLevel", "GeometryID", "Description", "GroundLevel", "InvertLevel", "MaxArea"]) as cursor:
@@ -451,6 +451,7 @@ class DisplayMikeUrban(object):
                                 try:
                                     row[1] = basin.max_volume
                                     row[7] = basin.max_area
+
                                     description = ""
                                     if basin.edges:
                                         for edge in basin.edges_sort:
@@ -481,7 +482,7 @@ class DisplayMikeUrban(object):
                                         description += "Maks. (%1.2f): %d m3\n" % (
                                         basin.critical_level, basin.get_volume(basin.critical_level))
                                     else:
-                                        description += "Maks. (%1.2f): %d m3\n" % (row[5], basin.max_volume)
+                                        description += "Maks. (%1.2f): %d m3\n" % (row[5], min(basin.max_volume, basin.get_volume(row[5])))
 
 
 
@@ -513,19 +514,19 @@ class DisplayMikeUrban(object):
 
         if "Pipes" in features_to_display:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Link.lyr" if not is_sqlite_database else os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE+ Links.lyr",
-                    links, group = empty_group_layer, definition_query = links_sql_query)
+                    msm_Link, group = empty_group_layer, definition_query = links_sql_query)
 
         if "Weirs" in features_to_display:
             # arcpy.AddMessage(weirs)
             # if len([row[0] for row in arcpy.da.SearchCursor(weirs,["MUID"])])>0:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Weir.lyr",
-                    weirs, group = empty_group_layer, definition_query = sql_query)
+                    msm_Weir, group = empty_group_layer, definition_query = sql_query)
                     
         if "Orifices" in features_to_display:
             # arcpy.AddMessage(weirs)
             # if len([row[0] for row in arcpy.da.SearchCursor(weirs,["MUID"])])>0:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Orifice.lyr",
-                    orifices, group = empty_group_layer, definition_query = sql_query)
+                    msm_Orifice, group = empty_group_layer, definition_query = sql_query)
 
         if "Pumps" in features_to_display:
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Pumps.lyr",
@@ -548,8 +549,8 @@ class DisplayMikeUrban(object):
 
             network_loads = []
             networkLoadInProject = False
-            fields = ["MUID","ApplyBoundaryNo","ConnectionTypeNo","CatchLoadNo","IndividualConnectionNo" if not is_sqlite_database else "ConnectionTypeNo","NodeID","LinkID","CatchID"]
-            with arcpy.da.SearchCursor(networkLoad, fields, where_clause = "ApplyBoundaryNo = 1 AND GroupNo = 2 AND ConnectionTypeNo = 3") as cursor:
+            fields = ["MUID","ApplyBoundaryNo","ConnectionTypeNo","CatchLoadNo", "IndividualConnectionNo" if not is_sqlite_database else "TypeNo","NodeID","LinkID","CatchID"]
+            with arcpy.da.SearchCursor(msm_BBoundary, fields, where_clause = "ApplyBoundaryNo = 1 AND GroupNo = 2 AND TypeNo IN (9,10)" if is_sqlite_database else "ApplyBoundaryNo = 1 AND GroupNo = 2 AND IndividualConnectionNo = 1") as cursor:
                 for row in cursor:
                     networkLoadInProject = True
                     network_load = NetworkLoad()
@@ -558,10 +559,11 @@ class DisplayMikeUrban(object):
                         setattr(network_load, fields[i], val)
                     network_loads.append(network_load)
 
-            if not is_sqlite_database:
-                fields = ["BoundaryID","VariationNo","ConstantValue", "TSConnection", "TimeseriesName"]
-                with arcpy.da.SearchCursor(boundaryItem, fields,
-                                            where_clause = "BoundaryID IN ('%s')" % "', '".join([network_load.MUID for network_load in network_loads])) as cursor:
+            if True:
+                # arcpy.AddMessage("MUID IN ('%s')" % "', '".join([network_load.MUID for network_load in network_loads]) if is_sqlite_database else "BoundaryID IN ('%s')" % "', '".join([network_load.MUID for network_load in network_loads]))
+                fields = ["MUID" if is_sqlite_database else "BoundaryID","VariationNo","ConstantValue", "TSConnection", "TimeseriesName"]
+                with arcpy.da.SearchCursor(msm_BBoundary if is_sqlite_database else msm_BItem, fields,
+                                            where_clause = "MUID IN ('%s')" % "', '".join([network_load.MUID for network_load in network_loads]) if is_sqlite_database else "BoundaryID IN ('%s')" % "', '".join([network_load.MUID for network_load in network_loads])) as cursor:
                     for row in cursor:
                         network_load = network_loads[[i for i,network_load in enumerate(network_loads) if network_load.MUID == row[0]][0]]
                         for i,val in enumerate(row):
@@ -573,18 +575,17 @@ class DisplayMikeUrban(object):
                             network_load.TSConnection = None
                             network_load.TimeseriesName = None
 
-
                         if network_load.CatchLoadNo:
-                            with arcpy.da.SearchCursor(catchments, ["MUID","SHAPE@XY"], where_clause = "MUID = '%s'" % (network_load.CatchID)) as xycursor:
+                            with arcpy.da.SearchCursor(ms_Catchment, ["MUID","SHAPE@XY"], where_clause = "MUID = '%s'" % (network_load.CatchID)) as xycursor:
                                 for xyrow in xycursor:
                                     network_load.Geometry = xyrow[1]
-                        elif network_load.IndividualConnectionNo == 1:
-                            with arcpy.da.SearchCursor(manholes, ["MUID","SHAPE@XY", "NetTypeNo"], where_clause = "MUID = '%s'" % (network_load.NodeID)) as xycursor:
+                        elif (is_sqlite_database and network_load.TypeNo == 9) or (not is_sqlite_database and network_load.IndividualConnectionNo == 1):
+                            with arcpy.da.SearchCursor(msm_Node, ["MUID","SHAPE@XY", "NetTypeNo"], where_clause = "MUID = '%s'" % (network_load.NodeID)) as xycursor:
                                 for xyrow in xycursor:
                                     network_load.Geometry = xyrow[1]
                                     network_load.net_type_no = xyrow[2]
-                        elif network_load.IndividualConnectionNo == 2:
-                            with arcpy.da.SearchCursor(links, ["MUID","SHAPE@XY", "NetTypeNo"], where_clause = "MUID = '%s'" % (network_load.LinkID)) as xycursor:
+                        elif (is_sqlite_database and network_load.TypeNo == 10) or (not is_sqlite_database and network_load.IndividualConnectionNo == 2):
+                            with arcpy.da.SearchCursor(msm_Link, ["MUID","SHAPE@XY", "NetTypeNo"], where_clause = "MUID = '%s'" % (network_load.LinkID)) as xycursor:
                                 for xyrow in xycursor:
                                     network_load.Geometry = xyrow[1]
                                     network_load.net_type_no = xyrow[2]
@@ -607,76 +608,83 @@ class DisplayMikeUrban(object):
                 addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Network Load.lyr",
                         networkShape, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE", definition_query = sql_query)
 
-            if not is_sqlite_database:
-                printStepAndTime("Adding passive regulations to map")
-                # Adding passive regulations to project
-                arcpy.SetProgressor("default","Adding passive regulations to map")
-                class Regulation:
-                    q_max = 0
-                    linkID = None
-                    tabID = None
-                    net_type_no = None
-                    shape = None
+            # if not is_sqlite_database:
+            printStepAndTime("Adding passive regulations to map")
+            # Adding passive regulations to project
+            arcpy.SetProgressor("default","Adding passive regulations to map")
+            class Regulation:
+                q_max = 0
+                linkID = None
+                tabID = None
+                net_type_no = None
+                shape = None
 
-                passive_regulations = {}
+            passive_regulations = {}
+            if is_sqlite_database:
+                with arcpy.da.SearchCursor(msm_Link, ["MUID", "FunctionID"], where_clause="FLowRegNo = 1") as cursor:
+                    for row in cursor:
+                        passive_regulations[row[0]] = Regulation()
+                        passive_regulations[row[0]].tabID = row[1]
+                        passive_regulations[row[0]].linkID = row[0]
+            else:
                 with arcpy.da.SearchCursor(msm_PasReg, ["LinkID", "FunctionID"], where_clause = "TypeNo = 1") as cursor:
                     for row in cursor:
                         passive_regulations[row[0]] = Regulation()
                         passive_regulations[row[0]].tabID = row[1]
                         passive_regulations[row[0]].linkID = row[0]
 
-                regulationsShape = getAvailableFilename(arcpy.env.scratchGDB + r"\passive_regulations",
-                                                        parent=MU_database)
-                if len(passive_regulations)>0:
-                    with arcpy.da.SearchCursor(ms_TabD, ["TabID", "Sqn", "Value2"], where_clause = "TabID IN ('%s')" % ("', '".join([regulation.tabID for regulation in passive_regulations.values()]))) as cursor:
-                        for row in cursor:
-                            linkIDs = [regulation.linkID for regulation in passive_regulations.values() if regulation.tabID == row[0]]
-                            for linkID in linkIDs:
-                                passive_regulations[linkID].q_max = row[2] if passive_regulations[linkID].q_max < row[2] else passive_regulations[linkID].q_max
-
-                printStepAndTime("Adding pump regulations to map")
-                # Adding passive regulations to project
-                arcpy.SetProgressor("default", "Adding pump regulations to map")
-
-                pumps = {}
-                with arcpy.da.SearchCursor(msm_Pump, ["MUID", "QMaxSetID", "NetTypeNo", "SHAPE@"], where_clause = "CapTypeNo = 1") as cursor:
+            regulationsShape = getAvailableFilename(arcpy.env.scratchGDB + r"\passive_regulations",
+                                                    parent=MU_database)
+            if len(passive_regulations)>0:
+                with arcpy.da.SearchCursor(ms_TabD, ["TabID", "Sqn", "Value2"], where_clause = "TabID IN ('%s')" % ("', '".join([regulation.tabID for regulation in passive_regulations.values()]))) as cursor:
                     for row in cursor:
-                        pumps[row[0]] = Regulation()
-                        pumps[row[0]].linkID = row[0]
-                        pumps[row[0]].tabID = row[1]
-                        pumps[row[0]].shape = row[3]
-                        pumps[row[0]].net_type_no = row[2]
+                        linkIDs = [regulation.linkID for regulation in passive_regulations.values() if regulation.tabID == row[0]]
+                        for linkID in linkIDs:
+                            passive_regulations[linkID].q_max = row[2] if passive_regulations[linkID].q_max < row[2] else passive_regulations[linkID].q_max
 
-                with arcpy.da.SearchCursor(ms_TabD, ["TabID", "Sqn", "Value2"], where_clause="TabID IN ('%s')" % (
-                "', '".join([regulation.tabID for regulation in pumps.values()]))) as cursor:
-                    for row in cursor:
-                        regulations = [regulation for regulation in pumps.values() if regulation.tabID == row[0]]
-                        for regulation in regulations:
-                            regulation.q_max = row[2] if regulation.q_max < row[2] else regulation.q_max
+            printStepAndTime("Adding pump regulations to map")
+            # Adding passive regulations to project
+            arcpy.SetProgressor("default", "Adding pump regulations to map")
 
-                arcpy.CreateFeatureclass_management(os.path.dirname(regulationsShape), os.path.basename(regulationsShape),
-                                                    "POLYLINE")
-                arcpy.AddField_management(regulationsShape, "LinkID", "TEXT")
-                arcpy.AddField_management(regulationsShape, "NetTypeNo", "SHORT")
-                arcpy.AddField_management(regulationsShape, "FunctionID", "TEXT")
-                arcpy.AddField_management(regulationsShape, "QMax", "FLOAT")
-                with arcpy.da.InsertCursor(regulationsShape,
-                                           ["SHAPE@", "LinkID", "FunctionID", "QMax", "NetTypeNo"]) as regulation_cursor:
-                    with arcpy.da.SearchCursor(links, ["SHAPE@", "MUID", "NetTypeNo"], where_clause="MUID IN ('%s')" % (
-                    "', '".join(passive_regulations.keys()))) as link_cursor:
-                        for row in link_cursor:
-                            passive_regulations[row[1]].net_type_no = row[2]
-                            regulation_cursor.insertRow(
-                                [row[0], row[1], passive_regulations[row[1]].tabID, passive_regulations[row[1]].q_max,
-                                 passive_regulations[row[1]].net_type_no])
+            pumps = {}
+            with arcpy.da.SearchCursor(msm_Pump, ["MUID", "QMaxSetID", "NetTypeNo", "SHAPE@"], where_clause = "CapTypeNo = 1") as cursor:
+                for row in cursor:
+                    pumps[row[0]] = Regulation()
+                    pumps[row[0]].linkID = row[0]
+                    pumps[row[0]].tabID = row[1]
+                    pumps[row[0]].shape = row[3]
+                    pumps[row[0]].net_type_no = row[2]
 
-                    for regulation in pumps.values():
-                        row = [regulation.shape, regulation.linkID, regulation.tabID, regulation.q_max, regulation.net_type_no]
-                        regulation_cursor.insertRow(row)
+            with arcpy.da.SearchCursor(ms_TabD, ["TabID", "Sqn", "Value2"], where_clause="TabID IN ('%s')" % (
+            "', '".join([regulation.tabID for regulation in pumps.values()]))) as cursor:
+                for row in cursor:
+                    regulations = [regulation for regulation in pumps.values() if regulation.tabID == row[0]]
+                    for regulation in regulations:
+                        regulation.q_max = row[2] if regulation.q_max < row[2] else regulation.q_max
 
-                addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Passive Regulations.lyr",
-                         regulationsShape, group=empty_group_layer, workspace_type="FILEGDB_WORKSPACE",
-                         definition_query=sql_query)
+            arcpy.CreateFeatureclass_management(os.path.dirname(regulationsShape), os.path.basename(regulationsShape),
+                                                "POLYLINE")
+            arcpy.AddField_management(regulationsShape, "LinkID", "TEXT")
+            arcpy.AddField_management(regulationsShape, "NetTypeNo", "SHORT")
+            arcpy.AddField_management(regulationsShape, "FunctionID", "TEXT")
+            arcpy.AddField_management(regulationsShape, "QMax", "FLOAT")
+            with arcpy.da.InsertCursor(regulationsShape,
+                                       ["SHAPE@", "LinkID", "FunctionID", "QMax", "NetTypeNo"]) as regulation_cursor:
+                with arcpy.da.SearchCursor(msm_Link, ["SHAPE@", "MUID", "NetTypeNo"], where_clause="MUID IN ('%s')" % (
+                "', '".join(passive_regulations.keys()))) as link_cursor:
+                    for row in link_cursor:
+                        passive_regulations[row[1]].net_type_no = row[2]
+                        regulation_cursor.insertRow(
+                            [row[0], row[1], passive_regulations[row[1]].tabID, passive_regulations[row[1]].q_max,
+                             passive_regulations[row[1]].net_type_no])
+
+                for regulation in pumps.values():
+                    row = [regulation.shape, regulation.linkID, regulation.tabID, regulation.q_max, regulation.net_type_no]
+                    regulation_cursor.insertRow(row)
+
+            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Passive Regulations.lyr",
+                     regulationsShape, group=empty_group_layer, workspace_type="FILEGDB_WORKSPACE",
+                     definition_query=sql_query)
 
         if "Boundary Water Levels" in features_to_display:
             printStepAndTime("Adding outlets to map")
@@ -699,13 +707,13 @@ class DisplayMikeUrban(object):
                     return t
 
             outlets = {}
-            with arcpy.da.SearchCursor(networkLoad, ["MUID", "NodeID"], where_clause = "ApplyBoundaryNo = 1 AND TypeNo = 12") as cursor:
+            with arcpy.da.SearchCursor(msm_BBoundary, ["MUID", "NodeID"], where_clause = "ApplyBoundaryNo = 1 AND TypeNo = 12") as cursor:
                 for row in cursor:
                     outlets[row[1]] = Outlet(row[1])
                     outlets[row[1]].boundary_MUID = row[0]
 
             if not is_sqlite_database:
-                with arcpy.da.SearchCursor(boundaryItem, ["MUID", "BoundaryID", "ConstantValue", "VariationNo", "TSConnection", "TimeseriesName"],
+                with arcpy.da.SearchCursor(msm_BItem, ["MUID", "BoundaryID", "ConstantValue", "VariationNo", "TSConnection", "TimeseriesName"],
                                             where_clause = "BoundaryType = 12 AND TypeNo = 1") as cursor:
                     for row in cursor:
                         nodeIDs = [outlet.nodeID for outlet in outlets.values() if outlet.boundary_MUID == row[1]]
@@ -717,13 +725,13 @@ class DisplayMikeUrban(object):
                                 outlets[nodeIDs[0]].TSConnection = row[4]
                                 outlets[nodeIDs[0]].TimeseriesName = row[5]
             else:
-                with arcpy.da.SearchCursor(networkLoad, ["NodeID", "ConstantValue"],
+                with arcpy.da.SearchCursor(msm_BBoundary, ["NodeID", "ConstantValue"],
                                            where_clause="ApplyBoundaryNo = 1 AND TypeNo = 12 AND ConnectionTypeNo = 3") as cursor:
                     for row in cursor:
                         outlets[row[0]].boundary_water_level = row[1]
 
 
-            with arcpy.da.SearchCursor(manholes, ["SHAPE@", "MUID", "NetTypeNo"], where_clause = "TypeNo = 3 AND MUID IN ('%s')" % ("', '".join(outlets.keys()))) as cursor:
+            with arcpy.da.SearchCursor(msm_Node, ["SHAPE@", "MUID", "NetTypeNo"], where_clause = "TypeNo = 3 AND MUID IN ('%s')" % ("', '".join(outlets.keys()))) as cursor:
                 for row in cursor:
                     outlets[row[1]].geometry = row[0]
                     outlets[row[1]].net_type_no = row[2]
@@ -751,13 +759,13 @@ class DisplayMikeUrban(object):
             printStepAndTime("Adding catchment connections to map")
             arcpy.SetProgressor("default","Adding catchment connections to map")
             addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchment Connections.lyr",
-                        catchcons, group = empty_group_layer)
+                        msm_CatchCon, group = empty_group_layer)
 
         if "Catchments" in features_to_display:
             printStepAndTime("Adding catchments to map")
             if join_catchments:
                 arcpy.SetProgressor("default", "Joining ms_Catchment and msm_HModA and adding catchments to map")
-                ms_Catchment = arcpy.CopyFeatures_management(catchments, getAvailableFilename(arcpy.env.scratchGDB + "\ms_CatchmentImp", parent = MU_database)).getOutput(0)
+                ms_Catchment = arcpy.CopyFeatures_management(ms_Catchment, getAvailableFilename(arcpy.env.scratchGDB + "\ms_CatchmentImp", parent = MU_database)).getOutput(0)
                 # arcpy.JoinField_management(in_data=ms_Catchment, in_field="MUID", join_table=MU_database + r"\msm_HModA", join_field="CatchID", fields="ImpArea")
 
                 arcpy.management.AddField(ms_Catchment, "ImpArea", "FLOAT")
@@ -796,7 +804,7 @@ class DisplayMikeUrban(object):
                     cursor = arcpy.da.SearchCursor(MU_database + r"\msm_HModA",
                                            ["CatchID", "ImpArea", "ParAID", "LocalNo", "RFactor", "ConcTime", "ILoss"])
                 else:
-                    cursor = arcpy.da.SearchCursor(catchments,
+                    cursor = arcpy.da.SearchCursor(ms_Catchment,
                                                    ["muid", "modelaimparea", "modelaparaid", "modelalocalno", "modelarfactor", "modelaconctime",
                                                     "modelailoss"])
 
@@ -824,7 +832,7 @@ class DisplayMikeUrban(object):
 
                 del cursor
 
-                nodes_net_type_no = {row[0]:row[1] for row in arcpy.da.SearchCursor(manholes, ["MUID", "NetTypeNo"])}
+                nodes_net_type_no = {row[0]:row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "NetTypeNo"])}
 
                 with arcpy.da.SearchCursor(os.path.join(MU_database, "msm_CatchCon"), ["CatchID", "NodeID"]) as cursor:
                     for row in cursor:
@@ -865,7 +873,7 @@ class DisplayMikeUrban(object):
                 # arcpy.AddMessage((os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments WO Imp Area.lyr",
                         # catchments, empty_group_layer))
                 addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments WO Imp Area.lyr",
-                        catchments, group = empty_group_layer)
+                        ms_Catchment, group = empty_group_layer)
         
         old_workspace = arcpy.env.workspace
         if "Annotations" in features_to_display and not is_sqlite_database:
@@ -879,8 +887,7 @@ class DisplayMikeUrban(object):
                 except Exception as e:
                     arcpy.AddWarning(e)
             arcpy.env.workspace = old_workspace
-            
-            
+
         #printStepAndTime("Refreshing Map")
         #arcpy.SetProgressor("default","Refreshing map")
         #arcpy.RefreshTOC()
@@ -920,20 +927,20 @@ class DimensionAnalysis(object):
 
     def execute(self, parameters, messages):        
         MU_database = parameters[0].ValueAsText
-        manholes = MU_database + "\mu_Geometry\msm_Node"
-        links = MU_database + "\mu_Geometry\msm_Link"
-        catchcons = MU_database + "\mu_Geometry\msm_CatchConLink"
+        msm_Node = MU_database + "\mu_Geometry\msm_Node"
+        msm_Link = MU_database + "\mu_Geometry\msm_Link"
+        msm_CatchCon = MU_database + "\mu_Geometry\msm_CatchConLink"
         mxd = arcpyMapDocument("CURRENT")
         df = arcpymapping.ListDataFrames(mxd)[0]
         arcpy.env.addOutputsToMap = False
-        addLayer = arcpymapping.Layer(manholes)
+        addLayer = arcpymapping.Layer(msm_Node)
         arcpymapping.AddLayer(df, addLayer)
         updatelayer = arcpymapping.ListLayers(mxd, "msm_Node", df)[0]
         sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Manholes.lyr")
         arcpymapping.UpdateLayer(df,updatelayer,sourcelayer,False)
         updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'ACCESS_WORKSPACE', unicode(addLayer.datasetName))
         
-        addLayer = arcpymapping.Layer(links)   
+        addLayer = arcpymapping.Layer(msm_Link)
         arcpymapping.AddLayer(df, addLayer)
         updatelayer = arcpymapping.ListLayers(mxd, "msm_Link", df)[0]
         sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links W QFull.lyr")
@@ -964,7 +971,7 @@ class DimensionAnalysis(object):
             # lblClass.expression = '"%1.2f bef. ha (%1.0f%s)" % (float( [ms_Catchment.SHAPE_Area])/1e4*float([msm_HModA.ImpArea])/1e2,round(float([msm_HModA.ImpArea])/5,0)*5,"%")'
 
         
-        addLayer = arcpymapping.Layer(catchcons)
+        addLayer = arcpymapping.Layer(msm_CatchCon)
         arcpymapping.AddLayer(df, addLayer)
         updatelayer = arcpymapping.ListLayers(mxd, "msm_CatchConLink", df)[0]
         sourcelayer = arcpymapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchment Connections.lyr")
@@ -1009,7 +1016,7 @@ class DisplayPipeElevation(object):
 
     def execute(self, parameters, messages):
         MU_database = parameters[0].ValueAsText
-        links = MU_database + "\mu_Geometry\msm_Link"
+        msm_Link = MU_database + "\mu_Geometry\msm_Link"
         mxd = arcpyMapDocument("CURRENT")
         df = arcpymapping.ListDataFrames(mxd)[0]
         arcpy.env.addOutputsToMap = False
@@ -1066,9 +1073,13 @@ class CopyMUPTemplate(object):
         with open(MU_database.replace(".mdb",".mup"), 'r') as fopen:
             txt = fopen.read()
 
-        txt = txt.replace("Template.mdb", os.path.basename(MU_database))
+        pattern = r"(?<=<[aA]ctive[dD]atabase>)[^<+]+"
+
+        txt = re.sub(pattern, os.path.basename(MU_database), txt)
+
 
         with open(MU_database.replace(".mdb", ".mup"), 'w') as fopen:
             fopen.write(txt)
+
 
         return
