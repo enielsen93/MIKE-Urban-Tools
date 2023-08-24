@@ -73,6 +73,8 @@ class GroupComboBoxClass1(object):
         self.ms_Catchment = None
         self.layers_in_group = []
         self.map_only = ""
+        self.points_muid = None
+        self.points_xy = None
 
     def onSelChange(self, selection):
         self.selected_group = selection
@@ -122,6 +124,15 @@ class GroupComboBoxClass1(object):
             print("Assuming it's not an MIKE Urban database as %s does not exist" % (pump_test))
             self.graph = mikegraph.Graph(nodes_and_links = [self.msm_Node.dataSource, self.msm_Link.dataSource])
         self.graph.map_network()
+
+        self.points_muid = []
+        self.points_xy = np.zeros((int(arcpy.management.GetCount(self.msm_Node.dataSource.replace("%",""))[0]),2))
+        with arcpy.da.SearchCursor(self.msm_Node.dataSource.replace("%",""),
+                                   ["MUID", "SHAPE@"]) as cursor:
+            for i, row in enumerate(cursor):
+                self.points_xy[i, :] = [row[1].firstPoint.X, row[1].firstPoint.Y]
+                self.points_muid.append(row[0])
+
         pass
     def onEditChange(self, text):
         pass
@@ -182,21 +193,15 @@ class TraceUpstreamToolClass16(object):
     def onMouseDown(self, x, y, button, shift):
         pass
     def onMouseDownMap(self, x, y, button, shift):
-        points_xy = np.zeros((int(arcpy.management.GetCount(os.path.join(group_layer.msm_Node.workspacePath, "msm_Node"))[0]),2))
-        points_muid = []
-
-        with arcpy.da.SearchCursor(os.path.join(group_layer.msm_Node.workspacePath, "msm_Node"), ["MUID", "SHAPE@"]) as cursor:
-            for i,row in enumerate(cursor):
-                points_xy[i,:] = [row[1].firstPoint.X, row[1].firstPoint.Y]
-                points_muid.append(row[0])
 
         def findClosestNode(coord):
-            distances = np.sum(np.abs(points_xy-[coord[0], coord[1]]),axis=1)
+            distances = np.sum(np.abs(group_layer.points_xy-[coord[0], coord[1]]),axis=1)
             index_closest = np.argmin(distances)
-            muid = points_muid[index_closest]
+            muid = group_layer.points_muid[index_closest]
             return muid
 
         target = findClosestNode([x,y])
+        print("Point Click [%1.2f, %1.2f]" % (x,y))
         print("Tracing upstream from node %s" % (target))
         
         upstream_nodes = group_layer.graph.find_upstream_nodes([target])[0]
@@ -205,6 +210,7 @@ class TraceUpstreamToolClass16(object):
         print("MUID IN ('%s')" % ("', '".join(upstream_nodes)))
         if group_layer.msm_Node and group_layer.msm_Node.visible:
             arcpy.SelectLayerByAttribute_management(group_layer.msm_Node.longName, "ADD_TO_SELECTION", "MUID IN ('%s')" % ("', '".join(upstream_nodes)))
+            print((group_layer.msm_Node.longName, "ADD_TO_SELECTION", "MUID IN ('%s')" % ("', '".join(upstream_nodes))))
 
         if group_layer.msm_Link and group_layer.msm_Link.visible:
             links_MUID = [link.MUID for link in group_layer.graph.network.links.values() if
