@@ -514,7 +514,8 @@ class CatchmentProcessingScalgo(object):
 
         # ms_Catchment_copy = arcpy.management.MinimumBoundingGeometry(ms_Catchment, r"C:\Papirkurv\ms_Catchment2", geometry_type = "RECTANGLE_BY_AREA", group_option = "ALL")[0]
         # ms_Catchment_copy = arcpy.management.CopyFeatures(ms_Catchment, r"in_memory\ms_Catchment")[0]
-
+        arcpy.SetProgressor("default", "Answer user promt (may be behind window)")
+        arcpy.AddMessage("Answer user promt (may be behind window)")
         userquery = pythonaddins.MessageBox(
             "Assign imperviousness to %s catchments?" % (len(catchments)),
             "Confirm Assignment", 4)
