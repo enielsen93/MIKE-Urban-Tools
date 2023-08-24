@@ -96,7 +96,7 @@ class Toolbox(object):
         self.alias  = "Pipe Dimension Tool"
         self.canRunInBackground = True
         # List of tool classes associated with this toolbox
-        self.tools = [PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope, CopyDiameter, CalculateSlopeOfPipe, ResetUpLevelDwlevel, SetDischargeRegulation, PipeDimensionToolResultFile]
+        self.tools = [PipeDimensionToolTAPro, upgradeDimensions, downgradeDimensions, setOutletLoss, reverseChange, InterpolateInvertLevels, GetMinimumSlope, CopyDiameter, CalculateSlopeOfPipe, ResetUpLevelDwlevel, SetDischargeRegulation, PipeDimensionToolResultFile, AnalyzeCatchmentArea]
 
 class PipeDimensionToolTAPro(object):
     def __init__(self):
@@ -785,11 +785,17 @@ class PipeDimensionToolResultFile(object):
 
     def updateParameters(self, parameters):  # optional
         pipe_layer = parameters[0].ValueAsText
+        fields = [f.name for f in arcpy.Describe(pipe_layer).fields]
         if pipe_layer:
             parameters[1].filter.list = [f.name for f in arcpy.Describe(pipe_layer).fields]
+        if "diameter" in [f.lower() for f in fields]:
+            parameters[1].Value = "Diameter"
+
         result_layer = parameters[2].ValueAsText
         if result_layer:
             parameters[3].filter.list = [f.name for f in arcpy.Describe(result_layer).fields]
+            if "maxq" in [f.name.lower() for f in arcpy.Describe(result_layer).fields]:
+                parameters[3].Value = "MaxQ"
         return
 
     def updateMessages(self, parameters):  # optional
@@ -899,8 +905,8 @@ class PipeDimensionToolResultFile(object):
                             D = [diameter for diameter in diameters_plastic if diameter < 450] + [
                                 diameter for diameter in diameters_concrete if diameter > 450]
                         else:
-                            D = diameters_plastic if not "concrete" in row[1].lower() and not "beton" in row[
-                                1].lower() else diameters_concrete
+                            D = diameters_plastic if not "concrete" in row[2].lower() and not "beton" in row[
+                                2].lower() else diameters_concrete
                         slope = slopeOverwrite if slopeOverwrite else row[0] * 1e-2
                         # if writeDischargeInstead:
                         #     diameter = # ins_row = (row[4], row[3], peak_discharge[msm_Link_Network.links[row[3]].fromnode], row[2], row[0], row[5], row[6])
@@ -1315,6 +1321,7 @@ class CopyDiameter(object):
         
         field_for_where_clause = "objectid" if not is_sqlite else "muid"
         check_other_layer = True
+        arcpy.AddMessage("Confirm Query - Might be hidden behind window!")
         try:
             if arcpy.Describe(reference_feature_layer).fidSet:
                 count = int(arcpy.GetCount_management(reference_feature_layer).getOutput(0))
@@ -1394,7 +1401,7 @@ class CopyDiameter(object):
         # arcpy.AddMessage(reference_where_clause)
 
         if is_sqlite:
-            arcpy.AddMessage(MU_database)
+            # arcpy.AddMessage(MU_database)
             with sqlite3.connect(
                         MU_database) as connection:
                 update_cursor = connection.cursor()
@@ -1449,7 +1456,7 @@ class CopyDiameter(object):
                             elif field == "SHAPE":
                                 shape = deepcopy(row[field_i])
                                 row[field_i] = shape
-                        arcpy.AddMessage(row)
+                        # arcpy.AddMessage(row)
                         cursor.updateRow(row)
 
 
@@ -2090,7 +2097,8 @@ class CalculateSlopeOfPipe(object):
                     length = network.links[row[0]].length
                     slope = (uplevel-dwlevel)/length*1e2
                     row[1] = slope
-                    #arcpy.AddMessage((uplevel, dwlevel, length, slope))
+                    # arcpy.AddMessage(row)
+                    # arcpy.AddMessage((uplevel, dwlevel, length, slope))
                     cursor.updateRow(row)
                 except Exception as e:
                     arcpy.AddError(traceback.format_exc())
@@ -2331,4 +2339,144 @@ class IncreaseBasinSize(object):
         size_at_depth = parameters[2].Value
         
         
+        return
+
+
+class AnalyzeCatchmentArea(object):
+    def __init__(self):
+        self.label = "Analyze Catchment Area to Link"
+        self.description = "Analyze Catchment Area to Link"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        link_layer = arcpy.Parameter(
+            displayName="Link Layer",
+            name="link_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+
+        sql_query_catchments = arcpy.Parameter(
+            displayName="Set as Definition Query for Catchments",
+            name="sql_query_catchments",
+            datatype="GPString",
+            category="Additional Settings",
+            parameterType="optional",
+            direction="Input")
+
+        parameters = [link_layer, sql_query_catchments]
+        return parameters
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):
+        return
+
+    def updateMessages(self, parameters):  # optional
+        return
+
+    def execute(self, parameters, messages):
+        link_layer = parameters[0].Value
+        sql_query_catchments = parameters[1].Value
+
+        MU_database = os.path.dirname(arcpy.Describe(link_layer).catalogPath).replace("\mu_Geometry", "")
+        graph = mikegraph.Graph(MU_database, ignore_regulations = True)
+
+        graph.map_network()
+        graph._read_catchments(where_clause=sql_query_catchments)
+
+        selected_pipes = [row[0] for row in arcpy.da.SearchCursor(link_layer, ["muid"])]
+
+        total_area = {}
+        impervious_area = {}
+        reduced_area = {}
+
+        target_manholes = [graph.network.links[link].fromnode for link in selected_pipes]
+        for manhole in target_manholes:
+            upstream_nodes = graph.find_upstream_nodes(manhole)
+            upstream_catchments = graph.find_connected_catchments(upstream_nodes[0])
+            total_area[manhole] = np.sum([catchment.area for catchment in upstream_catchments if catchment.area])/1e4
+            impervious_area[manhole] = np.sum([catchment.impervious_area for catchment in upstream_catchments if catchment.area])/1e4
+            reduced_area[manhole] = np.sum([catchment.reduced_area for catchment in upstream_catchments if catchment.area])/1e4
+
+        MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
+        if not os.path.exists(MIKE_folder):
+            os.mkdir(MIKE_folder)
+
+        MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
+        no_dir = True
+        dir_ext = 0
+        while no_dir:
+            try:
+                if arcpy.Exists(MIKE_gdb):
+                    os.rmdir(MIKE_gdb)
+                os.mkdir(MIKE_gdb)
+                no_dir = False
+            except Exception as e:
+                dir_ext += 1
+                MIKE_gdb = os.path.join(MIKE_folder,
+                                        "%s_%d" % (os.path.splitext(os.path.basename(MU_database))[0], dir_ext))
+        arcpy.env.scratchWorkspace = MIKE_gdb
+
+        result_layer = getAvailableFilename(arcpy.env.scratchGDB + "\Pipe_Area", parent=MU_database)
+        arcpy.CreateFeatureclass_management(arcpy.env.scratchGDB, os.path.basename(result_layer), "POLYLINE")
+        fields = ["muid", "diameter", "materialid", "slope", "nettypeno", "enabled", "Area", "ImpArea", "RedArea"]
+
+        def addField(shapefile, field_name, datatype):
+            i = 1
+            while field_name in [f.name for f in arcpy.Describe(shapefile).fields]:
+                field_name = "%s_%d" % (field_name, i)
+            arcpy.AddField_management(shapefile, field_name, datatype)
+            return field_name
+
+        addField(result_layer, "muid", "TEXT")
+        addField(result_layer, "diameter", "FLOAT")
+        addField(result_layer, "materialid", "TEXT")
+        addField(result_layer, "slope", "FLOAT")
+        addField(result_layer, "nettypeno", "SHORT")
+        addField(result_layer, "enabled", "SHORT")
+        addField(result_layer, "Area", "FLOAT")
+        addField(result_layer, "ImpArea", "FLOAT")
+        addField(result_layer, "RedArea", "FLOAT")
+
+        is_sqlite = True if ".sqlite" in MU_database else False
+        with arcpy.da.InsertCursor(result_layer, ["SHAPE@"] + fields) as ins_cursor:
+            with arcpy.da.SearchCursor(link_layer,
+                                       ["Slope" if is_sqlite else "Slope_C", "Diameter", "MaterialID", "MUID",
+                                        "SHAPE@", "NetTypeNo",
+                                        "enabled"],
+                                       where_clause="MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
+                for row_i, row in enumerate(cursor):
+                    # diameter_old = row[4]
+                    slope = row[0] * 1e-2 if row[0] else 0
+                    # if writeDischargeInstead:
+                    #     diameter = # ins_row = (row[4], row[3], peak_discharge[msm_Link_Network.links[row[3]].fromnode], row[2], row[0], row[5], row[6])
+                    #     ins_cursor.insertRow(ins_row)
+                    diameter = row[1]
+                    fromnode, tonode = graph.network.links[row[3]].fromnode, graph.network.links[row[3]].tonode
+                    material = row[2]
+                    ins_row = (row[4], row[3], diameter, material, row[0], row[5], row[6],
+                               total_area[fromnode],
+                               impervious_area[fromnode],
+                               reduced_area[fromnode])
+                    ins_cursor.insertRow(ins_row)
+
+        def addLayer(layer_source, source, group=None, workspace_type="ACCESS_WORKSPACE"):
+            layer = apmapping.Layer(layer_source)
+            if group:
+                apmapping.AddLayerToGroup(df, group, layer, "BOTTOM")
+            else:
+                apmapping.AddLayer(df, layer, "TOP")
+            updatelayer = apmapping.ListLayers(mxd, layer.name, df)[0]
+            updatelayer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))), workspace_type,
+                                          unicode(os.path.basename(source)))
+
+        mxd = arcpy.mapping.MapDocument("CURRENT")
+        df = arcpy.mapping.ListDataFrames(mxd)[0]
+
+        addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Links Dimensioned.lyr", result_layer,
+                 workspace_type="FILEGDB_WORKSPACE")
         return
