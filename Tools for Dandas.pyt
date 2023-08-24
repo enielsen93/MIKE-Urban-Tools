@@ -106,8 +106,16 @@ class Dandas2MULinks(object):
             datatype="Boolean",
             parameterType="Optional",
             direction="Input")
+
+        import_catchments = arcpy.Parameter(
+            displayName="Import catchments:",
+            name="import_catchments",
+            category="Additional Settings",
+            datatype="Boolean",
+            parameterType="Optional",
+            direction="Input")
 		
-        params = [dandas_knuder, dandas_ledninger, afloebkodeparameter, afloebkategori, coordinate_system, only_import_extent]
+        params = [dandas_knuder, dandas_ledninger, afloebkodeparameter, afloebkategori, coordinate_system, only_import_extent, import_catchments]
         return params
 
     def isLicensed(self):
@@ -118,6 +126,12 @@ class Dandas2MULinks(object):
         #  or height of the extent of the input features.  Do not set if there is no 
         #  input dataset yet, or the user has set a specific distance (Altered is true).
         #
+        if parameters[0].ValueAsText and not parameters[1].ValueAsText:
+            if re.search(r"(?<=.)knude(?=.)", os.path.basename(parameters[0].ValueAsText), flags=re.IGNORECASE):
+                ledninger_filename = re.sub(r"(?<=.)knude(?=.)", "Ledning", os.path.basename(parameters[0].ValueAsText), flags=re.IGNORECASE)
+                ledninger_filepath = os.path.join(os.path.dirname(parameters[0].ValueAsText), ledninger_filename)
+                if os.path.exists(ledninger_filepath):
+                    parameters[1].Value = ledninger_filepath
         return
 
     def updateMessages(self, parameters):
@@ -139,11 +153,29 @@ class Dandas2MULinks(object):
         afloebkategori = parameters[3].ValueAsText
         coordinate_system = parameters[4].Value
         only_import_extent = parameters[5].Value
+        import_catchments = parameters[6].Value
 
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
         extent = df.extent
-        
+
+        MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
+        if not os.path.exists(MIKE_folder):
+            os.mkdir(MIKE_folder)
+        MIKE_gdb = os.path.join(MIKE_folder, "DDS_Import")
+        no_dir = True
+        dir_ext = 0
+        while no_dir:
+            try:
+                if arcpy.Exists(MIKE_gdb):
+                    os.rmdir(MIKE_gdb)
+                os.mkdir(MIKE_gdb)
+                no_dir = False
+            except Exception as e:
+                dir_ext += 1
+                MIKE_gdb = os.path.join(MIKE_folder, "%s_%d" % ("DDS_Import", dir_ext))
+        arcpy.env.scratchWorkspace = MIKE_gdb
+
         if afloebkategori is None:
             afloebkategori = []
         statusUpdate("Reading %s" % (os.path.basename(dandas_knuder)),tic)
@@ -188,10 +220,10 @@ class Dandas2MULinks(object):
         for nodei in range(len(nodes)):
             arcpy.SetProgressorPosition(nodei)  
             try:
-
                 if only_import_extent:
                     x_coordinate, y_coordinate = float(nodes[nodei].find("XKoordinat").text), float(nodes[nodei].find("YKoordinat").text)
-                    if not all((x_coordinate > extent.lowerLeft.X, x_coordinate < extent.upperRight.X, y_coordinate > extent.lowerLeft, y_coordinate < extent.upperRight)):
+                    # arcpy.AddMessage((x_coordinate > extent.lowerLeft.X, x_coordinate < extent.upperRight.X, y_coordinate > extent.lowerLeft.Y, y_coordinate < extent.upperRight.Y))
+                    if not all((x_coordinate > extent.lowerLeft.X, x_coordinate < extent.upperRight.X, y_coordinate > extent.lowerLeft.Y, y_coordinate < extent.upperRight.Y)):
                         continue
 
                 msm_Node_Table = msm_Node_Template.copy()   
@@ -273,51 +305,52 @@ class Dandas2MULinks(object):
                 arcpy.AddWarning(traceback.format_exc())
                 arcpy.AddWarning(e.message)
         del msm_Node_Cursor
-        
-        arcpy.SetProgressor("default","Reading Catchments")    
-        ms_Catchment = getAvailableFilename(arcpy.env.scratchGDB + "\ms_Catchment")
-        arcpy.CopyFeatures_management(os.path.dirname(os.path.realpath(__file__)) + "\Data\Templates.mdb\ms_Catchment", ms_Catchment)
-        if coordinate_system:
-            arcpy.DefineProjection_management(ms_Catchment, coordinate_system) 
-        templateFile = os.path.dirname(os.path.realpath(__file__)) + "\Data\Templates.mdb\ms_Catchment_Template"
-        ms_Catchment_Fields = [a.name for a in arcpy.ListFields(templateFile) if a.name not in ["FID","Shape","SHAPE","OBJECTID"]]
-        ms_Catchment_Cursor = arcpy.da.InsertCursor(ms_Catchment, ["SHAPE@"] + ms_Catchment_Fields) 
-        ms_Catchment_Template = OrderedDict()
-        with arcpy.da.SearchCursor(templateFile,ms_Catchment_Fields) as cursor:
-            for row in cursor:
-                for i in range(len(ms_Catchment_Fields)):
-                    ms_Catchment_Template[ms_Catchment_Fields[i]] = row[i]
-        catchmentMUIDs = []
-        for nodei in range(len(nodes)):
-            if nodes[nodei].attrib['Knudenavn'] in nodesDict:
-                catchmentDictionary = ms_Catchment_Template.copy()
-                try:
-                    if nodes[nodei].find("DeloplandItems"):
-                        deloplandrows = nodes[nodei].find("DeloplandItems").findall("Delopland")
-                        for deloplandei in range(len(deloplandrows)):
-                            catchmentDictionary["NodeID"] = nodes[nodei].attrib['Knudenavn']
-                            i = 1
-                            MUID = catchmentDictionary["NodeID"] + "c%d" % (i)
-                            while MUID in catchmentMUIDs:
-                                i += 1
+
+        if import_catchments:
+            arcpy.SetProgressor("default","Reading Catchments")
+            ms_Catchment = getAvailableFilename(arcpy.env.scratchGDB + "\ms_Catchment")
+            arcpy.CopyFeatures_management(os.path.dirname(os.path.realpath(__file__)) + "\Data\Templates.mdb\ms_Catchment", ms_Catchment)
+            if coordinate_system:
+                arcpy.DefineProjection_management(ms_Catchment, coordinate_system)
+            templateFile = os.path.dirname(os.path.realpath(__file__)) + "\Data\Templates.mdb\ms_Catchment_Template"
+            ms_Catchment_Fields = [a.name for a in arcpy.ListFields(templateFile) if a.name not in ["FID","Shape","SHAPE","OBJECTID"]]
+            ms_Catchment_Cursor = arcpy.da.InsertCursor(ms_Catchment, ["SHAPE@"] + ms_Catchment_Fields)
+            ms_Catchment_Template = OrderedDict()
+            with arcpy.da.SearchCursor(templateFile,ms_Catchment_Fields) as cursor:
+                for row in cursor:
+                    for i in range(len(ms_Catchment_Fields)):
+                        ms_Catchment_Template[ms_Catchment_Fields[i]] = row[i]
+            catchmentMUIDs = []
+            for nodei in range(len(nodes)):
+                if nodes[nodei].attrib['Knudenavn'] in nodesDict:
+                    catchmentDictionary = ms_Catchment_Template.copy()
+                    try:
+                        if nodes[nodei].find("DeloplandItems"):
+                            deloplandrows = nodes[nodei].find("DeloplandItems").findall("Delopland")
+                            for deloplandei in range(len(deloplandrows)):
+                                catchmentDictionary["NodeID"] = nodes[nodei].attrib['Knudenavn']
+                                i = 1
                                 MUID = catchmentDictionary["NodeID"] + "c%d" % (i)
-                            catchmentMUIDs.append(MUID)
-                            catchmentDictionary["MUID"] = MUID
-                            array = arcpy.Array()
-                            deloplandekoorrows = deloplandrows[deloplandei].find("DeloplandKoordItems").findall("DeloplandKoord")
-                            for deloplandekoori in range(len(deloplandekoorrows)):
-                                array.add(arcpy.Point(float(deloplandekoorrows[deloplandekoori].find("Xkoordinat").text),float(deloplandekoorrows[deloplandekoori].find("Ykoordinat").text)))
-                            try:
-                                catchmentDictionary["ImpArea"] = float(deloplandrows[deloplandei].find("BefaestelsePct").text)
-                            except:
-                                catchmentDictionary["ImpArea"] = 0
-                            try:
-                                ms_Catchment_Cursor.insertRow([arcpy.Polygon(array)] + catchmentDictionary.values())
-                            except Exception as e:
-                                arcpy.AddMessage("Failed to draw catchment for node %s (%s)" % (nodes[nodei].attrib['Knudenavn'],e))
-                except Exception as e:
-                    arcpy.AddMessage("Failed to create catchment for node %s (%s)" % (nodes[nodei].attrib['Knudenavn'],e))
-        del ms_Catchment_Cursor
+                                while MUID in catchmentMUIDs:
+                                    i += 1
+                                    MUID = catchmentDictionary["NodeID"] + "c%d" % (i)
+                                catchmentMUIDs.append(MUID)
+                                catchmentDictionary["MUID"] = MUID
+                                array = arcpy.Array()
+                                deloplandekoorrows = deloplandrows[deloplandei].find("DeloplandKoordItems").findall("DeloplandKoord")
+                                for deloplandekoori in range(len(deloplandekoorrows)):
+                                    array.add(arcpy.Point(float(deloplandekoorrows[deloplandekoori].find("Xkoordinat").text),float(deloplandekoorrows[deloplandekoori].find("Ykoordinat").text)))
+                                try:
+                                    catchmentDictionary["ImpArea"] = float(deloplandrows[deloplandei].find("BefaestelsePct").text)
+                                except:
+                                    catchmentDictionary["ImpArea"] = 0
+                                try:
+                                    ms_Catchment_Cursor.insertRow([arcpy.Polygon(array)] + catchmentDictionary.values())
+                                except Exception as e:
+                                    arcpy.AddMessage("Failed to draw catchment for node %s (%s)" % (nodes[nodei].attrib['Knudenavn'],e))
+                    except Exception as e:
+                        arcpy.AddMessage("Failed to create catchment for node %s (%s)" % (nodes[nodei].attrib['Knudenavn'],e))
+            del ms_Catchment_Cursor
                             
         if dandas_ledninger:
             arcpy.SetProgressor("default","Reading links")    
@@ -396,7 +429,7 @@ class Dandas2MULinks(object):
                         if link_delledning.find("TvaersnitKode") is not None:
                             k = int(link_delledning.find("TvaersnitKode").text)
                             crosssection_catalogue = {0: 1, 1: 1, 5: 2, 6: 2, 8: 2, 9: 2, 10: 2, 50: 2, 99: 2, 3: 3, 4: 3, 7: 4, 2: 5}
-                            linkDictionary["TypeNo"] = crosssection_catalogue[k]
+                            linkDictionary["TypeNo"] = crosssection_catalogue[k] if k in crosssection_catalogue else 1
 
 
                         if link_delledning.find("DiameterIndv") is not None:
@@ -432,10 +465,7 @@ class Dandas2MULinks(object):
                         
                         if link_delledning.find("Fald") is not None:
                             linkDictionary["Slope_C"] = float(link_delledning.find("Fald").text)/10
-                    
-                    
-                    vertices = []
-                    
+
                     try:
                         vertices = [arcpy.Point(nodesDict[linkDictionary["FROMNODE"]][0],nodesDict[linkDictionary["FROMNODE"]][1])]
                         
@@ -478,7 +508,7 @@ class Dandas2MULinks(object):
             addLayer = arcpy.mapping.Layer(msm_Link)
             arcpy.mapping.AddLayerToGroup(df, empty_group_layer, addLayer, "BOTTOM")   
             updatelayer = arcpy.mapping.ListLayers(mxd, msm_Link.split("\\")[-1], df)[0]
-            sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Link.lyr")
+            sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Link_DDS.lyr")
             arcpy.mapping.UpdateLayer(df,updatelayer,sourcelayer,False)
             updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'FILEGDB_WORKSPACE', unicode(addLayer.datasetName))
            
@@ -494,12 +524,13 @@ class Dandas2MULinks(object):
             arcpy.AddMessage(links_with_faulty_uplevel)
             arcpy.AddMessage(links_with_faulty_dwlevel)
         
-        addLayer = arcpy.mapping.Layer(ms_Catchment)
-        arcpy.mapping.AddLayerToGroup(df, empty_group_layer, addLayer, "BOTTOM")
-        updatelayer = arcpy.mapping.ListLayers(mxd, ms_Catchment.split("\\")[-1], df)[0]
-        sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Catchments.lyr")
-        arcpy.mapping.UpdateLayer(df,updatelayer,sourcelayer,False)
-        updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'FILEGDB_WORKSPACE', unicode(addLayer.datasetName))
+        if import_catchments:
+            addLayer = arcpy.mapping.Layer(ms_Catchment)
+            arcpy.mapping.AddLayerToGroup(df, empty_group_layer, addLayer, "BOTTOM")
+            updatelayer = arcpy.mapping.ListLayers(mxd, ms_Catchment.split("\\")[-1], df)[0]
+            sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Catchments.lyr")
+            arcpy.mapping.UpdateLayer(df,updatelayer,sourcelayer,False)
+            updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'FILEGDB_WORKSPACE', unicode(addLayer.datasetName))
         
         return
         
