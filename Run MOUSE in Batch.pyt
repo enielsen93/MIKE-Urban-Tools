@@ -57,15 +57,15 @@ class BatchSimulations(object):
             datatype="File",
             parameterType="Optional",
             direction="Input",)
-        RunoffFile.filter.list=["crf"]
+        RunoffFile.filter.list=["crf", "res1d"]
         
         mex_file = arcpy.Parameter(
-            displayName="Mex Network File",
+            displayName="Network Setup File",
             name="mex_file",
             datatype="File",
             parameterType="Required",
             direction="Input")
-        mex_file.filter.list=["mex"]
+        mex_file.filter.list=["mex", "m1dx"]
         
         parameter = arcpy.Parameter(
             displayName="Values for parameter (separate by commas)",
@@ -73,8 +73,7 @@ class BatchSimulations(object):
             datatype="String",
             parameterType="Required",
             direction="Input")
-        mex_file.filter.list=["mex"]
-        
+
         mouse_sim_launch = arcpy.Parameter(
             displayName="MOUSE Sim Launch Executable path",
             name="mouse_sim_launch",
@@ -89,18 +88,31 @@ class BatchSimulations(object):
                 if os.path.exists(path.replace("2020",str(year))):
                     mouse_sim_launch.value = path.replace("2020",str(year))
                     break
+
+        mike1d_launch = arcpy.Parameter(
+            displayName="MIKE1Ds Launch Executable path",
+            name="mike1d_launch",
+            datatype="File",
+            parameterType="Optional",
+            direction="Input")
+        mike1d_launch.filter.list = ["exe"]
+
+        mike1d_paths = [r"C:\Program Files (x86)\DHI\2020\bin\x64\DHI.Mike1D.Application.exe"]
+        for path in mike1d_paths:
+            for year in reversed(range(2010, 2030)):
+                if os.path.exists(path.replace("2020", str(year))):
+                    mike1d_launch.value = path.replace("2020", str(year))
+                    break
         
         
-        params = [LTSCount, RunoffFile, mex_file, parameter, mouse_sim_launch]
+        params = [LTSCount, RunoffFile, mex_file, parameter, mouse_sim_launch, mike1d_launch]
 
         return params
 
     def isLicensed(self):
         return True
 
-    def updateParameters(self, parameters):  
-                
-        
+    def updateParameters(self, parameters):
         return
 
     def updateMessages(self, parameters):
@@ -117,6 +129,7 @@ class BatchSimulations(object):
         mex_file = parameters[2].ValueAsText
         parameter = parameters[3].ValueAsText
         mouse_sim_launch = parameters[4].ValueAsText
+        mike1d_launch = parameters[5].ValueAsText
         
         parameters = re.findall("[\d\.]+", parameter)
         
@@ -124,17 +137,26 @@ class BatchSimulations(object):
         with open(mex_file,"r") as f:
             mex_file_text = f.readlines()
         mex_file_parameter_lineno = [lineno for lineno,line in enumerate(mex_file_text) if "par1" in line]
-        mex_file_text_CRF_lineno = [lineno for lineno,line in enumerate(mex_file_text) if "CRF_file" in line][0]
+        if RunoffFile and "mex" in mex_file:
+            mex_file_text_CRF_lineno = [lineno for lineno,line in enumerate(mex_file_text) if "CRF_file" in line][0]
+        elif RunoffFile:
+            mex_file_text_CRF_lineno = [lineno for lineno, line in enumerate(mex_file_text) if "RR.res1d" in line][0]
         
         mex_files = []
         processes = []
         for job in range(len(parameters)):
             if RunoffFile:
                 arcpy.AddMessage("Copying %s" % RunoffFile)
-                RunoffFileNew = RunoffFile[0:-4] + "_Split%d.CRF" % (job+1)
+                if ".mex" in mex_file:
+                    RunoffFileNew = RunoffFile[0:-4] + "_Split%d.CRF" % (job+1)
+                else:
+                    RunoffFileNew = RunoffFile[0:-4] + "_Split%d.res1d" % (job + 1)
                 copyfile(RunoffFile, RunoffFileNew)
-    
-            mex_file_new = copy.deepcopy(mex_file.replace(".mex","_par1-%s.mex" % (parameters[job])))
+
+            if ".mex" in mex_file:
+                mex_file_new = copy.deepcopy(mex_file.replace(".mex","_par1-%s.mex" % (parameters[job])))
+            else:
+                mex_file_new = copy.deepcopy(mex_file.replace(".m1dx", "_par1-%s.m1dx" % (parameters[job])))
             mex_files.append(mex_file_new)
             
             mex_file_new_text = copy.deepcopy(mex_file_text)
@@ -149,7 +171,7 @@ class BatchSimulations(object):
             with open(mex_file_new,'w+') as f:
                 f.writelines(mex_file_new_text)
             
-            if mouse_sim_launch:
+            if mouse_sim_launch and ".mex" in mex_file:
                
                 while len(processes)>0 and not np.sum([1 for process in processes if process.poll() is None]) < LTSCount:
                     time.sleep(5)
@@ -159,5 +181,13 @@ class BatchSimulations(object):
                 run_cmd = r'"%s" "%s" "HD" "Run" "Close" "NoPrompt" "-wait"' % (mouse_sim_launch, mex_file_new)
                 processes.append(subprocess.Popen(run_cmd))
                 time.sleep(1)
+            elif mike1d_launch and "m1dx" in mex_file:
+                while len(processes)>0 and not np.sum([1 for process in processes if process.poll() is None]) < LTSCount:
+                    time.sleep(5)
+
+                run_cmd = '"%s" "%s"' % (mike1d_launch, mex_file_new)
+                processes.append(subprocess.Popen(run_cmd))
+                time.sleep(1)
+
         return
         
