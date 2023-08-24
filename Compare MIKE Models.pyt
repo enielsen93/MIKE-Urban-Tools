@@ -297,7 +297,14 @@ class FixSimulationModelName(object):
             displayName="Mike Urban database",
             name="database",
             datatype="DEWorkspace",
-            parameterType="Required",
+            parameterType="Optional",
+            direction="Input")
+
+        folder = arcpy.Parameter(
+            displayName="Folder",
+            name="folder",
+            datatype="Folder",
+            parameterType="Optional",
             direction="Input")
             
         pattern = arcpy.Parameter(
@@ -314,14 +321,14 @@ class FixSimulationModelName(object):
             parameterType="Optional",
             direction="Input")
         
-        parameters = [MU_database, pattern, replacement]
+        parameters = [MU_database, folder, pattern, replacement]
         return parameters
 
     def isLicensed(self):
         return True
 
     def updateParameters(self, parameters):
-        if not parameters[0].Value:
+        if not parameters[0].Value and not parameters[1].Value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             layers = arcpy.mapping.ListLayers(mxd)
             for layer in layers:
@@ -339,32 +346,42 @@ class FixSimulationModelName(object):
 
     def execute(self, parameters, messages):
         MU_database = parameters[0].ValueAsText
-        pattern = parameters[1].ValueAsText
-        replacement = parameters[2].ValueAsText
-        msm_Project = os.path.join(MU_database, "msm_Project")
-        
-        if not pattern:
-        
-            model_name, model_version = re.findall(r'\\(?:Model)*(?:MIKE)*\\([\w]+)_(\d+)\\', MU_database)[0]
-            # model_name = "KOM"
-            arcpy.AddMessage((model_name, model_version))
-            with arcpy.da.UpdateCursor(msm_Project, ["MUID", "PRFHotStartFileName", "CRFFileName", "CatchmentDischargeFileName"]) as cursor:
-                for row in cursor:
-                    for val_i, val in enumerate(row):
-                        # arcpy.AddMessage((r"LIS_008", model_name + "_" + model_version, val))
-                        arcpy.AddMessage((r"%s_\d+" % model_name, r"%s_%s" % (model_name, model_version) , val))
-                        if val:
-                            val = re.sub("%s_\d+" % model_name, r"%s_%s" % (model_name, model_version) , val)
-                        row[val_i] = val
-                        arcpy.AddMessage((row[val_i], val))
-                    cursor.updateRow(row)
-        else:
-            with arcpy.da.UpdateCursor(msm_Project, ["MUID", "PRFHotStartFileName", "CRFFileName", "CatchmentDischargeFileName"]) as cursor:
-                for row in cursor:
-                    for val_i, val in enumerate(row):
-                        # arcpy.AddMessage((r"LIS_008", model_name + "_" + model_version, val))
-                        if val:
-                            val = re.sub(pattern, replacement, val)
-                        row[val_i] = val
-                        arcpy.AddMessage((row[val_i], val))
-                    cursor.updateRow(row)
+        folder = parameters[1].ValueAsText
+        pattern = parameters[2].ValueAsText
+        replacement = parameters[3].ValueAsText
+
+
+        if MU_database:
+            msm_Project = os.path.join(MU_database, "msm_Project")
+            if not pattern:
+                model_name, model_version = re.findall(r'\\(?:Model)*(?:MIKE)*\\([\w]+)_(\d+)\\', MU_database)[0]
+                # model_name = "KOM"
+                arcpy.AddMessage((model_name, model_version))
+                with arcpy.da.UpdateCursor(msm_Project, ["MUID", "PRFHotStartFileName", "CRFFileName", "CatchmentDischargeFileName"]) as cursor:
+                    for row in cursor:
+                        for val_i, val in enumerate(row):
+                            # arcpy.AddMessage((r"LIS_008", model_name + "_" + model_version, val))
+                            arcpy.AddMessage((r"%s_\d+" % model_name, r"%s_%s" % (model_name, model_version) , val))
+                            if val:
+                                val = re.sub("%s_\d+" % model_name, r"%s_%s" % (model_name, model_version) , val)
+                            row[val_i] = val
+                            arcpy.AddMessage((row[val_i], val))
+                        cursor.updateRow(row)
+            else:
+                with arcpy.da.UpdateCursor(msm_Project, ["MUID", "PRFHotStartFileName", "CRFFileName", "CatchmentDischargeFileName"]) as cursor:
+                    for row in cursor:
+                        for val_i, val in enumerate(row):
+                            # arcpy.AddMessage((r"LIS_008", model_name + "_" + model_version, val))
+                            if val:
+                                val = re.sub(pattern, replacement, val)
+                            row[val_i] = val
+                            arcpy.AddMessage((row[val_i], val))
+                        cursor.updateRow(row)
+
+        if folder:
+            for root, dirs, files in os.walk(folder):
+                for file in files:
+                    if re.search(pattern, file):
+                        new_filename = re.sub(pattern, replacement, file)
+                        arcpy.AddMessage((os.path.join(root, file), os.path.join(root, new_filename)))
+                        os.rename(os.path.join(root, file), os.path.join(root, new_filename))
