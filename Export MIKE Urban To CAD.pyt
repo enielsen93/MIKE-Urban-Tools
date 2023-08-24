@@ -968,6 +968,21 @@ class ExportToDDS(object):
         return True
 
     def updateParameters(self, parameters):  # optional
+        msm_Node = parameters[0].value
+        msm_Link = parameters[1].value
+        mike_urban_database = os.path.dirname(arcpy.Describe(msm_Node).catalogPath).replace("\mu_Geometry", "")
+        if os.path.exists(r"C:\Papirkurv"):
+            basefolder = r"C:\Papirkurv"
+        else:
+            basefolder = os.path.dirname(mike_urban_database
+                                         )
+        if msm_Node and not parameters[2].value:
+            parameters[2].value = os.path.join(basefolder, os.path.basename(mike_urban_database).replace(".mdb","_knuder.xml"))
+
+        if msm_Link and not parameters[3].value:
+            parameters[3].value = os.path.join(basefolder, os.path.basename(mike_urban_database).replace(".mdb","_ledninger.xml"))
+
+
         # if not parameters[0].value and not parameters[1].value:
         #     mxd = arcpy.mapping.MapDocument("CURRENT")
         #
@@ -1059,13 +1074,14 @@ class ExportToDDS(object):
                 self.net_type_no = 2
                 self.description = ""
 
-            @property
-            def outer_diameter(self):
-                if self.material_id == "Plastic" and self.diameter not in outer_diameters_plastic and self.diameter < 1.6:
-                    i = np.where(outer_diameters_plastic - self.diameter >= 0)[0][0]
-                    return outer_diameters_plastic[i]
+            def outer_diameter(self, pipe_catalogue):
+                if self.material_id == "Plastic":# and self.diameter not in outer_diameters_plastic and self.diameter < 1.6:
+                    wall_thickness = self.wall_thickness(pipe_catalogue)
+                    return self.diameter*1e3 + (wall_thickness if wall_thickness else 0)*2
+                    # i = np.where(outer_diameters_plastic - self.diameter >= 0)[0][0]
+                    # return outer_diameters_plastic[i]
                 else:
-                    return self.diameter
+                    return self.diameter*1e3
 
             @property
             def material_code(self):
@@ -1091,6 +1107,12 @@ class ExportToDDS(object):
                 wall_thickness = [pipe_size.wall_thickness for pipe_size in pipe_catalogue if pipe_size.material.lower() == material.lower() and pipe_size.internal_diameter == self.diameter*1e3]
                 if wall_thickness:
                     return wall_thickness[0]
+                elif material.lower() in [pipe_size.material.lower() for pipe_size in pipe_catalogue]:
+                    try:
+                        return np.interp(self.diameter*1e3, [pipe_size.internal_diameter for pipe_size in pipe_catalogue if pipe_size.material.lower() == material.lower()], [pipe_size.wall_thickness for pipe_size in pipe_catalogue if pipe_size.material.lower() == material.lower()])
+                    except Exception as e:
+                        arcpy.AddWarning(e)
+                        return None
                 else:
                     return None
 
@@ -1180,18 +1202,19 @@ class ExportToDDS(object):
                     if row[6]: node.net_type_no = row[6]
                     if row[7]: node.description = row[7]
 
-        with arcpy.da.SearchCursor(msm_Link,
-                                   ["MUID", "SHAPE@", "Diameter", "MaterialID", "UpLevel", "DwLevel", "NetTypeNo",
-                                    "Description"]) as cursor:
-            for row in cursor:
-                links[row[0]] = Link(row[0], row[1])
-                link = links[row[0]]
-                if row[2]: link.diameter = row[2]
-                if row[3]: link.material_id = row[3]
-                if row[4]: link.uplevel = row[4]
-                if row[5]: link.dwlevel = row[5]
-                if row[6] and row[6] in [1,2,3]: link.net_type_no = row[6]
-                if row[7]: link.description = row[7]
+        if msm_Link:
+            with arcpy.da.SearchCursor(msm_Link,
+                                       ["MUID", "SHAPE@", "Diameter", "MaterialID", "UpLevel", "DwLevel", "NetTypeNo",
+                                        "Description"]) as cursor:
+                for row in cursor:
+                    links[row[0]] = Link(row[0], row[1])
+                    link = links[row[0]]
+                    if row[2]: link.diameter = row[2]
+                    if row[3]: link.material_id = row[3]
+                    if row[4]: link.uplevel = row[4]
+                    if row[5]: link.dwlevel = row[5]
+                    if row[6] and row[6] in [1,2,3]: link.net_type_no = row[6]
+                    if row[7]: link.description = row[7]
 
         for node in nodes.values():
             node_dds = ET.SubElement(node_root, "Knude")
@@ -1237,58 +1260,59 @@ class ExportToDDS(object):
                         arcpy.AddError(traceback.format_exc())
                     
 
+        if msm_Link:
+            for link in links.values():
+                # arcpy.AddMessage(links.values())
+                if link.muid in network.links and network.links[link.muid].fromnode in nodes and network.links[link.muid].tonode in nodes:
+                    link_dds = ET.SubElement(link_root, "Ledning")
+                    link_dds.set("NedstroemKnudenavn", network.links[link.muid].tonode)
+                    link_dds.set("OpstroemKnudenavn", network.links[link.muid].fromnode)
+                    ET.SubElement(link_dds, "KategoriAfloebKode").text = "1"
+                    ET.SubElement(link_dds, "TransportKode").text = "1"
+                    ET.SubElement(link_dds, "TypeAfloebKode").text = "%d" % link.net_type_no
 
-        for link in links.values():
-            # arcpy.AddMessage(links.values())
-            if link.muid in network.links and network.links[link.muid].fromnode in nodes and network.links[link.muid].tonode in nodes:
-                link_dds = ET.SubElement(link_root, "Ledning")
-                link_dds.set("NedstroemKnudenavn", network.links[link.muid].tonode)
-                link_dds.set("OpstroemKnudenavn", network.links[link.muid].fromnode)
-                ET.SubElement(link_dds, "KategoriAfloebKode").text = "1"
-                ET.SubElement(link_dds, "TransportKode").text = "1"
-                ET.SubElement(link_dds, "TypeAfloebKode").text = "%d" % link.net_type_no
+                    link_dds_parts = ET.SubElement(link_dds, 'DelLedningItems')
+                    link_dds_part = ET.SubElement(link_dds_parts, 'DelLedning')
+                    link_dds_part.set("NedstroemKnudenavn", network.links[link.muid].tonode)
+                    link_dds_part.set("OpstroemKnudenavn", network.links[link.muid].fromnode)
+                    if link.uplevel:
+                        ET.SubElement(link_dds_part,
+                                  'BundloebskoteOpst').text = "%1.2f" % link.uplevel if link.uplevel else "%1.2f" % nodes[
+                                    network.links[link.muid].fromnode].invert_level
 
-                link_dds_parts = ET.SubElement(link_dds, 'DelLedningItems')
-                link_dds_part = ET.SubElement(link_dds_parts, 'DelLedning')
-                link_dds_part.set("NedstroemKnudenavn", network.links[link.muid].tonode)
-                link_dds_part.set("OpstroemKnudenavn", network.links[link.muid].fromnode)
-                if link.uplevel:
-                    ET.SubElement(link_dds_part,
-                              'BundloebskoteOpst').text = "%1.2f" % link.uplevel if link.uplevel else "%1.2f" % nodes[
-                                network.links[link.muid].fromnode].invert_level
+                    if link.dwlevel:
+                        ET.SubElement(link_dds_part,
+                                      'BundloebskoteNedst').text = "%1.2f" % link.dwlevel if link.dwlevel else "%1.2f" % nodes[
+                            network.links[link.muid].tonode].invert_level
+                    ET.SubElement(link_dds_part, "MaterialeKode").text = "%d" % link.material_code
+                    ET.SubElement(link_dds_part, 'Handelsmaal').text = "%d" % (link.outer_diameter(pipe_catalogue))
+                    ET.SubElement(link_dds_part, 'DiameterIndv').text = "%d" % (link.diameter * 1e3)
+                    wall_thickness = link.wall_thickness(pipe_catalogue)
+                    if wall_thickness:
+                        ET.SubElement(link_dds_part, 'Godstykkelse').text = "%1.1f" % wall_thickness
 
-                if link.dwlevel:
-                    ET.SubElement(link_dds_part,
-                                  'BundloebskoteNedst').text = "%1.2f" % link.dwlevel if link.dwlevel else "%1.2f" % nodes[
-                        network.links[link.muid].tonode].invert_level
-                ET.SubElement(link_dds_part, "MaterialeKode").text = "%d" % link.material_code
-                ET.SubElement(link_dds_part, 'Handelsmaal').text = "%d" % (link.outer_diameter * 1e3)
-                ET.SubElement(link_dds_part, 'DiameterIndv').text = "%d" % (link.diameter * 1e3)
-                wall_thickness = link.wall_thickness(pipe_catalogue)
-                if wall_thickness:
-                    ET.SubElement(link_dds_part, 'Godstykkelse').text = "%1.1f" % wall_thickness
+                    if len(link.shape.getPart()[0]) > 2:
+                        bends = ET.SubElement(link_dds_part, 'KnaekpunktItems')
+                        for part_i, part in enumerate(link.shape.getPart()[0][1:-1]):
+                            bend = ET.SubElement(bends, 'Knaekpunkt')
+                            bend.set('Sortering', '%d' % (part_i + 1))
+                            ET.SubElement(bend, 'XKoordinat').text = "%1.2f" % (part.X)
+                            ET.SubElement(bend, 'YKoordinat').text = "%1.2f" % (part.Y)
 
-                if len(link.shape.getPart()[0]) > 2:
-                    bends = ET.SubElement(link_dds_part, 'KnaekpunktItems')
-                    for part_i, part in enumerate(link.shape.getPart()[0][1:-1]):
-                        bend = ET.SubElement(bends, 'Knaekpunkt')
-                        bend.set('Sortering', '%d' % (part_i + 1))
-                        ET.SubElement(bend, 'XKoordinat').text = "%1.2f" % (part.X)
-                        ET.SubElement(bend, 'YKoordinat').text = "%1.2f" % (part.Y)
-
-                link_dds_part_labels = ET.SubElement(link_dds_part, 'LabelDelledningItems')
-                link_dds_part_label = ET.SubElement(link_dds_part_labels, 'LabelDelledning')
-                centroid = link.shape.positionAlongLine(link.shape.length / 2)
-                ET.SubElement(link_dds_part_label, 'PunktPaaLednKode').text = "0"
-                ET.SubElement(link_dds_part_label, 'TekstjusteringKode').text = "4"
-                ET.SubElement(link_dds_part_label, 'XLabel').text = "%1.2f" % centroid.firstPoint.X
-                ET.SubElement(link_dds_part_label, 'YLabel').text = "%1.2f" % centroid.firstPoint.Y
+                    link_dds_part_labels = ET.SubElement(link_dds_part, 'LabelDelledningItems')
+                    link_dds_part_label = ET.SubElement(link_dds_part_labels, 'LabelDelledning')
+                    centroid = link.shape.positionAlongLine(link.shape.length / 2)
+                    ET.SubElement(link_dds_part_label, 'PunktPaaLednKode').text = "0"
+                    ET.SubElement(link_dds_part_label, 'TekstjusteringKode').text = "4"
+                    ET.SubElement(link_dds_part_label, 'XLabel').text = "%1.2f" % centroid.firstPoint.X
+                    ET.SubElement(link_dds_part_label, 'YLabel').text = "%1.2f" % centroid.firstPoint.Y
 
         # Skriv XML-fil
         with open(dandas_knuder, "w+") as f:
             f.write(xml.dom.minidom.parseString(ET.tostring(node_root, encoding="UTF-8")).toprettyxml().encode("utf-8"))
 
-        with open(dandas_ledninger, "w+") as f:
-            f.write(xml.dom.minidom.parseString(ET.tostring(link_root, encoding="UTF-8")).toprettyxml().encode("utf-8"))
+        if msm_Link:
+            with open(dandas_ledninger, "w+") as f:
+                f.write(xml.dom.minidom.parseString(ET.tostring(link_root, encoding="UTF-8")).toprettyxml().encode("utf-8"))
 
         
