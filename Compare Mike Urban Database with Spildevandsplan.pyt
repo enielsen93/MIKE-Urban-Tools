@@ -38,8 +38,8 @@ def getAvailableFilename(filepath, parent = None):
         
 class Toolbox(object):
     def __init__(self):
-        self.label =  "Compare Mike Urban Database with Spildevandsplan"
-        self.alias  = "Compare Mike Urban Database with Spildevandsplan"
+        self.label =  "(Obsolete) Compare Mike Urban Database with Spildevandsplan"
+        self.alias  = "(Obsolete) Compare Mike Urban Database with Spildevandsplan"
 
         # List of tool classes associated with this toolbox
         self.tools = [GetImperviousnessSPV, SelectSPV, AnalyzeSPV] 

@@ -466,7 +466,7 @@ class AnalyzeSPV(object):
             ws.col(0).width = int(2962*(11/9.44))
             ws.col(9).width = int(2962*(14/9.44))
             xlwt.add_palette_colour("header", 0x21)
-            wb.set_colour_RGB(0x21, 96, 73, 122)
+            wb.set_colour_RGB(0x21, 0, 157, 224)
             # xlwt.add_palette_colour("column1", 0x21)
             # wb.set_colour_RGB(0x22, 228, 223, 236)
             ws.write(0,0,"Oplandsnavn",xlwt.easyxf('font: bold on, color white; pattern: pattern solid, fore_colour header; '))
