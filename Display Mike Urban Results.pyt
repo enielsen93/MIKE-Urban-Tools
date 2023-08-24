@@ -20,6 +20,15 @@ from subprocess import call
 from shutil import copyfile
 import traceback
 import scipy
+
+if "mapping" in dir(arcpy):
+    arcgis_pro = False
+    import arcpy.mapping as arcpymapping
+    from arcpy.mapping import MapDocument as arcpyMapDocument
+else:
+    arcgis_pro = True
+    import arcpy.mp as arcpymapping
+    from arcpy.mp import ArcGISProject as arcpyMapDocument
 # arcpy.env.workspace = arcpy.env.scratchGDB
 
 def getAvailableFilename(filepath, parent = None):
@@ -40,7 +49,7 @@ class Toolbox(object):
         self.alias  = "Display Mike Urban Results"
 
         # List of tool classes associated with this toolbox
-        self.tools = [DisplayFloodReturnPeriodFun, DisplayWeirStatistics, DisplayFlowStatistics, DisplayQFullQMax, DisplayWeirReturnPeriod] 
+        self.tools = [DisplayFloodReturnPeriodFun, DisplayWeirStatistics, DisplayFlowStatistics, DisplayQFullQMax, DisplayWeirReturnPeriod, DisplayMIKE1DResults]
 
 class DisplayFloodReturnPeriodFun(object):
     def __init__(self):
@@ -1344,3 +1353,195 @@ class DisplayWeirReturnPeriod(object):
                 
 
         addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Weir_return_period.lyr", msm_WeirNew, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
+
+
+class DisplayMIKE1DResults(object):
+    def __init__(self):
+        self.label = "Display MIKE1D Results (alpha)"
+        self.description = "Display MIKE1D Results (alpha)"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        # Input Features parameter
+        folder = arcpy.Parameter(
+            displayName="Folder",
+            name="folder",
+            datatype="Folder",
+            parameterType="Optional",
+            direction="Input")
+        if os.path.exists(r"C:\Papirkurv\Resultater"):
+            folder.value = r"C:\Papirkurv\Resultater"
+
+        node_featureclass = arcpy.Parameter(
+            displayName="Nodes Result File",
+            name="node_featureclass",
+            datatype="GPFeatureLayer",
+            parameterType="Optional",
+            direction="Input")
+        node_featureclass.filter.list = ["POINT"]
+
+        reach_featureclass = arcpy.Parameter(
+            displayName="Reaches Result File",
+            name="reach_featureclass",
+            datatype="GPFeatureLayer",
+            parameterType="Optional",
+            direction="Input")
+        reach_featureclass.filter.list = ["LINE", "POLYLINE"]
+
+
+        parameters = [folder, node_featureclass, reach_featureclass]
+
+        return parameters
+
+    def isLicensed(self):  # optional
+        return True
+
+    def updateParameters(self, parameters):  # optional
+        if parameters[0].altered and parameters[0].value and not parameters[1].value and not parameters[2].value:
+            folder = parameters[0].ValueAsText
+            import glob
+            shp_files = glob.glob(os.path.join(folder, "*.shp"))
+            file_mod_times = [(file, os.path.getmtime(file)) for file in shp_files]
+            sorted_files = sorted(file_mod_times, key=lambda x: x[1], reverse = True)
+            # parameters[1].Value = sorted_files[0][0]
+            for file in sorted_files:
+                if "nodes" in file[0]:
+                    parameters[1].Value = file[0]
+                    break
+
+            for file in sorted_files:
+                if "links" in file[0]:
+                    parameters[2].Value = file[0]
+                    break
+
+
+        #
+        # if parameters[0].altered:
+        #     parameters[3].value = getAvailableFilename(os.path.join(arcpy.env.scratchGDB, os.path.basename(parameters[0].ValueAsText)).replace(".ERF","_NodeFlood"))
+        #     parameters[4].value = getAvailableFilename(
+        #         os.path.join(arcpy.env.scratchGDB, os.path.basename(parameters[0].ValueAsText)).replace(".ERF", "_BasinFlood"))
+        return
+
+    def updateMessages(self, parameters):  # optional
+        return
+
+    def execute(self, parameters, messages):
+        nodes_featureclass = parameters[1].ValueAsText
+        reaches_featureclass = parameters[2].ValueAsText
+
+        mxd = arcpy.mapping.MapDocument("CURRENT")
+        df = arcpy.mapping.ListDataFrames(mxd)[0]
+
+        def addLayer(layer_source, source, group=None, workspace_type="ACCESS_WORKSPACE", new_name=None,
+                     definition_query=None):
+            if ".sqlite" in source:
+                source_layer = arcpymapping.LayerFile(layer_source) if arcgis_pro else arcpy.mapping.Layer(source)
+
+                if group:
+                    if arcgis_pro:
+                        update_layer = df.addLayerToGroup(group, source_layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayerToGroup(df, group, source_layer, "BOTTOM")
+                else:
+                    if arcgis_pro:
+                        update_layer = df.addLayer(source_layer, "TOP")
+                    else:
+                        arcpymapping.AddLayer(df, source_layer, "TOP")
+
+                if not arcgis_pro: update_layer = df.listLayers(mxd, source_layer.name, df)[0] if arcgis_pro else \
+                arcpy.mapping.ListLayers(mxd, source_layer.name, df)[0]
+
+                if arcgis_pro:
+                    new_connection_properties = update_layer.connectionProperties
+                    new_connection_properties["workspace_factory"] = 'Sql'
+                    new_connection_properties["connection_info"]["database"] = os.path.dirname(source)
+                    update_layer.updateConnectionProperties()
+                else:
+                    if ".sqlite" in source:
+                        layer = arcpymapping.Layer(layer_source)
+                        update_layer.visible = layer.visible
+                        update_layer.labelClasses = layer.labelClasses
+                        update_layer.showLabels = layer.showLabels
+                        update_layer.name = layer.name
+                        update_layer.definitionQuery = definition_query
+
+                        try:
+                            arcpymapping.UpdateLayer(df, update_layer, layer, symbology_only=True)
+                        except Exception as e:
+                            arcpy.AddWarning(source)
+                            pass
+                    else:
+                        update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))),
+                                                       workspace_type, os.path.basename(source))
+
+                # layer_source_mike_plus = layer_source.replace("MOUSE", "MIKE+") if "MOUSE" in layer_source and os.path.exists(layer_source.replace("MOUSE", "MIKE+")) else None
+                # layer_source = layer_source_mike_plus if layer_source_mike_plus else layer_source
+                # layer = arcpymapping.Layer(layer_source)
+                # update_layer.visible = layer.visible
+                # update_layer.labelClasses = layer.labelClasses
+                # update_layer.showLabels = layer.showLabels
+                # update_layer.name = layer.name
+                # update_layer.definitionQuery = definition_query
+
+                try:
+                    arcpymapping.UpdateLayer(df, update_layer, layer, symbology_only=True)
+                except Exception as e:
+                    arcpy.AddWarning(source)
+                    pass
+            else:
+                # arcpy.AddMessage(layer_source)
+                layer = arcpymapping.LayerFile(layer_source) if arcgis_pro else arcpymapping.Layer(layer_source)
+                if group:
+                    if arcgis_pro:
+                        df.addLayerToGroup(group, layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayerToGroup(df, group, layer, "BOTTOM")
+                else:
+                    if arcgis_pro:
+                        df.addLayer(layer, "TOP")
+                    else:
+                        arcpymapping.AddLayer(df, layer, "TOP")
+                update_layer = df.listLayers(layer.listLayers()[0].name)[0] if arcgis_pro else \
+                arcpymapping.ListLayers(mxd, layer.name, df)[0]
+                if definition_query:
+                    update_layer.definitionQuery = definition_query
+                if new_name:
+                    update_layer.name = new_name
+
+                if arcgis_pro:
+                    df.updateConnectionProperties(update_layer.connectionProperties['connection_info']['database'],
+                                                  os.path.dirname(source.replace(r"\mu_Geometry", "")))
+                else:
+                    update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))),
+                                                   workspace_type, os.path.basename(source))
+            return update_layer
+
+        if reaches_featureclass:
+            layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE1D_results_links.lyr",
+                     reaches_featureclass.replace(".shp","")    , group=None, workspace_type="SHAPEFILE_WORKSPACE", new_name = os.path.basename(reaches_featureclass).replace(".shp",""))
+            layer.showLabels = False
+
+        if nodes_featureclass:
+            layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE1D_results_nodes.lyr",
+                     nodes_featureclass.replace(".shp",""), group=None, workspace_type = "SHAPEFILE_WORKSPACE", new_name = os.path.basename(nodes_featureclass).replace(".shp",""))
+            layer.showLabels = False
+        #
+        # def addLayer(layer_source, source):
+        #     layer = arcpy.mapping.Layer(layer_source)
+        #     layer = arcpy.mapping.AddLayer(df, weirLayer, 'TOP')
+        #     layer = arcpy.mapping.ListLayers(mxd, weirLayer, df)[0]
+        #     layer.replaceDataSource(os.path.dirname(msm_weir[0]), "FILEGDB_WORKSPACE",
+        #                                 os.path.basename(msm_weir[0]).split(".")[0])
+        #
+        #     weirLayer.name = os.path.splitext(os.path.basename(htmlFile))[0] + u" Weir Discharge"
+        #
+        # weirLayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Weir.lyr")
+        # weirLayer = arcpy.mapping.AddLayer(df, weirLayer, 'TOP')
+        # weirLayer = arcpy.mapping.ListLayers(mxd, weirLayer, df)[0]
+        # weirLayer.replaceDataSource(os.path.dirname(msm_weir[0]), "FILEGDB_WORKSPACE",
+        #                             os.path.basename(msm_weir[0]).split(".")[0])
+        #
+        # weirLayer.name = os.path.splitext(os.path.basename(htmlFile))[0] + u" Weir Discharge"
+        return
