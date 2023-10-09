@@ -7,10 +7,13 @@ import cProfile
 from alive_progress import alive_bar
 import math
 
+extension = ""
+
+MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\VBT_STATUS\VBT_STATUS.sqlite"
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_027\KOM_CDS_5_sc3Base.res1d"
-res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_N_CDS5_156Base.res1d"
+res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\VBT_STATUS\VBT_STATUS_m1d - Result Files\VBT_STATUS_CDS20_120BaseDefault_Network_HD.res1d"
 # res1d_files = [r'C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_CDS5_156_ARF_100Base.res1d', r'C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_CDS5_156_ARF_150Base.res1d', r'C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_N_CDS5_156Base.res1d', r'C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_N_CDS5_156_ARF_127Base.res1d']
-MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023.mdb"
+# MU_model = r"C:\Papirkurv\VBT_STATUS\VBT_STATUS.sqlite"
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_013\SON_013_N_CDS5_156_ARF_127Base.res1d"
 # MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_013\SON_013.mdb"
 # MU_model= "C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_z014\SON_014.mdb"
@@ -31,10 +34,14 @@ class Node:
         self.inlet_waterlevel = 0
         self.outlet_waterlevel = 0
         self.max_inlet_velocity = 0
+        self.end_depth = 0
 
     @property
     def flood_depth(self):
-        return max(self.max_level - self.ground_level,0)
+        if self.max_level and self.ground_level:
+            return max(self.max_level - self.ground_level,0)
+        else:
+            return 0
 
     @property
     def flood_volume(self):
@@ -100,12 +107,15 @@ if MU_model and ".mdb" in MU_model:
     conn = pyodbc.connect(
         r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=%s;' % (MU_model))
     cursor = conn.cursor()
-    cursor.execute('select MUID, Diameter, NetTypeNo from msm_Node')
+    cursor.execute('select MUID, Diameter, NetTypeNo, groundlevel, criticallevel, invertlevel from msm_Node')
     rows = cursor.fetchall()
     for row in rows:
         nodes[row[0]] = Node(row[0])
         nodes[row[0]].diameter = row[1]
         nodes[row[0]].net_type_no = row[2]
+        nodes[row[0]].ground_level = row[3]
+        nodes[row[0]].critical_level = row[4]
+        nodes[row[0]].invert_level = row[5]
 
     cursor.execute('select MUID, NetTypeNo from msm_Weir')
     rows = cursor.fetchall()
@@ -124,11 +134,14 @@ if MU_model and ".mdb" in MU_model:
         reaches[row[0]].dwlevel = row[5] if row[5] else row[6]
 
 elif MU_model and ".sqlite" in MU_model:
-    with arcpy.da.SearchCursor(os.path.join(MU_model, "msm_Node"), ["MUID", "Diameter", "NetTypeNo"]) as cursor:
+    with arcpy.da.SearchCursor(os.path.join(MU_model, "msm_Node"), ["MUID", "Diameter", "NetTypeNo", "GroundLevel", "CriticalLevel", "InvertLevel"]) as cursor:
         for row in cursor:
             nodes[row[0]] = Node(row[0])
             nodes[row[0]].diameter = row[1]
             nodes[row[0]].net_type_no = row[2]
+            nodes[row[0]].ground_level = row[3]
+            nodes[row[0]].critical_level = row[4]
+            nodes[row[0]].invert_level = row[5]
 
     with arcpy.da.SearchCursor(os.path.join(MU_model, "msm_Weir"), ["MUID", "NetTypeNo"]) as cursor:
         for row in cursor:
@@ -148,20 +161,12 @@ elif MU_model and ".sqlite" in MU_model:
 print(res1d_file)
 # queries = []
 res1d = Res1D(res1d_file)
-# for node in res1d.data.Nodes:
-#     queries.append(QueryDataNode("WaterLevel", node, validate = False))
-#
-# for reach in res1d.data.Reaches:
-#     queries.append(QueryDataReach("Discharge", reach, validate = False))
 
 for reach in [r for r in res1d.data.Reaches if r.Name.replace("Weir:","") in reaches]:
     muid = reach.Name.replace("Weir:","")
     reach.type = "Weir"
     res1d_nodes = [node for node in res1d.data.Nodes]
     reaches[muid].shape = arcpy.Polyline(arcpy.Array([arcpy.Point(coordinate.X, coordinate.Y) for coordinate in reach.DigiPoints]))
-    # reaches[muid].start_coordinate = [res1d_nodes[reach.StartNodeIndex].XCoordinate, res1d_nodes[reach.StartNodeIndex].YCoordinate]
-    # reaches[muid].end_coordinate = [res1d_nodes[reach.EndNodeIndex].XCoordinate,
-                                      # res1d_nodes[reach.EndNodeIndex].YCoordinate]
     reaches[muid].fromnode = res1d_nodes[reach.StartNodeIndex].ID
     reaches[muid].tonode = res1d_nodes[reach.EndNodeIndex].ID
     reaches[muid].length = reach.Length
@@ -170,7 +175,7 @@ df = Res1D(res1d_file)
 
 # dataframe = df.read()
 arcpy.env.overwriteOutput = True
-output_folder = r"C:\Papirkurv\Resultater"# r"C:\Users\ELNN\OneDrive - Ramboll\Documents\ArcGIS\scratch.gdb"
+output_folder = r"C:\Papirkurv\Resultater"
 
 def getAvailableFilename(filepath):
     if arcpy.Exists(filepath):
@@ -181,14 +186,16 @@ def getAvailableFilename(filepath):
     else:
         return filepath
 
-nodes_new_filename = getAvailableFilename(os.path.join(output_folder, os.path.basename(res1d_file).replace(".res1d","_nodes.shp")))
+extension = extension if 'extension' in locals() else ""
 
-links_new_filename = getAvailableFilename(os.path.join(output_folder, os.path.basename(res1d_file).replace(".res1d","_links.shp")))
+nodes_new_filename = getAvailableFilename(os.path.join(output_folder, os.path.basename(res1d_file).replace(".res1d","_nodes%s.shp" % extension)))
+
+links_new_filename = getAvailableFilename(os.path.join(output_folder, os.path.basename(res1d_file).replace(".res1d","_links%s.shp" % extension)))
 
 nodes_output_filepath = arcpy.CreateFeatureclass_management(output_folder, os.path.basename(nodes_new_filename), "POINT")[0]
 arcpy.management.AddField(nodes_output_filepath, "MUID", "TEXT")
 arcpy.management.AddField(nodes_output_filepath, "NetTypeNo", "SHORT")
-for field in ["Diameter", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "max_hl", "max_I_V", "flow_area", "flow_diam"]:
+for field in ["Diameter", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "max_hl", "max_I_V", "flow_area", "flow_diam", "end_depth"]:
     arcpy.management.AddField(nodes_output_filepath, field, "FLOAT", 8, 2)
 
 links_output_filepath = arcpy.CreateFeatureclass_management(output_folder, os.path.basename(links_new_filename), "POLYLINE")[0]
@@ -242,49 +249,59 @@ with alive_bar(len(reaches),force_tty=True) as bar:
 
 res1d_quantities = res1d.quantities
 
-with arcpy.da.InsertCursor(nodes_output_filepath, ["SHAPE@", "MUID", "Diameter", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "NetTypeNo", "max_hl", "max_I_V", "flow_area", "flow_diam"]) as cursor:
-    with alive_bar(len(df.data.Nodes), force_tty=True) as bar:
-        for query_node in df.data.Nodes:
-            muid = query_node.ID
-            if muid not in nodes:
-                nodes[muid] = Node(muid)
-            node = nodes[muid]
-            try:
+with arcpy.da.InsertCursor(nodes_output_filepath, ["SHAPE@", "MUID", "Diameter", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "NetTypeNo", "max_hl", "max_I_V", "flow_area", "flow_diam", "end_depth"]) as cursor:
+    # with alive_bar(len(df.data.Nodes), force_tty=True) as bar:
+    for query_node in df.data.Nodes:
+        muid = query_node.ID
+        if muid not in nodes:
+            nodes[muid] = Node(muid)
+        node = nodes[muid]
+        try:
+            if not node.ground_level:
                 node.ground_level = query_node.CriticalLevel if hasattr(query_node, 'CriticalLevel') and query_node.CriticalLevel else query_node.GroundLevel
-                node.invert_level = query_node.BottomLevel
+            if not node.invert_level:
+                query_node.BottomLevel
+        except Exception as e:
+            if muid == "504120R":
+                print("Break")
+            print(e)
+        # try:
+            # node.ground_level = query_node.CriticalLevel if hasattr(query_node, 'CriticalLevel') and query_node.CriticalLevel else query_node.GroundLevel
+            # node.invert_level = query_node.BottomLevel
+        # except Exception as e:
+        #     print(e)
+
+        queries = [QueryDataNode("WaterLevel", muid)]
+        query_result = res1d.read(queries)
+        node.max_level = np.max(query_result.iloc[:,0])
+        node.end_depth = query_result.iloc[-1, 0] - node.invert_level
+        if "WaterVolumeAboveGround" in res1d_quantities:
+            query = QueryDataNode("WaterVolumeAboveGround", muid)
+            try:
+                query_result = res1d.read(query)
+                mike_flood_volume = np.max(np.max(query_result.iloc[:, 0]))
             except Exception as e:
-                print(e)
-
-            queries = [QueryDataNode("WaterLevel", muid)]
-            query_result = res1d.read(queries)
-            node.max_level = np.max(query_result.iloc[:,0])
-            if "WaterVolumeAboveGround" in res1d_quantities:
-                query = QueryDataNode("WaterVolumeAboveGround", muid)
-                try:
-                    query_result = res1d.read(query)
-                    mike_flood_volume = np.max(np.max(query_result.iloc[:, 0]))
-                except Exception as e:
-                    mike_flood_volume = None
-            else:
                 mike_flood_volume = None
+        else:
+            mike_flood_volume = None
 
-            if muid in [reach.tonode for reach in reaches.values()] and muid in [reach.fromnode for reach in reaches.values()]:
-                try:
-                    water_levels = [reach.max_end_water_level for reach in reaches.values() if reach.tonode == muid and reach.type == "Link"]
-                    node.inlet_waterlevel = np.max(water_levels) if water_levels else 0
-                    water_levels = [reach.max_start_water_level for reach in reaches.values() if reach.fromnode == muid and reach.type == "Link"]
-                    node.outlet_waterlevel = np.max(water_levels) if water_levels else 0
-                    node.max_headloss = node.inlet_waterlevel - node.outlet_waterlevel
-                    inlet_velocities = [reach.max_flow_velocity for reach in reaches.values() if reach.tonode == muid and reach.type == "Link"]
-                    node.max_inlet_velocity = np.max(inlet_velocities) if inlet_velocities else 0
+        if muid in [reach.tonode for reach in reaches.values()] and muid in [reach.fromnode for reach in reaches.values()]:
+            try:
+                water_levels = [reach.max_end_water_level for reach in reaches.values() if reach.tonode == muid and reach.type == "Link"]
+                node.inlet_waterlevel = np.max(water_levels) if water_levels else 0
+                water_levels = [reach.max_start_water_level for reach in reaches.values() if reach.fromnode == muid and reach.type == "Link"]
+                node.outlet_waterlevel = np.max(water_levels) if water_levels else 0
+                node.max_headloss = node.inlet_waterlevel - node.outlet_waterlevel
+                inlet_velocities = [reach.max_flow_velocity for reach in reaches.values() if reach.tonode == muid and reach.type == "Link"]
+                node.max_inlet_velocity = np.max(inlet_velocities) if inlet_velocities else 0
 
-                except Exception as e:
-                    print(muid)
-                    # if node.id == "D08089XR":
-                    #     print([np.max(df.get_reach_end_values(reach.muid, "WaterLevel")) for reach in reaches.values() if reach.tonode == muid and reach.type == "Link" and hasattr(reach, "muid")])
-                    #     print(muid, node.max_headloss, node.outlet_waterlevel, node.inlet_waterlevel)
-                    print(traceback.format_exc())
-                    print(e)
-            cursor.insertRow([arcpy.Point(query_node.XCoordinate, query_node.YCoordinate), muid, node.diameter if node.diameter else 0, node.invert_level, node.max_level, node.flood_depth, node.flood_volume if not mike_flood_volume else mike_flood_volume, node.net_type_no if node.net_type_no is not None else 0, node.max_headloss if node.max_headloss else 0, node.max_inlet_velocity if node.max_inlet_velocity else 0, node.flow_area, node.flow_area_diameter])
-            bar()
+            except Exception as e:
+                print(muid)
+                # if node.id == "D08089XR":
+                #     print([np.max(df.get_reach_end_values(reach.muid, "WaterLevel")) for reach in reaches.values() if reach.tonode == muid and reach.type == "Link" and hasattr(reach, "muid")])
+                #     print(muid, node.max_headloss, node.outlet_waterlevel, node.inlet_waterlevel)
+                print(traceback.format_exc())
+                print(e)
+        cursor.insertRow([arcpy.Point(query_node.XCoordinate, query_node.YCoordinate), muid, node.diameter if node.diameter else 0, node.invert_level, node.max_level, node.flood_depth, node.flood_volume if not mike_flood_volume else mike_flood_volume, node.net_type_no if node.net_type_no is not None else 0, node.max_headloss if node.max_headloss else 0, node.max_inlet_velocity if node.max_inlet_velocity else 0, node.flow_area, node.flow_area_diameter, node.end_depth if node.end_depth else 0])
+            # bar()
 # cProfile.run("main()")
