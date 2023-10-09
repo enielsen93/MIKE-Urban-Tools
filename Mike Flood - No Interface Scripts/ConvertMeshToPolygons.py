@@ -8,24 +8,39 @@ Created on Tue Nov  9 11:25:43 2021
 import mikeio
 import numpy as np
 import arcpy
-filename = r"C:\Offline\VOR_Status\Mesh\Mesh_v1.1_lf_v1.2.mesh"
+import os
+from alive_progress import alive_bar
 
-dfsu = mikeio.dfsu.Mesh(filename)
+filenames = [
+    r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\07_MESH\Forslag 16\VBT_Mesh_2023_10_06_interp.mesh"
+]
+filenames.reverse()
 
-node_coordinates = dfsu.node_coordinates
-element_coordinates = dfsu.element_coordinates
+arcpy.env.overwriteOutput = True
 
-element_table = dfsu.element_table
+for filename in filenames:
+    print(filename)
+    dfsu = mikeio.dfsu.Mesh(filename)
 
-fc = r"C:\Papirkurv\Mesh_Z_2.shp"
-distance_vector = np.sum(element_coordinates[:,:2]-[525251, 6255830], axis=1)
-with arcpy.da.InsertCursor(fc, ["SHAPE@",'Z']) as cursor:
-    for element_i, element in enumerate(element_table):
-        if distance_vector[element_i] < 150:
-            cursor.insertRow([arcpy.Polygon(arcpy.Array([arcpy.Point(node[0], node[1])
-                                                         for node in node_coordinates[
-                                                             np.array([element[0], element[1], element[2]])]])), element_coordinates[element_i,2]])
-        # cursor.insertRow([arcpy.Polygon(arcpy.Array([arcpy.Point(node[0], node[1])
-        #                            for node in node_coordinates[np.array([element[0], element[1], element[2]])]])),
-        #                   np.mean(node_coordinates[np.array([element[0], element[1], element[2]]),2])])
-        # print(element)
+    node_coordinates = dfsu.node_coordinates
+    element_coordinates = dfsu.element_coordinates
+
+    element_table = dfsu.element_table
+
+    shapefile_filepath = filename.replace(".mesh",".shp")
+
+    arcpy.management.CreateFeatureclass(os.path.dirname(shapefile_filepath), os.path.basename(shapefile_filepath), "POLYGON", has_z = "ENABLED")
+    arcpy.AddField_management(shapefile_filepath, "Z", "FLOAT")
+    with arcpy.da.InsertCursor(shapefile_filepath, ["SHAPE@",'Z']) as cursor:
+        with alive_bar(len(element_table), force_tty=True) as bar:
+            for element_i, element in enumerate(element_table):
+                cursor.insertRow([arcpy.Polygon(arcpy.Array([arcpy.Point(node[0], node[1])
+                                                             for node in node_coordinates[
+                                                                 np.array([element[0], element[1], element[2]])]])), element_coordinates[element_i,2]])
+                bar()
+            # cursor.insertRow([arcpy.Polygon(arcpy.Array([arcpy.Point(node[0], node[1])
+            #                            for node in node_coordinates[np.array([element[0], element[1], element[2]])]])),
+            #                   np.mean(node_coordinates[np.array([element[0], element[1], element[2]]),2])])
+            # print(element)
+
+    arcpy.AddSpatialIndex_management(shapefile_filepath)
