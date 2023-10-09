@@ -384,4 +384,7 @@ class FixSimulationModelName(object):
                     if re.search(pattern, file):
                         new_filename = re.sub(pattern, replacement, file)
                         arcpy.AddMessage((os.path.join(root, file), os.path.join(root, new_filename)))
-                        os.rename(os.path.join(root, file), os.path.join(root, new_filename))
+                        try:
+                            os.rename(os.path.join(root, file), os.path.join(root, new_filename))
+                        except Exception as e:
+                            arcpy.AddMessage(e)
