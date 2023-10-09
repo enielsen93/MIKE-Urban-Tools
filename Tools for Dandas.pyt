@@ -423,6 +423,10 @@ class Dandas2MULinks(object):
                     
                     linkDictionary["NetTypeNo"] = int(link.find("TypeAfloebKode").text) if link.find("TypeAfloebKode") is not None else 1
 
+                    if link.find(
+                            "DatoEtableret") is not None:
+                        linkDictionary["YearEst"] = int(link.find("DatoEtableret").text[:4])
+
                     if link.find("DelLedningItems") is not None and link.find("DelLedningItems").find("DelLedning") is not None:
                         link_delledning = link.find("DelLedningItems").find("DelLedning")
 
@@ -440,8 +444,8 @@ class Dandas2MULinks(object):
                         if link_delledning.find("Handelsmaal") is not None:
                             linkDictionary["Handmaal"] = float(link_delledning.find("Handelsmaal").text) / 1.0e3
 
-                        linkDictionary["YearEst"] = int(link.find("DatoEtableret").text[:4]) if link.find(
-                            "DatoEtableret") is not None else None
+                        if not linkDictionary["YearEst"] and link_delledning.find("DatoEtableret") is not None:
+                            linkDictionary["YearEst"] = int(link_delledning.find("DatoEtableret").text[:4])
 
                         linkDictionary["Description"] = link.find("Bemaerkning").text[:50] if link.find(
                             "Bemaerkning") is not None else ""
