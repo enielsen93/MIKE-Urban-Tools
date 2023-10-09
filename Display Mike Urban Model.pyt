@@ -594,7 +594,7 @@ class DisplayMikeUrban(object):
 
 
             if networkLoadInProject:
-                arcpy.CreateFeatureclass_management(os.path.dirname(networkShape), os.path.basename(networkShape), "POINT")
+                arcpy.CreateFeatureclass_management(os.path.dirname(networkShape), os.path.basename(networkShape), "POINT", spatial_reference = msm_Node)
                 arcpy.AddField_management(networkShape, "MUID", "TEXT")
                 arcpy.AddField_management(networkShape, "NetTypeNo", "SHORT")
                 arcpy.AddField_management(networkShape, "Discharge", "DOUBLE")
@@ -663,7 +663,7 @@ class DisplayMikeUrban(object):
                         regulation.q_max = row[2] if regulation.q_max < row[2] else regulation.q_max
 
             arcpy.CreateFeatureclass_management(os.path.dirname(regulationsShape), os.path.basename(regulationsShape),
-                                                "POLYLINE")
+                                                "POLYLINE", spatial_reference = msm_Node)
             arcpy.AddField_management(regulationsShape, "LinkID", "TEXT")
             arcpy.AddField_management(regulationsShape, "NetTypeNo", "SHORT")
             arcpy.AddField_management(regulationsShape, "FunctionID", "TEXT")
@@ -739,7 +739,7 @@ class DisplayMikeUrban(object):
             if len([outlet for outlet in outlets.values()])>0: # if any outlets with water level exist
                 boundariesShape = getAvailableFilename(arcpy.env.scratchGDB + r"\BoundaryWaterLevel", parent = MU_database)
                 try:
-                    arcpy.CreateFeatureclass_management(os.path.dirname(boundariesShape), os.path.basename(boundariesShape), "POINT")
+                    arcpy.CreateFeatureclass_management(os.path.dirname(boundariesShape), os.path.basename(boundariesShape), "POINT", spatial_reference = msm_Node)
                     arcpy.AddField_management(boundariesShape, "NodeID", "TEXT")
                     arcpy.AddField_management(boundariesShape, "NetTypeNo", "SHORT")
                     arcpy.AddField_management(boundariesShape, "B_MUID", "TEXT")
