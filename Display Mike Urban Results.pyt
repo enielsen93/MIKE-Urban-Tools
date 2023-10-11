@@ -11,15 +11,19 @@ import mousereader
 import ColebrookWhite
 import networker
 import codecs
-m11extraPath = r"C:\Program Files (x86)\DHI\2016\bin\m11extra.exe"
-i = 2030
-while not os.path.exists(m11extraPath.replace("2016",str(i))):
-    i -= 1
-m11extraPath = m11extraPath.replace("2016",str(i))
+
 from subprocess import call
 from shutil import copyfile
 import traceback
 import scipy
+
+def m11extrapath():
+    m11extraPath = r"C:\Program Files (x86)\DHI\2016\bin\m11extra.exe"
+    i = 2030
+    while not os.path.exists(m11extraPath.replace("2016",str(i))) and i < 20:
+        i -= 1
+    m11extraPath = m11extraPath.replace("2016",str(i))
+    return m11extraPath
 
 if "mapping" in dir(arcpy):
     arcgis_pro = False
@@ -227,7 +231,7 @@ class DisplayFloodReturnPeriodFun(object):
             resultFile = workingDir + "\ResultFile.txt"
             
             copyfile(flowFile,prfFileCopy)
-            call([m11extraPath, prfFileCopy])
+            call([m11extrapath(), prfFileCopy])
 
             lines = ""
             links = []
@@ -247,7 +251,7 @@ class DisplayFloodReturnPeriodFun(object):
             with codecs.open(M11IN,'w','cp1252') as M11INFile:
                 M11INFile.write(lines)
 
-            call([m11extraPath, prfFileCopy, resultFile])
+            call([m11extrapath(), prfFileCopy, resultFile])
 
             linksFlow = []
             with codecs.open(resultFile,'r','cp1252') as M11OUTFile:
@@ -284,7 +288,7 @@ class DisplayFloodReturnPeriodFun(object):
             with codecs.open(M11IN,'w','cp1252') as M11INFile:
                 M11INFile.write(lines)
             
-            call([m11extraPath, prfFileCopy, resultFile])
+            call([m11extrapath(), prfFileCopy, resultFile])
             nodesMinWL = {}
             with codecs.open(resultFile,'r','cp1252') as M11OUTFile:
                 txt = M11OUTFile.readlines()
@@ -1104,7 +1108,7 @@ class DisplayQFullQMax(object):
         if not minimumSlope:
             minimumSlope = 0
         copyfile(prfFile,prfFileCopy)
-        call([m11extraPath, prfFileCopy])
+        call([m11extrapath(), prfFileCopy])
 
         lines = ""
         links = []
@@ -1124,7 +1128,7 @@ class DisplayQFullQMax(object):
         with codecs.open(M11IN,'w','cp1252') as M11INFile:
             M11INFile.write(lines)
 
-        call([m11extraPath, prfFileCopy, resultFile, "/MAX"])
+        call([m11extrapath(), prfFileCopy, resultFile, "/MAX"])
         os.remove(prfFileCopy)
         os.remove(M11IN)
         os.remove(M11OUT)
