@@ -812,7 +812,7 @@ class DisplayMikeUrban(object):
                     # try:
                         catchments_dict[row[0]] = Catchment()
                         catchments_dict[row[0]].local_parameters = row[3] if "mdb" in MU_database else 1 - row[3]
-                        catchments_dict[row[0]].imperviousness = row[1]
+                        catchments_dict[row[0]].imperviousness = row[1] if "mdb" in MU_database else row[1]*1e2
                         catchments_dict[row[0]].ParAID = row[2] if not catchments_dict[row[0]].local_parameters else ""
                         if catchments_dict[row[0]].local_parameters or row[2] in hParA_dict:
                             catchments_dict[row[0]].reduction_factor = (hParA_dict[row[2]].reduction_factor
