@@ -917,7 +917,7 @@ class DisplaySqliteStep1(object):
                         except Exception as e:
                             arcpy.AddWarning("Could not find catchment %s in msm_HModA" % (row[0]))
                         else:
-                            row[1] = catchment.imperviousness
+                            row[1] = catchment.imperviousness*1e2
                             row[2] = catchment.ParAID
                             row[3] = catchment.reduction_factor
                             row[4] = catchment.concentration_time
