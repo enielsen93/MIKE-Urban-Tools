@@ -1,5 +1,5 @@
 # Created by Emil Nielsen
-# Contact: 
+# Contact:
 # E-mail: enielsen93@hotmail.com
 
 import arcpy
@@ -8,6 +8,7 @@ from arcpy import env
 from shutil import copyfile
 import string
 import traceback
+import networker
 import random
 
 class Toolbox(object):
@@ -104,7 +105,7 @@ class RenameMUFeatures(object):
                     row[0] = "%s%d" % (prefix, row[1])
                     cursor.updateRow(row)
                     
-            network = networker.NetworkLinks(database, map_only = "link")
+            network = networker.NetworkLinks(outputDatabase, map_only = "link")
             # arcpy.CalculateField_management(linksFile, "MUID", "!FROMNODE! + str(!OBJECTID!)", "PYTHON")
             
             def generateName(link, iterator = 1):
@@ -128,12 +129,13 @@ class RenameMUFeatures(object):
             arcpy.SetProgressor("step","Renaming pipes", 0, int(arcpy.GetCount_management(linksFile)[0]), 1)       
             
             arcpy.AddMessage(linksNewNames)
+            arcpy.AddMessage(linksFile)
             with arcpy.da.UpdateCursor(linksFile, ["MUID"]) as cursor:
                 for i,row in enumerate(cursor):
                     arcpy.SetProgressorPosition(i)
                     oldname = row[0]
                     if row[0] not in linksNewNames:
-                        arcpy.AddError("Error: Link %s not in linksNewNames")  
+                        arcpy.AddError("Error: Link %s not in linksNewNames" % (row[0]))
                     elif row[0] != linksNewNames[row[0]]:
                         row[0] = linksNewNames[row[0]]
                         try:
