@@ -430,8 +430,8 @@ class DisplaySqliteStep1(object):
                 if len(basins) > 0:
                     fromnode_fieldname = "fromnode" if not is_sqlite_database else "fromnodeid"
                     tonode_fieldname = "tonode" if not is_sqlite_database else "tonodeid"
-                    outlet_feature_classes = {links: ["UpLevel", "DwLevel"], orifices: ["InvertLevel"] * 2,
-                                              weirs: ["CrestLevel"] * 2}
+                    outlet_feature_classes = {msm_Link: ["UpLevel", "DwLevel"], msm_Orifice: ["InvertLevel"] * 2,
+                                              msm_Weir: ["CrestLevel"] * 2}
                     tonodes = {}
 
                     for feature_class, edgelevel_fieldname in zip(outlet_feature_classes.keys(),
