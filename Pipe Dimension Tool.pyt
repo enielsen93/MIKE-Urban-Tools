@@ -418,7 +418,6 @@ class PipeDimensionToolTAPro(object):
             arcpy.SetProgressorPosition(target_i)
             timearea_curves[target_manhole] = rainseries.timeareaCurve(target_manhole, graph)
 
-
             if show_graph and graphs_count < 15:
                 if graphs_count > 15:
                     arcpy.AddMessage("Displaying no more than 15 graphs!")
@@ -426,7 +425,7 @@ class PipeDimensionToolTAPro(object):
                     graphs_count += 1
                     old_setting = arcpy.env.addOutputsToMap
                     arcpy.env.addOutputsToMap = False
-                    table = arcpy.management.CreateTable(r"C:\Users\ELNN\OneDrive - Ramboll\Documents\ArcGIS\MIKE URBAN\MOL_055R_opdim_Langebro_12\scratch.gdb", "Tab" + target_manhole, os.path.dirname(
+                    table = arcpy.management.CreateTable(arcpy.env.scratchGDB, "Tab" + target_manhole, os.path.dirname(
                         os.path.realpath(__file__)) + "\Data\PipeDimensionTool\Template.dbf")[0]
 
                     rationel_curves = rainseries.rationelCurve(target_manhole, graph)
@@ -465,7 +464,7 @@ class PipeDimensionToolTAPro(object):
             dfs0_text[0] = "\t".join(["Discharge[meter^3/sec]:Instantaneous"] * len(timearea_curves.keys()))
             dfs0_text[1] = "Time"
             for i in range(len(dfs0_text) - 2):
-                dfs0_text[i + 2] = str(series.index[0] + datetime.timedelta(minutes=i))
+                dfs0_text[i + 2] = str(rainseries.series.index[0] + datetime.timedelta(minutes=i))
 
             for target_manhole in sorted(timearea_curves.keys()):
                 dfs0_text[1] += "\t" + target_manhole
@@ -1313,6 +1312,7 @@ class CopyDiameter(object):
         # arcpy.AddMessage(MU_database)
         
         is_sqlite = True if ".sqlite" in MU_database else False
+        match_by = match_by.lower().replace("shape@", "shape")
         if is_sqlite:
             if "shape" in copy_field.lower():
                 arcpy.AddError("Copy field %s is not supported for sqlite" % (copy_field))
@@ -1371,6 +1371,9 @@ class CopyDiameter(object):
             for i in range(len(fields)):
                 if fields[i].lower() == "shape":
                     fields[i] = "shape@"
+
+            if "shape@" not in fields:
+                fields.append("shape@")
             return fields
 
         references = []
@@ -1378,12 +1381,12 @@ class CopyDiameter(object):
         if "esri_oid" in fields:
             fields.remove("esri_oid")
         arcpy.AddMessage(fields)
-        
+
         with arcpy.da.SearchCursor(arcpy.Describe(reference_feature_layer).catalogPath, fields, where_clause = reference_where_clause) as cursor:
             for row in cursor:
                 reference = Reference()
                 for field_i, field in enumerate(fields):
-                    setattr(reference, field.lower(), row[field_i])
+                    setattr(reference, field.lower().replace("shape@","shape"), row[field_i])
                 
                 references.append(reference)
         # arcpy.AddMessage([reference.muid for reference in references])
@@ -1392,8 +1395,9 @@ class CopyDiameter(object):
         fields = changeShapeFieldname([field.name.lower() for field in arcpy.ListFields(target_feature_layer)])
         if "ESRI_OID" in fields:
             fields.remove("ESRI_OID")
-        
-        match_by_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == match_by.lower()][0]
+
+        arcpy.AddMessage(fields)
+        match_by_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == match_by.lower().replace("shape","shape@")][0]
         # arcpy.AddMessage(fields)
         # arcpy.AddMessage(match_by_field_i)
         
@@ -1410,13 +1414,12 @@ class CopyDiameter(object):
                 # arcpy.AddMessage(copy_field)
                 # arcpy.AddMessage(target_where_clause)
                 # arcpy.AddMessage([row[0] for row in arcpy.da.SearchCursor(target_feature_layer, ["MUID"], target_where_clause)])
-                
+
                 for MUID in [row[0] for row in arcpy.da.SearchCursor(target_feature_layer, ["MUID"], target_where_clause)]:
                     # arcpy.AddMessage(MUID)
                     # arcpy.AddMessage(target_where_clause)
                     # arcpy.AddMessage([getattr(reference, "muid") for reference in references])
                     match = [reference for reference in references if getattr(reference, "muid") == MUID][0]
-
                     for field in copy_field:
                         field_value = getattr(match, field.lower())
                         # arcpy.AddMessage(type(field_value) is str or type(field_value) is unicode)
@@ -1439,10 +1442,9 @@ class CopyDiameter(object):
             edit.startOperation()
             with arcpy.da.UpdateCursor(arcpy.Describe(target_feature_layer).catalogPath, fields, where_clause = target_where_clause) as cursor:
                 for row in cursor:
-
+                    # arcpy.AddMessage((fields, row))
                     match = [reference for reference in references if getattr(reference, match_by.lower()) == row[match_by_field_i]]
-                    # arcpy.AddMessage(match)
-                    # arcpy.AddMessage(row[match_by_field_i])
+                    arcpy.AddMessage((getattr(reference, match_by.lower()), row[match_by_field_i]))
                     # arcpy.AddMessage([getattr(reference, match_by.lower()) for reference in references])
                     if match:
                         reference = match[0]
