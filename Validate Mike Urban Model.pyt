@@ -148,6 +148,7 @@ class CheckMikeUrbanDatabase(object):
         msm_Link = MU_database + "\msm_Link"
         msm_Weir = MU_database + "\msm_Weir"
         msm_Orifice = MU_database + "\msm_Orifice"
+        msm_PasReg = MU_database + "\msm_PasReg"
         msm_Pump = MU_database + "\msm_Pump"
         networkLinks = [msm_Link, msm_Weir, msm_Orifice]
         msm_BItem = MU_database + "\msm_BItem"
@@ -285,7 +286,24 @@ class CheckMikeUrbanDatabase(object):
             # arcpy.AddWarning("Warning: Manholes with outlet head loss ID set to MOUSE Classic(Engelund) (should probably be Weighted Inlet Energy): '" + "', '".join(
                 # nodesOutletShape
                 # ) + "'")
-        
+
+        node_muids = [row[0] for row in arcpy.da.SearchCursor(msm_Node, "MUID")]
+        duplicate_nodes = [node for node in node_muids if node_muids.count(node) > 1]
+
+        if duplicate_nodes:
+            arcpy.AddWarning("Warning: Duplicate MUIDs in manholes: ('" + "', '".join(duplicate_nodes) + "')")
+
+        link_muids = [row[0] for row in arcpy.da.SearchCursor(msm_Link, "MUID")]
+        duplicate_links = [link for link in link_muids if link_muids.count(link) > 1]
+
+        if duplicate_links:
+            arcpy.AddWarning("Warning: Duplicate MUIDs in links: ('" + "', '".join(duplicate_links) + "')")
+
+        regulated_links = [row[0] for row in arcpy.da.SearchCursor(msm_PasReg, ["LinkID"])]
+        broken_regulations = [link_id for link_id in regulated_links if link_id not in link_muids]
+        if broken_regulations:
+            arcpy.AddWarning("Warning: Regulations that apply to missing links: ('" + "', '".join(broken_regulations) + "')")
+
         nodesBadName = [row[0] for row in arcpy.da.SearchCursor(msm_Node,"MUID",where_clause = "MUID LIKE 'Node_*'")]
         if len(nodesBadName)>0:
             arcpy.AddWarning("Warning: Manholes with unoriginal names found (not suitable for FLORA): '" + "', '".join(nodesBadName) + "'")
@@ -402,10 +420,10 @@ class CheckMikeUrbanDatabase(object):
                 # if node in nodesUpstream and critlevel < MUIDsCritLevel[basin]:
                     # arcpy.AddWarning("Warning: Critical level of Manhole %s is %1.2f which is below critical level of downstream basin %s with critical level %1.2f. Consider changing cover type to Sealed." % (node, critlevel, basin, MUIDsCritLevel[basin]))
             
-        if dbExtension == "mdb":
-            boundaryItemsWithScalingFactor = [row[0] for row in arcpy.da.SearchCursor(msm_BItem,["BoundaryID","Fraction"]) if row[1] != 1]
-            if len(boundaryItemsWithScalingFactor)>0:
-                arcpy.AddWarning("Boundary Item %s has scaling factor different from 1. Safety and hydrological reduction factors should be Time-Area parameters." % ( " and ".join(boundaryItemsWithScalingFactor)))
+        # if dbExtension == "mdb":
+        #     boundaryItemsWithScalingFactor = [row[0] for row in arcpy.da.SearchCursor(msm_BItem,["BoundaryID","Fraction"]) if row[1] != 1]
+        #     if len(boundaryItemsWithScalingFactor)>0:
+        #         arcpy.AddWarning("Boundary Item %s has scaling factor different from 1. Safety and hydrological reduction factors should be Time-Area parameters." % ( " and ".join(boundaryItemsWithScalingFactor)))
         
         if run_cleanup:
             nodes = [row[0] for row in arcpy.da.SearchCursor(msm_Node,["MUID"])]
