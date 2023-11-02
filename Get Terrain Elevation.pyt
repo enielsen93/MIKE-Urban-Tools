@@ -124,9 +124,10 @@ class GetTerrainElevation(object):
         OID_field = arcpy.Describe(point_layer).OIDFieldName if not is_sqlite_database else "muid"
         point_layer_OIDs = [row[0] for row in arcpy.da.SearchCursor(point_layer, OID_field)]
         
-        edit = arcpy.da.Editor(os.path.dirname(os.path.dirname(arcpy.Describe(point_layer).catalogPath)))
-        edit.startEditing(False, True)
-        edit.startOperation()
+        if not is_sqlite_database:
+            edit = arcpy.da.Editor(os.path.dirname(os.path.dirname(arcpy.Describe(point_layer).catalogPath)))
+            edit.startEditing(False, True)
+            edit.startOperation()
         
         point_layer_shapes = {}
         points_elevation = {}
@@ -185,14 +186,16 @@ class GetTerrainElevation(object):
                         except Exception as e:
                             arcpy.AddError("Error on row %s" % row[1])
                             arcpy.AddError(e.message)
-        edit.stopOperation()
-        try:
-            edit.stopEditing(True)
-        except RuntimeError as e:
-            if "GDB_Release" in e.message:
-                pass
-            else:
-                raise(e)
+                            
+        if not is_sqlite_database:
+            edit.stopOperation()
+            try:
+                edit.stopEditing(True)
+            except RuntimeError as e:
+                if "GDB_Release" in e.message:
+                    pass
+                else:
+                    raise(e)
         return
         
 class GetTerrainElevationDandas(object):
