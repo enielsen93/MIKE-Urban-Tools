@@ -154,6 +154,8 @@ class CheckMikeUrbanDatabase(object):
         msm_BItem = MU_database + "\msm_BItem"
         msm_BBoundary = MU_database + "\msm_BBoundary"       
 
+        is_sqlite = True if ".sqlite" in MU_database else False
+
         MUIDs = []
         MUIDsBadName = []
         badNameRegex = re.compile("^Catchment")
@@ -171,19 +173,23 @@ class CheckMikeUrbanDatabase(object):
         if len(MUIDsBadName)>0:
             arcpy.AddWarning("Warning: Catchments with unoriginal names found (not suitable for FLORA): '" + "', '".join(MUIDsBadName) + "'")
 
-        catchmentsSinglePart = arcpy.MultipartToSinglepart_management(catchments,
-                                               r"in_memory\singlepartCatchments")
-        
-        MUIDsSinglePart = []
-        with arcpy.da.SearchCursor(catchmentsSinglePart,["MUID"]) as cursor:
-            for row in cursor:
-                MUIDsSinglePart.append(row[0])
-        
-        singlePartDuplicates = set([x for x in MUIDsSinglePart if MUIDsSinglePart.count(x) > 1])
-        multiPartFeatures = [a for a in singlePartDuplicates if not a in duplicates]
+        try:
+            catchmentsSinglePart = arcpy.MultipartToSinglepart_management(catchments,
+                                                   r"in_memory\singlepartCatchments")
 
-        if len(multiPartFeatures)>0:
-            arcpy.AddWarning("Warning: Multipart catchments in table ms_Catchment found (unable to import catchments into Dandas): '" + "', '".join(multiPartFeatures) + "'")
+            MUIDsSinglePart = []
+            with arcpy.da.SearchCursor(catchmentsSinglePart,["MUID"]) as cursor:
+                for row in cursor:
+                    MUIDsSinglePart.append(row[0])
+
+            singlePartDuplicates = set([x for x in MUIDsSinglePart if MUIDsSinglePart.count(x) > 1])
+            multiPartFeatures = [a for a in singlePartDuplicates if not a in duplicates]
+            if len(multiPartFeatures) > 0:
+                arcpy.AddWarning(
+                    "Warning: Multipart catchments in table ms_Catchment found (unable to import catchments into Dandas): '" + "', '".join(
+                        multiPartFeatures) + "'")
+        except Exception as e:
+            arcpy.AddWarning("Could not check for multipart features")
 
         if dbExtension == "mdb":
             MUIDsWithoutModelRecords = set(MUIDs)
@@ -267,8 +273,8 @@ class CheckMikeUrbanDatabase(object):
         catchmentsDrainageAreaDiffer = []
         with arcpy.da.SearchCursor(catchments, ["MUID", "Area", "SHAPE@AREA"], where_clause = 'Area IS NOT NULL') as cursor:
             for row in cursor:
-                shapeArea = row[2]/1e4
-                if abs(shapeArea-row[1])/max(row[1],shapeArea)*1e2>10:
+                shapeArea = row[2]/1e4 if not is_sqlite else row[2]
+                if abs(abs(shapeArea)-abs(row[1]))/min(row[1],shapeArea)*1e2>10:
                     catchmentsDrainageAreaDiffer.append(row[0])
                 else:
                     catchmentsDrainageAreaSame.append(row[0])
@@ -299,10 +305,11 @@ class CheckMikeUrbanDatabase(object):
         if duplicate_links:
             arcpy.AddWarning("Warning: Duplicate MUIDs in links: ('" + "', '".join(duplicate_links) + "')")
 
-        regulated_links = [row[0] for row in arcpy.da.SearchCursor(msm_PasReg, ["LinkID"])]
-        broken_regulations = [link_id for link_id in regulated_links if link_id not in link_muids]
-        if broken_regulations:
-            arcpy.AddWarning("Warning: Regulations that apply to missing links: ('" + "', '".join(broken_regulations) + "')")
+        if not is_sqlite:
+            regulated_links = [row[0] for row in arcpy.da.SearchCursor(msm_PasReg, ["LinkID"])]
+            broken_regulations = [link_id for link_id in regulated_links if link_id not in link_muids]
+            if broken_regulations:
+                arcpy.AddWarning("Warning: Regulations that apply to missing links: ('" + "', '".join(broken_regulations) + "')")
 
         nodesBadName = [row[0] for row in arcpy.da.SearchCursor(msm_Node,"MUID",where_clause = "MUID LIKE 'Node_*'")]
         if len(nodesBadName)>0:
@@ -320,7 +327,6 @@ class CheckMikeUrbanDatabase(object):
         if links_different_length:
             arcpy.AddWarning("Pipes with length set that's different from geometric length: ('" + "', '".join(links_different_length) + "')")
 
-        
         linksDiameterPlastic = [row[0] for row in arcpy.da.SearchCursor(msm_Link,"Diameter",where_clause = "MaterialID = 'Plastic'")]
         outerDiametersFound = set()
         for d in linksDiameterPlastic:
@@ -328,16 +334,17 @@ class CheckMikeUrbanDatabase(object):
                 outerDiametersFound.add(str(d))
         if len(outerDiametersFound)>0:
             arcpy.AddWarning("Plastic Pipes found with diameter that might be the outer diameter instead of inner (diameters: %s)" %  (", ".join(outerDiametersFound)))
-        
-        with arcpy.da.SearchCursor(msm_Node, ["MUID", "GeometryID","InvertLevel"],where_clause = "TypeNo = 2") as cursor:
-            for row in cursor:
-                try:
-                    geometryInvertLevel = np.min([a[0] for a in arcpy.da.SearchCursor(MU_database + r"\ms_TabD",["Value1"],where_clause = "TabID = '%s'" % (row[1]))])
-                except Exception as e:
-                    arcpy.AddError(row)
-                    raise(e)
-                if geometryInvertLevel != row[2]:
-                    arcpy.AddWarning("Invert Level of basin node %s is different from invert level of basin geometry %s (%1.2f - %1.2f)" % (row[0], row[1], row[2], geometryInvertLevel))        
+
+        if not is_sqlite:
+            with arcpy.da.SearchCursor(msm_Node, ["MUID", "GeometryID","InvertLevel"],where_clause = "TypeNo = 2") as cursor:
+                for row in cursor:
+                    try:
+                        geometryInvertLevel = np.min([a[0] for a in arcpy.da.SearchCursor(MU_database + r"\ms_TabD",["Value1"],where_clause = "TabID = '%s'" % (row[1]))])
+                    except Exception as e:
+                        arcpy.AddError(row)
+                        raise(e)
+                    if geometryInvertLevel != row[2]:
+                        arcpy.AddWarning("Invert Level of basin node %s is different from invert level of basin geometry %s (%1.2f - %1.2f)" % (row[0], row[1], row[2], geometryInvertLevel))
         
         if set_basin_cross_section_area:
             basinGeometries = [row[0] for row in arcpy.da.SearchCursor(msm_Node, ["GeometryID"],where_clause = "TypeNo = 2")]
