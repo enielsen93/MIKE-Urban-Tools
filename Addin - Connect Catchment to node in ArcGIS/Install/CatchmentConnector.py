@@ -67,10 +67,14 @@ class ConnectCatchment(object):
         node = nodes[np.argmin(dist)]
 
         catchLayer = [layer for layer in arcpy.mapping.ListLayers(mxd) if layer.longName == catchmentLayer.selectedLayer][0]
+        
+        mike_urban_database = os.path.dirname(arcpy.Describe(catchLayer).catalogPath).replace("\mu_Geometry", "")
+        is_sqlite = True if ".sqlite" in mike_urban_database else False
+        
         catchments_selected = []
         ID_fields = ["MUID","FID","OBJECTID","OID"]
         for ID_field in ID_fields:
-            if ID_field in [field.name for field in arcpy.ListFields(catchLayer)]:
+            if ID_field.lower() in [field.name.lower() for field in arcpy.ListFields(catchLayer)]:
                 break
 
         with arcpy.da.SearchCursor(catchLayer, [ID_field]) as cursor:
@@ -88,49 +92,61 @@ class ConnectCatchment(object):
                 msm_CatchConLink = os.path.join(catchLayer.workspacePath, "msm_CatchConLink")
 
                 catchments_existing = []
+                
+                if is_sqlite:
+                    import sqlite3
+                    conn = sqlite3.connect(mike_urban_database)
+                    cursor = conn.cursor()
+                    update_query = r"UPDATE msm_CatchCon SET nodeid = '%s' WHERE catchid IN ('%s')" % (node, "', '".join(catchments_selected))
+                    print(update_query)
+                    cursor.execute(update_query)
+                    conn.commit()
+                    # for catchment in catchment_selected:
+                        # insert_query = r"INSERT INTO msm_CatchCon (catchid, nodeid) VALUES (%s, %s)" % (catchment, node)
+                    conn.close()
+                else:
+                    with arcpy.da.UpdateCursor(msm_CatchCon, ['CatchID', 'NodeID'], where_clause = "CatchID IN ('%s')" % ("', '".join(catchments_selected))) as cursor:
+                        for row in cursor:
+                            row[1] = node
+                            catchments_existing.append(row[0])
+                            cursor.updateRow(row)
 
-                with arcpy.da.UpdateCursor(msm_CatchCon, ['CatchID', 'NodeID'], where_clause = "CatchID IN ('%s')" % ("', '".join(catchments_selected))) as cursor:
-                    for row in cursor:
-                        row[1] = node
-                        catchments_existing.append(row[0])
-                        cursor.updateRow(row)
+                    for MUID in catchments_selected:
+                        if MUID not in catchments_existing:
+                            with arcpy.da.InsertCursor(msm_CatchCon, ['CatchID', 'NodeID']) as cursor:
+                                cursor.insertRow([MUID,node])
 
-                for MUID in catchments_selected:
-                    if MUID not in catchments_existing:
-                        with arcpy.da.InsertCursor(msm_CatchCon, ['CatchID', 'NodeID']) as cursor:
-                            cursor.insertRow([MUID,node])
+                    where_clause = "MUID IN ('%s')" % "', '".join(catchments_selected)
+                    catchments_coordinates = {row[0]: row[1] for row in
+                                              arcpy.da.SearchCursor(ms_Catchment, ["MUID", "SHAPE@XY"],
+                                                                    where_clause=where_clause)}
+                    links = {row[0]: [row[1], row[2]] for row in
+                             arcpy.da.SearchCursor(msm_CatchCon, ["MUID", "CatchID", "NodeID"],
+                                                   where_clause=where_clause.replace("MUID", "CatchID")) if row[1] in catchments_selected}
 
-                where_clause = "MUID IN ('%s')" % "', '".join(catchments_selected)
-                catchments_coordinates = {row[0]: row[1] for row in
-                                          arcpy.da.SearchCursor(ms_Catchment, ["MUID", "SHAPE@XY"],
-                                                                where_clause=where_clause)}
-                links = {row[0]: [row[1], row[2]] for row in
-                         arcpy.da.SearchCursor(msm_CatchCon, ["MUID", "CatchID", "NodeID"],
-                                               where_clause=where_clause.replace("MUID", "CatchID")) if row[1] in catchments_selected}
+                    nodes_MUIDs = [node for catchment, node in links.values()]
 
-                nodes_MUIDs = [node for catchment, node in links.values()]
+                    nodes_coordinates = {row[0]: row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "SHAPE@XY"],
+                                                                                         where_clause="MUID IN ('%s')" % ("', '".join(
+                                                                                             nodes_MUIDs)))}
+                    msm_CatchConLink_MUIDs = [link for link in links.values()]
 
-                nodes_coordinates = {row[0]: row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "SHAPE@XY"],
-                                                                                     where_clause="MUID IN ('%s')" % ("', '".join(
-                                                                                         nodes_MUIDs)))}
-                msm_CatchConLink_MUIDs = [link for link in links.values()]
+                    with arcpy.da.UpdateCursor(msm_CatchConLink, ["CatchConID"], where_clause =
+                                                "CatchConID IN (%s)" % ", ".join([str(key) for key in links.keys()])) as cursor:
+                        for row in cursor:
+                            cursor.deleteRow()
 
-                with arcpy.da.UpdateCursor(msm_CatchConLink, ["CatchConID"], where_clause =
-                                            "CatchConID IN (%s)" % ", ".join([str(key) for key in links.keys()])) as cursor:
-                    for row in cursor:
-                        cursor.deleteRow()
-
-                with arcpy.da.InsertCursor(msm_CatchConLink,
-                                           ["SHAPE@", "MUID", "CatchConID", "SHAPE_Length"]) as cursor:
-                    for link_i, link in enumerate(links.keys()):
-                        catchment, node = links[link]
-                        catchment_coordinate = catchments_coordinates[catchment]
-                        node_coordinate = nodes_coordinates[node]
-                        shape = arcpy.Polyline(
-                            arcpy.Array([arcpy.Point(catchment_coordinate[0], catchment_coordinate[1]),
-                                         arcpy.Point(node_coordinate[0], node_coordinate[1])]))
-                        row = [shape, link_i, link, shape.length]
-                        cursor.insertRow(row)
+                    with arcpy.da.InsertCursor(msm_CatchConLink,
+                                               ["SHAPE@", "MUID", "CatchConID", "SHAPE_Length"]) as cursor:
+                        for link_i, link in enumerate(links.keys()):
+                            catchment, node = links[link]
+                            catchment_coordinate = catchments_coordinates[catchment]
+                            node_coordinate = nodes_coordinates[node]
+                            shape = arcpy.Polyline(
+                                arcpy.Array([arcpy.Point(catchment_coordinate[0], catchment_coordinate[1]),
+                                             arcpy.Point(node_coordinate[0], node_coordinate[1])]))
+                            row = [shape, link_i, link, shape.length]
+                            cursor.insertRow(row)
         pass
     def onMouseUp(self, x, y, button, shift):
         pass
