@@ -12,7 +12,7 @@ import os
 from alive_progress import alive_bar
 
 filenames = [
-    r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\07_MESH\Forslag 16\VBT_Mesh_2023_10_06_interp.mesh"
+    r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\07_MESH\Forslag 16\VBT_Mesh_2023_10_17_interp.mesh"
 ]
 filenames.reverse()
 

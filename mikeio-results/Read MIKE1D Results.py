@@ -7,12 +7,12 @@ import cProfile
 from alive_progress import alive_bar
 import math
 
-extension = "_FM"
+extension = ""
 
 MU_model = None
-MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_109\KOM_Plan_109.mdb"
+MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\VBT_204\VBT_204.sqlite"
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_027\KOM_CDS_5_sc3Base.res1d"
-res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_109\KOM_109_uaabnet_CDS_5_100Base.res1d"
+res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\05_RESULTS\01_NETWORK\2023-11-09\VBT_STATUS_CDS_20_138_SpillBaseDefault_Network_HD.res1d"
 # res1d_files = [r'C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_CDS5_156_ARF_100Base.res1d', r'C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_CDS5_156_ARF_150Base.res1d', r'C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_N_CDS5_156Base.res1d', r'C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_N_CDS5_156_ARF_127Base.res1d']
 # MU_model = r"C:\Papirkurv\VBT_STATUS\VBT_STATUS.sqlite"
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_013\SON_013_N_CDS5_156_ARF_127Base.res1d"
@@ -200,7 +200,7 @@ print("Creating Nodes")
 nodes_output_filepath = arcpy.CreateFeatureclass_management(output_folder, os.path.basename(nodes_new_filename), "POINT")[0]
 arcpy.management.AddField(nodes_output_filepath, "MUID", "TEXT")
 arcpy.management.AddField(nodes_output_filepath, "NetTypeNo", "SHORT")
-for field in ["Diameter", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "max_hl", "max_I_V", "flow_area", "flow_diam", "end_depth"]:
+for field in ["Diameter", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "max_hl", "max_I_V", "flow_area", "flow_diam", "end_depth", "Surcharge"]:
     arcpy.management.AddField(nodes_output_filepath, field, "FLOAT", 8, 2)
 
 print("Creating Links")
@@ -235,8 +235,8 @@ with alive_bar(len(reaches), force_tty=True) as bar:
                     reach.max_end_water_level = np.max(abs(reach_end_values))
             except Exception as e:
                 print(e)
-                # reach.max_discharge = np.max(abs(df.get_reach_end_values("Weir:"+muid, "Discharge")))
-                # reach.sum_discharge = np.trapz(abs(df.get_reach_end_values("Weir:" + muid, "Discharge")), timeseries)
+                reach.max_discharge = np.max(abs(df.get_reach_end_values("Weir:"+muid, "Discharge")))
+                reach.sum_discharge = np.trapz(abs(df.get_reach_end_values("Weir:" + muid, "Discharge")), timeseries)
             if True:
                 # print((reach.min_start_water_level, reach.min_end_water_level, reach.max_start_water_level, reach.max_end_water_level))
                 if all((reach.min_start_water_level, reach.min_end_water_level, reach.max_start_water_level, reach.max_end_water_level)):
@@ -256,7 +256,7 @@ with alive_bar(len(reaches), force_tty=True) as bar:
 res1d_quantities = res1d.quantities
 
 print("Reading and writing Node Results")
-with arcpy.da.InsertCursor(nodes_output_filepath, ["SHAPE@", "MUID", "Diameter", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "NetTypeNo", "max_hl", "max_I_V", "flow_area", "flow_diam", "end_depth"]) as cursor:
+with arcpy.da.InsertCursor(nodes_output_filepath, ["SHAPE@", "MUID", "Diameter", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "NetTypeNo", "max_hl", "max_I_V", "flow_area", "flow_diam", "end_depth", "Surcharge"]) as cursor:
     with alive_bar(len(list(df.data.Nodes)), force_tty=True) as bar:
         for query_node in df.data.Nodes:
             muid = query_node.ID
@@ -294,11 +294,11 @@ with arcpy.da.InsertCursor(nodes_output_filepath, ["SHAPE@", "MUID", "Diameter",
                 query = QueryDataNode("DischargeToSurface", muid)
                 try:
                     query_result = res1d.read(query)
-                    mike_flood_volume = np.trapz(query_result.iloc[:, 0], timeseries)
+                    surcharge = np.trapz(query_result.iloc[:, 0], timeseries)
                 except Exception as e:
-                    mike_flood_volume = None
+                    surcharge = None
             else:
-                mike_flood_volume = None
+                surcharge = None
 
             if muid in [reach.tonode for reach in reaches.values()] and muid in [reach.fromnode for reach in reaches.values()]:
                 try:
@@ -317,6 +317,6 @@ with arcpy.da.InsertCursor(nodes_output_filepath, ["SHAPE@", "MUID", "Diameter",
                     #     print(muid, node.max_headloss, node.outlet_waterlevel, node.inlet_waterlevel)
                     print(traceback.format_exc())
                     print(e)
-            cursor.insertRow([arcpy.Point(query_node.XCoordinate, query_node.YCoordinate), muid, node.diameter if node.diameter else 0, node.invert_level, node.max_level, node.flood_depth, node.flood_volume if not mike_flood_volume else mike_flood_volume, node.net_type_no if node.net_type_no is not None else 0, node.max_headloss if node.max_headloss else 0, node.max_inlet_velocity if node.max_inlet_velocity else 0, node.flow_area, node.flow_area_diameter, node.end_depth if node.end_depth else 0])
+            cursor.insertRow([arcpy.Point(query_node.XCoordinate, query_node.YCoordinate), muid, node.diameter if node.diameter else 0, node.invert_level, node.max_level, node.flood_depth, node.flood_volume if not mike_flood_volume else mike_flood_volume, node.net_type_no if node.net_type_no is not None else 0, node.max_headloss if node.max_headloss else 0, node.max_inlet_velocity if node.max_inlet_velocity else 0, node.flow_area, node.flow_area_diameter, node.end_depth if node.end_depth else 0, surcharge if surcharge else 0])
             bar()
 # cProfile.run("main()")

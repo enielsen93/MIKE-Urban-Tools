@@ -1,7 +1,7 @@
 import mikeio
 
-dfsu_filepath = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\05_RESULTS\03_FLOOD\Plan\VBT_STATUS_002_v4_m21fm - Result Files\VBT_STATUS_CDS_20_138_FMBaseDefault_2D_overland.dfsu"
-
+dfsu_filepath = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\05_RESULTS\03_FLOOD\GA\2023-10-30\VBT_STATUS_002_GA_m21fm - Result Files\VBT_STATUS_CDS_20_138_FM_GABaseDefault_2D_overland.dfsu"
+print(dfsu_filepath)
 dfs = mikeio.dfsu.Dfsu2DH(dfsu_filepath)
 
 step = 6

@@ -7,12 +7,12 @@ import cProfile
 from alive_progress import alive_bar
 import math
 
-extension = "_1D_spill"
+extension = "_spill"
 
 MU_model = None
-MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\VBT_STATUS_005\VBT_STATUS_005.sqlite"
+MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\VBT_STATUS_007\VBT_STATUS_007.sqlite"
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_027\KOM_CDS_5_sc3Base.res1d"
-res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\05_RESULTS\01_NETWORK\2023-11-01\VBT_STATUS_005_CDS_20_138_spillBaseDefault_LTS_extreme_statistics.res1d"
+res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\05_RESULTS\01_NETWORK\2023-11-09\VBT_STATUS_CDS_20_138_SpillBaseDefault_LTS_extreme_statistics.res1d"
 # res1d_files = [r'C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_CDS5_156_ARF_100Base.res1d', r'C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_CDS5_156_ARF_150Base.res1d', r'C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_N_CDS5_156Base.res1d', r'C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_023\SON_023_N_CDS5_156_ARF_127Base.res1d']
 # MU_model = r"C:\Papirkurv\VBT_STATUS\VBT_STATUS.sqlite"
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_013\SON_013_N_CDS5_156_ARF_127Base.res1d"
@@ -20,6 +20,8 @@ res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro 
 # MU_model= "C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_z014\SON_014.mdb"
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_STATUS_001\KOM_STATUS_CDS20Base.res1d"
 # MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_STATUS_001\KOM_STATUS_001.mdb"
+
+print(res1d_file)
 
 nodes = {}
 reaches = {}

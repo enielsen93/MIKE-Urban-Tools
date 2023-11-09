@@ -16,8 +16,7 @@ arcpy.env.overwriteOutput = True
 
 arcpy.CheckOutExtension("3D")
 
-mesh_files = [r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\07_MESH\Forslag 16\VBT_Mesh_2023_10_06_interp.mesh",
-              r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\07_MESH\Forslag 16\VBT_Mesh_0_2m2_interp.mesh"]
+mesh_files = [r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Vesterbro Torv\MIKE_URBAN\07_MESH\Forslag 16\VBT_Mesh_2023_10_31_interp.mesh"]
 
 for mesh_file in mesh_files:
 # mesh_file = r"C:\Papirkurv\MIWM\Herfolge_Flood_endelig_mesh_m_veje_haevet_grunde_interp.mesh"
