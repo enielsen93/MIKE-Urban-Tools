@@ -7,7 +7,7 @@ import os
 import sys
 import numpy as np
 import sqlite3
-import pythonaddins
+# import pythonaddins
 
 
 class Toolbox(object):
@@ -79,26 +79,33 @@ class FieldCalculator(object):
         field = parameters[1].ValueAsText
         value = parameters[2].ValueAsText
 
-        mxd = arcpy.mapping.MapDocument("CURRENT")
-        
-        MU_database = os.path.dirname(arcpy.Describe(featureclass).catalogPath).replace("\mu_Geometry", "")
+        MU_database = os.path.dirname(arcpy.Describe(featureclass).catalogPath).replace("\mu_Geometry", "").replace("!delete!","")
         featureclass_name = arcpy.Describe(featureclass).name
         arcpy.AddMessage(featureclass)
         selection = [row[0] for row in arcpy.da.SearchCursor(featureclass, ["muid"])]
         arcpy.AddMessage("Confirm Query - Might be hidden behind window!")
-        userquery = pythonaddins.MessageBox(
-            "Assign value to %d features?" % (len(selection)),
-            "Confirm Assignment", 4)
+        # userquery = pythonaddins.MessageBox(
+        #     "Assign value to %d features?" % (len(selection)),
+        #     "Confirm Assignment", 4)
 
-        if userquery == "Yes":
-            with sqlite3.connect(
-                        MU_database) as connection:
-                    update_cursor = connection.cursor()
-                    arcpy.AddMessage("UPDATE %s SET %s = %s WHERE MUID IN %s" % (featureclass_name, field, value,
-                                                                                 "('%s')" % ("','".join(selection))))
-                    update_cursor.execute(
-                                    "UPDATE %s SET %s = %s WHERE MUID IN %s" % (featureclass_name, field, value,
-                                                                                 "('%s')" % ("','".join(selection))))
-            update_cursor.close()
+        # if userquery == "Yes":
+        arcpy.AddMessage(MU_database)
+        try:
+            connection = sqlite3.connect(
+                        MU_database)
+            update_cursor = connection.cursor()
+            update_query = "UPDATE %s SET %s = %s WHERE MUID IN %s" % (featureclass_name.replace("main.",""), field, value,
+                                                                         "('%s')" % ("','".join(selection)))
+            update_cursor.execute(update_query)
+            connection.commit()
+            connection.close()
+        except Exception as e:
+            import traceback
+            arcpy.AddWarning(traceback.format_exc())
+            raise (e)
+
+        finally:
+            if connection:
+                connection.close()
         return
         
