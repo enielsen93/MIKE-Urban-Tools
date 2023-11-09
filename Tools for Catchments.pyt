@@ -515,17 +515,22 @@ class CatchmentProcessingScalgo(object):
         raster = parameters[1].ValueAsText
         impervious_table = parameters[2].Value
         arcpy.AddMessage(impervious_table)
+        mike_urban_database = os.path.dirname(arcpy.Describe(ms_Catchment).catalogPath)
 
         class Catchment:
             def __init__(self, area):
                 self.area = area
                 self.impervious_area = 0
+                self.old_imperviousness = 0
 
             @property
             def imperviousness(self):
                 return self.impervious_area / self.area * 100
 
         catchments = {row[0]: Catchment(row[1]) for row in arcpy.da.SearchCursor(ms_Catchment, ["MUID", "SHAPE@Area"])}
+        with arcpy.da.SearchCursor(ms_Catchment, ["MUID", "modelaimparea"]) as cursor:
+            for row in cursor:
+                catchments[row[0]].old_imperviousness = row[1]
 
         # ms_Catchment_copy = arcpy.management.MinimumBoundingGeometry(ms_Catchment, r"C:\Papirkurv\ms_Catchment2", geometry_type = "RECTANGLE_BY_AREA", group_option = "ALL")[0]
         # ms_Catchment_copy = arcpy.management.CopyFeatures(ms_Catchment, r"in_memory\ms_Catchment")[0]
@@ -569,33 +574,54 @@ class CatchmentProcessingScalgo(object):
                                                          cluster_tolerance="-1 Unknown", output_type="INPUT")[0]
 
 
-
-
             with arcpy.da.SearchCursor(intersect_polygon, ["MUID", "gridcode", "SHAPE@Area"]) as cursor:
                 for row in cursor:
                     if row[1] in gridcode_dict and imperviousness_dict[gridcode_dict[row[1]]] > 0:
                         catchments[row[0]].impervious_area += imperviousness_dict[gridcode_dict[row[1]]] * row[2] / 100.0
 
-            if "OplandData_GDB" in arcpy.Describe(ms_Catchment).file:
-                catchmentcursor = arcpy.da.UpdateCursor(catchments, ["MUID", "BEF_GRAD"],
-                                                        where_clause="MUIDs IN ('%s')" % ("', '".join(MUIDs)))
+            arcpy.AddMessage(arcpy.Describe(ms_Catchment).catalogPath)
+            if "sqlite" in arcpy.Describe(ms_Catchment).catalogPath:
+                import sqlite3
+                arcpy.AddMessage(mike_urban_database.replace("!delete!",""))
+                try:
+                    connection =sqlite3.connect(mike_urban_database.replace("!delete!", ""))
+                    update_cursor = connection.cursor()
+                    for muid in catchments.keys():
+                        if abs(catchments[muid].old_imperviousness - catchments[muid].imperviousness/100.0) > 0.01:
+                            arcpy.AddMessage("UPDATE msm_Catchment SET modelaimparea = %1.2f WHERE MUID = '%s'" % (catchments[muid].imperviousness/100.0, muid))
+                            update_cursor.execute(
+                                                "UPDATE msm_Catchment SET modelaimparea = %1.2f WHERE MUID = '%s'" % (catchments[muid].imperviousness/100.0, muid))
+                            arcpy.AddMessage("Changed catchment %s from %d to %d" % (muid, catchments[muid].old_imperviousness*1e4, catchments[muid].imperviousness))
+                    connection.commit()
+                    connection.close()
+                except Exception as e:
+                    import traceback
+                    arcpy.AddWarning(traceback.format_exc())
+                    raise(e)
+                finally:
+                    if connection:
+                        connection.close()
             else:
-                catchmentcursor = arcpy.da.UpdateCursor(
-                    os.path.join(os.path.dirname(arcpy.Describe(ms_Catchment).path), "msm_HModA"), ["CatchID", "ImpArea"],
-                    where_clause="CatchID IN ('%s')" % ("', '".join(catchments.keys())))
+                if "OplandData_GDB" in arcpy.Describe(ms_Catchment).file:
+                    catchmentcursor = arcpy.da.UpdateCursor(catchments, ["MUID", "BEF_GRAD"],
+                                                            where_clause="MUIDs IN ('%s')" % ("', '".join(MUIDs)))
+                else:
+                    catchmentcursor = arcpy.da.UpdateCursor(
+                        os.path.join(os.path.dirname(arcpy.Describe(ms_Catchment).path), "msm_HModA"), ["CatchID", "ImpArea"],
+                        where_clause="CatchID IN ('%s')" % ("', '".join(catchments.keys())))
 
-            for row in catchmentcursor:
-                oldValue = row[1]
-                row[1] = catchments[row[0]].imperviousness
-                if abs(oldValue - row[1]) > 1:
-                    arcpy.AddMessage("Changed catchment %s from %1.0f to %1.0f" % (row[0], oldValue, row[1]))
-                    try:
-                        catchmentcursor.updateRow(row)
-                    except Exception as e:
-                        arcpy.AddError("Can't change %s from %d to %d" % (row[0], oldValue, row[1]))
-                        raise (e)
+                for row in catchmentcursor:
+                    oldValue = row[1]
+                    row[1] = catchments[row[0]].imperviousness
+                    if abs(oldValue - row[1]) > 1:
+                        arcpy.AddMessage("Changed catchment %s from %1.0f to %1.0f" % (row[0], oldValue, row[1]))
+                        try:
+                            catchmentcursor.updateRow(row)
+                        except Exception as e:
+                            arcpy.AddError("Can't change %s from %d to %d" % (row[0], oldValue, row[1]))
+                            raise (e)
 
-            del catchmentcursor
+                del catchmentcursor
 
         return
 
@@ -1366,111 +1392,148 @@ class DuplicateCatchments(object):
 
     def execute(self, parameters, messages):        
         catchments = parameters[0].ValueAsText
-        
-        MU_database = os.path.dirname(arcpy.Describe(catchments).catalogPath).replace("\mu_Geometry","")
+        MU_database = os.path.dirname(arcpy.Describe(catchments).catalogPath).replace("\mu_Geometry", "")
         ms_Catchment = os.path.join(MU_database, "ms_Catchment")
         msm_HModA = os.path.join(MU_database, "msm_HModA")
         msm_CatchCon = os.path.join(MU_database, "msm_CatchCon")
-        MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchments, ["MUID"])]
 
-        # max_catchcon_MUID = np.max([row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database, 'ms_Catchment'), ["MUID"])])
+        if not os.path.exists(msm_CatchCon):
+            arcpy.AddMessage("Assuming it is not part of a MIKE database as %s does not exist" % msm_CatchCon)
+            MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchments, ["MUID"])]
+            MUIDs_duplicate = set()
+            for MUID in MUIDs:
+                if MUIDs.count(MUID) > 1:
+                    MUIDs_duplicate.add(MUID)
 
-        arcpy.SetProgressorLabel("Creating Workspace")
-        MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
-        if not os.path.exists(MIKE_folder):
-            os.mkdir(MIKE_folder)
-        MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
+            MUIDs_reassigned = {MUID: [] for MUID in MUIDs_duplicate}
+            MUIDs_used = MUIDs
 
-        no_dir = True
-        dir_ext = 0
-        while no_dir:
-            try:
-                if arcpy.Exists(MIKE_gdb):
-                    os.rmdir(MIKE_gdb)
-                os.mkdir(MIKE_gdb)
-                no_dir = False
-            except Exception as e:
-                dir_ext += 1
-                MIKE_gdb = os.path.join(MIKE_folder,
-                                        "%s_%d" % (os.path.splitext(os.path.basename(MU_database))[0], dir_ext))
+            for MUID_duplicate in MUIDs_duplicate:
+                idx_of_duplicates = [i for i, MUID in enumerate(MUIDs) if MUID == MUID_duplicate][1:]
 
-        arcpy.CreateFileGDB_management(MIKE_gdb, "scratch.gdb")
-        arcpy.AddMessage(MIKE_gdb)
-        arcpy.env.scratchWorkspace = os.path.join(MIKE_gdb, "scratch.gdb")
-
-        arcpy.SetProgressorLabel("Creating backup in %s" % (arcpy.env.scratchWorkspace))
-        for feature_class in [ms_Catchment, msm_HModA, msm_CatchCon]:
-            arcpy.Copy_management(feature_class, os.path.join(arcpy.env.scratchWorkspace, os.path.basename(feature_class)))
-
-        MUIDs_duplicate = set()
-        for MUID in MUIDs:
-            if MUIDs.count(MUID)>1:
-                MUIDs_duplicate.add(MUID)
-
-        MUIDs_reassigned = {MUID:[] for MUID in MUIDs_duplicate}
-        MUIDs_used = MUIDs
-
-        for MUID_duplicate in MUIDs_duplicate:
-            idx_of_duplicates = [i for i,MUID in enumerate(MUIDs) if MUID == MUID_duplicate][1:]
-
-            for idx in idx_of_duplicates:
-                i = 2
-                new_MUID = MUID_duplicate + "s%d" % i
-                while new_MUID in MUIDs_used:
-                    i += 1
+                for idx in idx_of_duplicates:
+                    i = 2
                     new_MUID = MUID_duplicate + "s%d" % i
+                    while new_MUID in MUIDs_used:
+                        i += 1
+                        new_MUID = MUID_duplicate + "s%d" % i
 
-                MUIDs_reassigned[MUID_duplicate].append(new_MUID)
-                MUIDs_used.append(new_MUID)
+                    MUIDs_reassigned[MUID_duplicate].append(new_MUID)
+                    MUIDs_used.append(new_MUID)
 
-        msm_HModA_table = {}
-        with arcpy.da.SearchCursor(msm_HModA, '*' , "CatchID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
-            for row in cursor:
-                msm_HModA_table[row[1]] = row
-        arcpy.AddMessage((msm_HModA, "CatchID IN ('%s')" % ("', '".join(MUIDs_duplicate)), msm_HModA_table))
+            MUIDs_reassigned_loop = {MUID: 0 for MUID in
+                                     MUIDs_reassigned.keys()}  # dictionairy to check how many times the loop has found this MUID
+            with arcpy.da.UpdateCursor(catchments, ['MUID'], "MUID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
+                for row in cursor:
+                    MUID = row[0]
+                    if row[0] in MUIDs_reassigned:
+                        if MUIDs_reassigned_loop[row[0]] > 0:
+                            row[0] = MUIDs_reassigned[row[0]][MUIDs_reassigned_loop[row[0]]-1]
+                            arcpy.AddMessage(row)
+                            cursor.updateRow(row)
+                        MUIDs_reassigned_loop[MUID] += 1
 
-        msm_CatchCon_table = {}
-        with arcpy.da.SearchCursor(msm_CatchCon, '*' , "CatchID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
-            for row in cursor:
-                msm_CatchCon_table[row[2]] = row
+        else:
+            MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchments, ["MUID"])]
 
-        MUIDs_reassigned_loop = {MUID:0 for MUID in MUIDs_reassigned.keys()}# dictionairy to check how many times the loop has found this MUID
-        with arcpy.da.UpdateCursor(catchments, ['MUID'], "MUID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
-            for row in cursor:
-                MUID = row[0]
-                if row[0] in MUIDs_reassigned:
-                    if MUIDs_reassigned_loop[row[0]] > 0:
+            # max_catchcon_MUID = np.max([row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database, 'ms_Catchment'), ["MUID"])])
+
+            arcpy.SetProgressorLabel("Creating Workspace")
+            MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
+            if not os.path.exists(MIKE_folder):
+                os.mkdir(MIKE_folder)
+            MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
+
+            no_dir = True
+            dir_ext = 0
+            while no_dir:
+                try:
+                    if arcpy.Exists(MIKE_gdb):
+                        os.rmdir(MIKE_gdb)
+                    os.mkdir(MIKE_gdb)
+                    no_dir = False
+                except Exception as e:
+                    dir_ext += 1
+                    MIKE_gdb = os.path.join(MIKE_folder,
+                                            "%s_%d" % (os.path.splitext(os.path.basename(MU_database))[0], dir_ext))
+
+            arcpy.CreateFileGDB_management(MIKE_gdb, "scratch.gdb")
+            arcpy.AddMessage(MIKE_gdb)
+            arcpy.env.scratchWorkspace = os.path.join(MIKE_gdb, "scratch.gdb")
+
+            arcpy.SetProgressorLabel("Creating backup in %s" % (arcpy.env.scratchWorkspace))
+            for feature_class in [ms_Catchment, msm_HModA, msm_CatchCon]:
+                arcpy.Copy_management(feature_class, os.path.join(arcpy.env.scratchWorkspace, os.path.basename(feature_class)))
+
+            MUIDs_duplicate = set()
+            for MUID in MUIDs:
+                if MUIDs.count(MUID)>1:
+                    MUIDs_duplicate.add(MUID)
+
+            MUIDs_reassigned = {MUID:[] for MUID in MUIDs_duplicate}
+            MUIDs_used = MUIDs
+
+            for MUID_duplicate in MUIDs_duplicate:
+                idx_of_duplicates = [i for i,MUID in enumerate(MUIDs) if MUID == MUID_duplicate][1:]
+
+                for idx in idx_of_duplicates:
+                    i = 2
+                    new_MUID = MUID_duplicate + "s%d" % i
+                    while new_MUID in MUIDs_used:
+                        i += 1
+                        new_MUID = MUID_duplicate + "s%d" % i
+
+                    MUIDs_reassigned[MUID_duplicate].append(new_MUID)
+                    MUIDs_used.append(new_MUID)
+
+            msm_HModA_table = {}
+            with arcpy.da.SearchCursor(msm_HModA, '*' , "CatchID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
+                for row in cursor:
+                    msm_HModA_table[row[1]] = row
+            arcpy.AddMessage((msm_HModA, "CatchID IN ('%s')" % ("', '".join(MUIDs_duplicate)), msm_HModA_table))
+
+            msm_CatchCon_table = {}
+            with arcpy.da.SearchCursor(msm_CatchCon, '*' , "CatchID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
+                for row in cursor:
+                    msm_CatchCon_table[row[2]] = row
+
+            MUIDs_reassigned_loop = {MUID:0 for MUID in MUIDs_reassigned.keys()}# dictionairy to check how many times the loop has found this MUID
+            with arcpy.da.UpdateCursor(catchments, ['MUID'], "MUID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
+                for row in cursor:
+                    MUID = row[0]
+                    if row[0] in MUIDs_reassigned:
+                        if MUIDs_reassigned_loop[row[0]] > 0:
+                            arcpy.AddMessage(row)
+                            row[0] = MUIDs_reassigned[row[0]][MUIDs_reassigned_loop[row[0]]-1]
+                            arcpy.AddMessage(row)
+                            cursor.updateRow(row)
+                            arcpy.AddMessage(row)
+                        MUIDs_reassigned_loop[MUID] += 1
+
+            for MUID in MUIDs_reassigned:
+                MUIDs_reassigned[MUID][0] = MUID
+            arcpy.AddMessage(msm_HModA_table)
+            with arcpy.da.InsertCursor(msm_HModA, '*') as cursor:
+                for original_MUID in MUIDs_reassigned.keys():
+                    for new_MUID in MUIDs_reassigned[original_MUID]:
+                        row = list(msm_HModA_table[original_MUID])
+                        row[1] = new_MUID
                         arcpy.AddMessage(row)
-                        row[0] = MUIDs_reassigned[row[0]][MUIDs_reassigned_loop[row[0]]-1]
-                        arcpy.AddMessage(row)
-                        cursor.updateRow(row)
-                        arcpy.AddMessage(row)
-                    MUIDs_reassigned_loop[MUID] += 1
+                        cursor.insertRow(row)
 
-        for MUID in MUIDs_reassigned:
-            MUIDs_reassigned[MUID][0] = MUID
-        arcpy.AddMessage(msm_HModA_table)
-        with arcpy.da.InsertCursor(msm_HModA, '*') as cursor:
-            for original_MUID in MUIDs_reassigned.keys():
-                for new_MUID in MUIDs_reassigned[original_MUID]:
-                    row = list(msm_HModA_table[original_MUID])
-                    row[1] = new_MUID
-                    arcpy.AddMessage(row)
-                    cursor.insertRow(row)
-
-        new_MUID_i = 0
-        catch_con_max_MUID = np.max([row[0] for row in arcpy.da.SearchCursor(msm_CatchCon, ["MUID"])])
-        with arcpy.da.InsertCursor(msm_CatchCon, '*') as cursor:
-            for original_MUID in MUIDs_reassigned.keys():
-                for new_MUID in MUIDs_reassigned[original_MUID]:
-                    new_MUID_i += 1
-                    temp_row = list(msm_CatchCon_table[original_MUID])
-                    temp_row[2] = new_MUID
-                    arcpy.AddMessage((catch_con_max_MUID, new_MUID_i))
-                    temp_row[1] = catch_con_max_MUID + new_MUID_i
-                    arcpy.AddMessage(row)
-                    row = temp_row
-                    cursor.insertRow(row)
+            new_MUID_i = 0
+            catch_con_max_MUID = np.max([row[0] for row in arcpy.da.SearchCursor(msm_CatchCon, ["MUID"])])
+            with arcpy.da.InsertCursor(msm_CatchCon, '*') as cursor:
+                for original_MUID in MUIDs_reassigned.keys():
+                    for new_MUID in MUIDs_reassigned[original_MUID]:
+                        new_MUID_i += 1
+                        temp_row = list(msm_CatchCon_table[original_MUID])
+                        temp_row[2] = new_MUID
+                        arcpy.AddMessage((catch_con_max_MUID, new_MUID_i))
+                        temp_row[1] = catch_con_max_MUID + new_MUID_i
+                        arcpy.AddMessage(row)
+                        row = temp_row
+                        cursor.insertRow(row)
       
         
         return
