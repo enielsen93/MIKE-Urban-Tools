@@ -94,22 +94,12 @@ class ConnectCatchment(object):
                 catchments_existing = []
                 
                 if is_sqlite:
-                    with arcpy.da.SearchCursor(msm_CatchCon.replace("!delete!",""), ['CatchID', 'NodeID'], where_clause = "CatchID IN ('%s')" % ("', '".join(catchments_selected))) as cursor:
-                        for row in cursor:
-                            catchments_existing.append(row[0])
-
                     import sqlite3
                     conn = sqlite3.connect(mike_urban_database.replace("!delete!",""))
                     cursor = conn.cursor()
-                    if catchments_existing:
-                        update_query = r"UPDATE msm_CatchCon SET nodeid = '%s' WHERE catchid IN ('%s')" % (node, "', '".join(catchments_existing))
-                        print(update_query)
-                        cursor.execute(update_query)
-                    catchments_not_existing = list(set(catchments_selected) - set(catchments_existing))
-                    # for catchment in catchments_not_existing:
-                    #     insert_query = r"INSERT INTO msm_CatchCon (catchid, nodeid) VALUES ('%s', '%s')" % (node, catchment)
-                    #     print(insert_query)
-                    #     cursor.execute(insert_query)
+                    update_query = r"UPDATE msm_CatchCon SET nodeid = '%s' WHERE catchid IN ('%s')" % (node, "', '".join(catchments_selected))
+                    print(update_query)
+                    cursor.execute(update_query)
                     conn.commit()
                     # for catchment in catchment_selected:
                         # insert_query = r"INSERT INTO msm_CatchCon (catchid, nodeid) VALUES (%s, %s)" % (catchment, node)
