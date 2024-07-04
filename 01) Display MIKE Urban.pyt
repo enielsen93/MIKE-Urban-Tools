@@ -22,7 +22,6 @@ import scipy.integrate
 from collections import namedtuple
 import warnings
 
-
 def getAvailableFilename(filepath, parent=None):
     parent = "F%s" % (parent) if parent and parent[0].isdigit() else None
     parent = os.path.basename(re.sub(r"\.[^\.\\]+$", "", parent)).replace(".", "_").replace("-", "_").replace(" ",
@@ -34,18 +33,6 @@ def getAvailableFilename(filepath, parent=None):
         while arcpy.Exists(filepath + "%d" % i):
             i += 1
         return filepath + "%d" % i
-        # try:
-        # arcpy.Delete_management(filepath)
-        # return filepath
-        # except:
-        # i = 1
-        # while arcpy.Exists(filepath + "%d" % i):
-        # try:
-        # arcpy.Delete_management(filepath + "%d" % i)
-        # return filepath + "%d" % i
-        # except:
-        # i += 1
-        # return filepath + "%d" % i
     else:
         return filepath
 

@@ -8,7 +8,7 @@ from alive_progress import alive_bar
 import math
 import warnings
 
-extension = "3"
+extension = "5"
 MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_050\SON_050.mdb"
 res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_050\SON_050_N_CDS5_156Base.res1d"
 
@@ -107,33 +107,34 @@ if MU_model and ".mdb" in MU_model:
     import pyodbc
     if not any("Access" in item for item in pyodbc.drivers()):
         raise Exception("Error. Could not find driver for Microsoft Access! Perhaps Python is 64 bit and Access is 32 bit or vice versa? Install Microsoft Access Database Engine 2016 64 bit from Software Store.")
-    conn = pyodbc.connect(r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=%s;' % (MU_model))
-    cursor = conn.cursor()
-    cursor.execute('select MUID, Diameter, NetTypeNo, groundlevel, criticallevel, invertlevel from msm_Node')
-    rows = cursor.fetchall()
-    for row in rows:
-        nodes[row[0]] = Node(row[0])
-        nodes[row[0]].diameter = row[1]
-        nodes[row[0]].net_type_no = row[2]
-        nodes[row[0]].ground_level = row[3]
-        nodes[row[0]].critical_level = row[4]
-        nodes[row[0]].invert_level = row[5]
+    with pyodbc.connect(r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=%s;' % (MU_model)) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute('select MUID, Diameter, NetTypeNo, groundlevel, criticallevel, invertlevel from msm_Node')
+            rows = cursor.fetchall()
+            for row in rows:
+                nodes[row[0]] = Node(row[0])
+                nodes[row[0]].diameter = row[1]
+                nodes[row[0]].net_type_no = row[2]
+                nodes[row[0]].ground_level = row[3]
+                nodes[row[0]].critical_level = row[4]
+                nodes[row[0]].invert_level = row[5]
 
-    cursor.execute('select MUID, NetTypeNo from msm_Weir')
-    rows = cursor.fetchall()
-    for row in rows:
-        reaches[row[0]] = Reach(row[0])
-        reaches[row[0]].net_type_no = row[1]
-        reaches[row[0]].type = "Weir"
+            cursor.execute('select MUID, NetTypeNo from msm_Weir')
+            rows = cursor.fetchall()
+            for row in rows:
+                reaches[row[0]] = Reach(row[0])
+                reaches[row[0]].net_type_no = row[1]
+                reaches[row[0]].type = "Weir"
 
-    cursor.execute('select MUID, NetTypeNo, Diameter, uplevel, uplevel_c, dwlevel, dwlevel_c from msm_Link')
-    rows = cursor.fetchall()
-    for row in rows:
-        reaches[row[0]] = Reach(row[0])
-        reaches[row[0]].net_type_no = row[1]
-        reaches[row[0]].diameter = row[2]
-        reaches[row[0]].uplevel = row[3] if row[3] else row[4]
-        reaches[row[0]].dwlevel = row[5] if row[5] else row[6]
+            cursor.execute('select MUID, NetTypeNo, Diameter, uplevel, uplevel_c, dwlevel, dwlevel_c from msm_Link')
+            rows = cursor.fetchall()
+            for row in rows:
+                reaches[row[0]] = Reach(row[0])
+                reaches[row[0]].net_type_no = row[1]
+                reaches[row[0]].diameter = row[2]
+                reaches[row[0]].uplevel = row[3] if row[3] else row[4]
+                reaches[row[0]].dwlevel = row[5] if row[5] else row[6]
+
 
 elif MU_model and ".sqlite" in MU_model:
     with arcpy.da.SearchCursor(os.path.join(MU_model, "msm_Node"), ["MUID", "Diameter", "NetTypeNo", "GroundLevel", "CriticalLevel", "InvertLevel"]) as cursor:
