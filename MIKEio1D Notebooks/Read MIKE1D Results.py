@@ -8,12 +8,12 @@ from alive_progress import alive_bar
 import math
 import warnings
 
-extension = "1"
-MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_211\SON_211_New_3.sqlite"
-res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_211\SON_211_New_3_m1d - Result Files\SON_211_CDS_10_100BaseDefault_Network_HD.res1d"
+extension = "3"
+MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_050\SON_050.mdb"
+res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_050\SON_050_N_CDS5_156Base.res1d"
 
 
-filter_to_extent = [571614, 6219613, 572864, 6220891]
+filter_to_extent = [571648, 6219583, 572698, 6220380]
 if filter_to_extent:
     print("Skipping all reaches and nodes outside extent %s" % filter_to_extent)
 
@@ -44,10 +44,11 @@ class Node:
 
     @property
     def flood_volume(self):
+        reservoir_height = -0.25
         if self.diameter and self.flood_depth:
             node_area = self.diameter**2*np.pi/4
-            integral1 = (math.exp(7*min(1,self.flood_depth))/7-math.exp(7*0)/7)*node_area
-            integral2 = (max(1, self.flood_depth)-1)*node_area*1000
+            integral1 = (math.exp(7*min(1,(self.flood_depth-reservoir_height)))/7-math.exp(7*0)/7)*node_area
+            integral2 = (max(1, (self.flood_depth-reservoir_height))-1)*node_area*1000
             return integral1+integral2
         else:
             return 0
@@ -104,8 +105,9 @@ class Reach:
 print("Reading MIKE Database")
 if MU_model and ".mdb" in MU_model:
     import pyodbc
-    conn = pyodbc.connect(
-        r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=%s;' % (MU_model))
+    if not any("Access" in item for item in pyodbc.drivers()):
+        raise Exception("Error. Could not find driver for Microsoft Access! Perhaps Python is 64 bit and Access is 32 bit or vice versa? Install Microsoft Access Database Engine 2016 64 bit from Software Store.")
+    conn = pyodbc.connect(r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=%s;' % (MU_model))
     cursor = conn.cursor()
     cursor.execute('select MUID, Diameter, NetTypeNo, groundlevel, criticallevel, invertlevel from msm_Node')
     rows = cursor.fetchall()
