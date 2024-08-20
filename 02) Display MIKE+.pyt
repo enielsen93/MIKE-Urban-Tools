@@ -49,16 +49,16 @@ from arcpy import env
 
 class Toolbox(object):
     def __init__(self):
-        self.label =  "Display SQLITE"
-        self.alias  = "Display SQLITE"
+        self.label =  "Display MIKE+"
+        self.alias  = "Display MIKE+"
 
         # List of tool classes associated with this toolbox
         self.tools = [DisplaySqliteStep1, DisplaySqliteStep2] #DimensionAnalysis, DisplayPipeElevation
 
 class DisplaySqliteStep1(object):
     def __init__(self):
-        self.label = "Display SQLITE, step 1"
-        self.description = "Display SQLITE, step 1"
+        self.label = "1) Display SQLITE - Step 1"
+        self.description = ("1) Display SQLITE - Step 1")
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1004,12 +1004,15 @@ class DisplaySqliteStep1(object):
         # arcpy.RefreshTOC()
         # arcpy.RefreshActiveView()
         copy2clip("; ".join(clipboard_txt))
+
+        arcpy.AddMessage("Feature paths copied to Clipboard. Open <Add Data> and paste from Clipboard then click <Add>. For all subsequent dialog boxes tick muid and click OK. Then Drag & Drop Layers into Group %s." % empty_group_layer.name)
+        arcpy.RefreshTOC()
         return
 
 class DisplaySqliteStep2(object):
     def __init__(self):
-        self.label = "Display SQLITE, step 2"
-        self.description = "Display SQLITE, step 2"
+        self.label = "2) Display SQLITE - Step 2"
+        self.description = "2) Display SQLITE - Step 2"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1121,4 +1124,6 @@ class DisplaySqliteStep2(object):
                 if "msm_Catchment" in layer.dataSource:
                     layer_template = os.path.join(templates_folder, "msm_Catchment.lyr")
                     apply_layer_settings(layer, layer_template)
+
+            arcpy.RefreshTOC()
 
