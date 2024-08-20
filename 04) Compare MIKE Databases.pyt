@@ -43,8 +43,8 @@ class Toolbox(object):
 
 class CompareMikeModels(object):
     def __init__(self):
-        self.label = "Compare MIKE Models"
-        self.description = "Compare MIKE Models"
+        self.label = "1) Compare MIKE Models"
+        self.description = "1) Compare MIKE Models"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -130,6 +130,7 @@ class CompareMikeModels(object):
             updatelayer = arcpy.mapping.ListLayers(mxd, layer.name, df)[0]
             updatelayer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))), workspace_type,
                                           unicode(os.path.basename(source)))
+            return updatelayer
 
         empty_group_mapped = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\EmptyGroup.lyr")
         empty_group = arcpy.mapping.AddLayer(df, empty_group_mapped, "TOP")
@@ -294,14 +295,17 @@ class CompareMikeModels(object):
                     cursor.insertRow(row)
 
             newlayer = arcpy.mapping.Layer(result_layer)
-            arcpy.mapping.AddLayerToGroup(df, empty_group_layer, newlayer, "TOP")
+            arcpy.AddMessage(newlayer.name)
+            newlayer.name = newlayer.name + " (%d features)" % (np.sum(
+                [1 for row in arcpy.da.SearchCursor(result_layer, ["MUID"])]))
+            update_layer = arcpy.mapping.AddLayerToGroup(df, empty_group_layer, newlayer, "TOP")
 
         return
 
 class FixSimulationModelName(object):
     def __init__(self):
-        self.label = "Fix MIKE Urban Model Name"
-        self.description = "Fix MIKE Urban Model Name"
+        self.label = "a) Fix MIKE Urban Model Name"
+        self.description = "a) Fix MIKE Urban Model Name"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
