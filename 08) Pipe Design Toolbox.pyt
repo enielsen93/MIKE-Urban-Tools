@@ -100,8 +100,8 @@ class Toolbox(object):
 
 class PipeDimensionToolTAPro(object):
     def __init__(self):
-        self.label       = "Calculate minimum required pipe diameter through Time Area Method"
-        self.description = "Calculate minimum required pipe diameter through Time Area Method"
+        self.label       = "1a) Calculate minimum required pipe diameter through Time Area Method"
+        self.description = "1a) Calculate minimum required pipe diameter through Time Area Method"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -715,8 +715,8 @@ class PipeDimensionToolTAPro(object):
 
 class PipeDimensionToolResultFile(object):
     def __init__(self):
-        self.label = "Calculate minimum required pipe diameter through Result File"
-        self.description = "Calculate minimum required pipe diameter through Result File"
+        self.label = "1b) Calculate minimum required pipe diameter through Result File"
+        self.description = "1b) Calculate minimum required pipe diameter through Result File"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1003,8 +1003,8 @@ class PipeDimensionToolResultFile(object):
 
 class upgradeDimensions(object):
     def __init__(self):
-        self.label       = "Upgrade dimensions"
-        self.description = "Upgrade dimensions"
+        self.label       = "2b) Upgrade dimensions"
+        self.description = "2b) Upgrade dimensions"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1110,8 +1110,8 @@ class upgradeDimensions(object):
 
 class downgradeDimensions(object):
     def __init__(self):
-        self.label       = "Downgrade dimensions"
-        self.description = "Downgrade dimensions"
+        self.label       = "2a) Downgrade dimensions"
+        self.description = "2a) Downgrade dimensions"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1220,8 +1220,8 @@ class downgradeDimensions(object):
 
 class CopyDiameter(object):
     def __init__(self):
-        self.label       = "Copy field value from layer to layer"
-        self.description = "Copy field value from layer to layer"
+        self.label       = "6) Copy field value from layer to layer"
+        self.description = "6) Copy field value from layer to layer"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1380,7 +1380,7 @@ class CopyDiameter(object):
         fields = changeShapeFieldname([field.name.lower() for field in arcpy.ListFields(reference_feature_layer)])
         if "esri_oid" in fields:
             fields.remove("esri_oid")
-        arcpy.AddMessage(fields)
+        # arcpy.AddMessage(fields)
 
         with arcpy.da.SearchCursor(arcpy.Describe(reference_feature_layer).catalogPath, fields, where_clause = reference_where_clause) as cursor:
             for row in cursor:
@@ -1396,7 +1396,7 @@ class CopyDiameter(object):
         if "ESRI_OID" in fields:
             fields.remove("ESRI_OID")
 
-        arcpy.AddMessage(fields)
+        # arcpy.AddMessage(fields)
         match_by_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == match_by.lower().replace("shape","shape@")][0]
         # arcpy.AddMessage(fields)
         # arcpy.AddMessage(match_by_field_i)
@@ -1444,7 +1444,7 @@ class CopyDiameter(object):
                 for row in cursor:
                     # arcpy.AddMessage((fields, row))
                     match = [reference for reference in references if getattr(reference, match_by.lower()) == row[match_by_field_i]]
-                    arcpy.AddMessage((getattr(reference, match_by.lower()), row[match_by_field_i]))
+                    # arcpy.AddMessage((getattr(reference, match_by.lower()), row[match_by_field_i]))
                     # arcpy.AddMessage([getattr(reference, match_by.lower()) for reference in references])
                     if match:
                         reference = match[0]
@@ -1468,8 +1468,8 @@ class CopyDiameter(object):
 
 class InterpolateInvertLevels(object):
     def __init__(self):
-        self.label       = "Interpolate Invert Levels"
-        self.description = "Interpolate Invert Levels"
+        self.label       = "3) Interpolate Invert Levels"
+        self.description = "3) Interpolate Invert Levels"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1675,8 +1675,8 @@ class InterpolateInvertLevels(object):
 
 class GetMinimumSlope(object):
     def __init__(self):
-        self.label = "Calculate Minimum Slope of Energy Gradient"
-        self.description = "Calculate Minimum Slope of Energy Gradient"
+        self.label = "1c) Calculate Minimum Slope of Energy Gradient"
+        self.description = "1c) Calculate Minimum Slope of Energy Gradient"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1832,8 +1832,8 @@ class GetMinimumSlope(object):
 
 class setOutletLoss(object):
     def __init__(self):
-        self.label       = "Change outlet loss of nodes"
-        self.description = "Change outlet loss of nodes"
+        self.label       = "a) Change outlet loss of nodes"
+        self.description = "a) Change outlet loss of nodes"
         self.canRunInBackground = True
 
     def getParameterInfo(self):
@@ -1970,8 +1970,8 @@ class setOutletLoss(object):
 
 class reverseChange(object):
     def __init__(self):
-        self.label       = "Revert changed dimensions"
-        self.description = "Revert changed dimensions"
+        self.label       = "2c) Revert changed dimensions"
+        self.description = "2c) Revert changed dimensions"
         self.canRunInBackground = True
 
     def getParameterInfo(self):
@@ -2038,8 +2038,8 @@ class reverseChange(object):
 
 class CalculateSlopeOfPipe(object):
     def __init__(self):
-        self.label       = "Calculate Slope of Pipe"
-        self.description = "Calculate Slope of Pipe"
+        self.label       = "b) Calculate Slope of Pipe"
+        self.description = "b) Calculate Slope of Pipe"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -2112,8 +2112,8 @@ class CalculateSlopeOfPipe(object):
 
 class ResetUpLevelDwlevel(object):
     def __init__(self):
-        self.label = "Set Uplevel and Dwlevel to NULL if equal to invert level"
-        self.description = "Set Uplevel and Dwlevel to NULL if equal to invert level"
+        self.label = "5) Set Uplevel and Dwlevel to NULL if equal to invert level"
+        self.description = "5) Set Uplevel and Dwlevel to NULL if equal to invert level"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -2196,8 +2196,8 @@ class ResetUpLevelDwlevel(object):
 
 class SetDischargeRegulation(object):
     def __init__(self):
-        self.label = "Set Discharge Regulation"
-        self.description = "Set Discharge Regulation"
+        self.label = "4) Set Discharge Regulation"
+        self.description = "4) Set Discharge Regulation"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -2346,8 +2346,8 @@ class IncreaseBasinSize(object):
 
 class AnalyzeCatchmentArea(object):
     def __init__(self):
-        self.label = "Analyze Catchment Area to Link"
-        self.description = "Analyze Catchment Area to Link"
+        self.label = "c) Analyze Catchment Area to Link"
+        self.description = "c) Analyze Catchment Area to Link"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
