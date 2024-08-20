@@ -27,8 +27,8 @@ class Toolbox(object):
 
 class GetTerrainElevation(object):
     def __init__(self):
-        self.label = "Assign terrain data MIKE Manholes or Points"
-        self.description = "Assign terrain data to MIKE Manholes or Points"
+        self.label = "1) Assign terrain data MIKE Manholes or Points"
+        self.description = "1) Assign terrain data to MIKE Manholes or Points"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -217,8 +217,8 @@ class GetTerrainElevation(object):
 
 class GetTerrainElevationDandas(object):
     def __init__(self):
-        self.label = "Assign terrain data to Dandas manholes"
-        self.description = "Assign terrain data to Dandas manholes"
+        self.label = "2) Assign terrain data to Dandas manholes"
+        self.description = "2) Assign terrain data to Dandas manholes"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
