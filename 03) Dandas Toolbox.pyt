@@ -47,8 +47,8 @@ class Toolbox(object):
 class Dandas2MULinks(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
-        self.label = "Convert Dandas .XMLs to Mike Urban Features"
-        self.description = "Convert Dandas .XMLs to Mike Urban Features"
+        self.label = "1) Convert Dandas .XMLs to Mike Urban Features"
+        self.description = "1) Convert Dandas .XMLs to Mike Urban Features"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -460,12 +460,12 @@ class Dandas2MULinks(object):
                         if link_delledning.find("BundloebskoteOpst") is not None:
                             if (link_delledning.find("DeltaKoteOpst") is not None and 
                                 not link_delledning.find("DeltaKoteOpst").text == "0.00"):
-                                linkDictionary["UpLevel"] = link_delledning.find("BundloebskoteOpst").text
+                                linkDictionary["UpLevel"] = float(link_delledning.find("BundloebskoteOpst").text)
                             
                         if link_delledning.find("BundloebskoteNedst") is not None:
                             if (link_delledning.find("DeltaKoteNedst") is not None and 
                                     not link_delledning.find("DeltaKoteNedst").text == "0.00"):
-                                linkDictionary["DwLevel"] = link_delledning.find("BundloebskoteNedst").text
+                                linkDictionary["DwLevel"] = float(link_delledning.find("BundloebskoteNedst").text)
                         
                         if link_delledning.find("Fald") is not None:
                             linkDictionary["Slope_C"] = float(link_delledning.find("Fald").text)/10
@@ -541,8 +541,8 @@ class Dandas2MULinks(object):
 class DDS2Tilbudsliste(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
-        self.label = "Convert to Tender Document"
-        self.description = "Convert to Tender Document"
+        self.label = "a) Convert to Tender Document"
+        self.description = "a) Convert to Tender Document"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -750,8 +750,8 @@ class DDS2Tilbudsliste(object):
 class CopyMikeUrbanFeatures(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
-        self.label = "Copy Mike Urban Features to Mike Urban Database"
-        self.description = "Copy Mike Urban Features to Mike Urban Database"
+        self.label = "2) Copy Mike Urban Features to Mike Urban Database"
+        self.description = "2) Copy Mike Urban Features to Mike Urban Database"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1031,8 +1031,8 @@ class CopyMikeUrbanFeatures(object):
 
 class GPSManholes(object):
     def __init__(self):
-        self.label       = "Find GPS-measured manholes from Dandas XML"
-        self.description = "Find GPS-measured manholes from Dandas XML"
+        self.label       = "b) Find GPS-measured manholes from Dandas XML"
+        self.description = "b) Find GPS-measured manholes from Dandas XML"
 
     def getParameterInfo(self):
         #Define parameter definitions
@@ -1233,8 +1233,8 @@ class GPSManholes(object):
 class DDS2ArcGISRK(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
-        self.label = "Find unconnected Dandas Catchments w/ Reduktionsknuder"
-        self.description = "Find unconnected Dandas Catchments w/ Reduktionsknuder"
+        self.label = "c) Find unconnected Dandas Catchments w/ Reduktionsknuder"
+        self.description = "c) Find unconnected Dandas Catchments w/ Reduktionsknuder"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1359,8 +1359,8 @@ class DDS2ArcGISRK(object):
 class DDS2ArcGISMU(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
-        self.label = "Find unconnected Dandas Catchments w/ Mike Urban Manholes"
-        self.description = "Find unconnected Dandas Catchments w/ Mike Urban Manholes"
+        self.label = "d) Find unconnected Dandas Catchments w/ Mike Urban Manholes"
+        self.description = "d) Find unconnected Dandas Catchments w/ Mike Urban Manholes"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
