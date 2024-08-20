@@ -51,8 +51,8 @@ class Toolbox(object):
 
 class DisplayMikeUrban(object):
     def __init__(self):
-        self.label = "Display Mike Urban Model"
-        self.description = "Display Mike Urban Model"
+        self.label = "1) Display Mike Urban Model"
+        self.description = "1) Display Mike Urban Model"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1125,6 +1125,7 @@ class DisplayMikeUrban(object):
         # arcpy.SetProgressor("default","Refreshing map")
         # arcpy.RefreshTOC()
         # arcpy.RefreshActiveView()
+        arcpy.RefreshTOC()
         return
 
 
@@ -1282,8 +1283,8 @@ class DisplayPipeElevation(object):
 
 class CopyMUPTemplate(object):
     def __init__(self):
-        self.label = "Copy MUP Template"
-        self.description = "Copy MUP Template"
+        self.label = "a) Use MUP Template for MIKE Urban Database with proper labelling"
+        self.description = "a) Use MUP Template for MIKE Urban Database with proper labelling"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
