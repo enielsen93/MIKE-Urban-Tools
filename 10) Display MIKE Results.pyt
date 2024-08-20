@@ -337,15 +337,13 @@ class DisplayFloodReturnPeriodFun(object):
                     MUIDsTCrit[MUID] = np.interp(MUIDsHCrit[MUID],
                           np.flipud(nodeH),
                           np.flipud(float(observationPeriod)/(np.array(range(len(nodeH)))+1)))
-                    arcpy.AddMessage((MUIDsHCrit[MUID], nodeH))
+                    # arcpy.AddMessage((MUIDsHCrit[MUID], nodeH))
                 if critical_return_period:
                     try:
                         MUIDs_elevation_at_crit[MUID] = np.interp(critical_return_period,
                                                            np.flipud(float(observationPeriod) /
                                                                      (np.array(range(len(nodeH))) + 1)),
                                                            np.flipud(nodeH))
-                        if MUID == "B828":
-                            arcpy.AddMessage((nodeH))
                     except Exception as e:
                         pass
             except Exception as e:
@@ -355,7 +353,7 @@ class DisplayFloodReturnPeriodFun(object):
         arcpy.SetProgressorLabel("Creating manhole result file")
         msm_NodeNew = arcpy.CopyFeatures_management(msm_Node, getAvailableFilename(arcpy.env.scratchGDB + "\NodeFloodReturn",
                                                                           parent=mike_urban_database)).getOutput(0)
-        arcpy.AddMessage(msm_NodeNew)
+        # arcpy.AddMessage(msm_NodeNew)
         arcpy.AddField_management (msm_NodeNew, "TCrit", "DOUBLE", 10, 5)
         with arcpy.da.UpdateCursor(msm_NodeNew,["MUID","TCrit"]) as cursor:
             for row in cursor:
@@ -417,9 +415,9 @@ class DisplayFloodReturnPeriodFun(object):
                 update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))),
                                                workspace_type, unicode(os.path.basename(source)))
 
-        arcpy.AddMessage((os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Node.lyr", msm_NodeNew, "FILEGDB_WORKSPACE"))
+        # arcpy.AddMessage((os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Node.lyr", msm_NodeNew, "FILEGDB_WORKSPACE"))
         addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Node.lyr", msm_NodeNew, workspace_type="FILEGDB_WORKSPACE")
-
+        return
         arcpy.SetProgressorLabel("Creating basin result file")
         exportBasins = arcpy.Select_analysis(mike_urban_database + r"\mu_Geometry\msm_Node", getAvailableFilename(arcpy.env.scratchGDB + "\BasinFloodReturn",
                                                                          parent=mike_urban_database), where_clause = "TypeNo = 2").getOutput(0)
@@ -1358,7 +1356,6 @@ class DisplayWeirReturnPeriod(object):
 
         addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Weir_return_period.lyr", msm_WeirNew, group = empty_group_layer, workspace_type = "FILEGDB_WORKSPACE")
 
-
 class DisplayMIKE1DResults(object):
     def __init__(self):
         self.label = "Display MIKE1D Results (alpha)"
@@ -1394,8 +1391,17 @@ class DisplayMIKE1DResults(object):
             direction="Input")
         reach_featureclass.filter.list = ["LINE", "POLYLINE"]
 
+        display_type = arcpy.Parameter(
+            displayName="Display with fitting symbology",
+            name="display_type",
+            datatype="GPString",
+            parameterType="Optional",
+            multiValue=True,
+            direction="Input")
+        display_type.filter.list = ["Flood volume", "Max Elevation / Headloss"]
+        display_type.value = "Flood Volume"
 
-        parameters = [folder, node_featureclass, reach_featureclass]
+        parameters = [folder, node_featureclass, reach_featureclass, display_type]
 
         return parameters
 
@@ -1434,6 +1440,8 @@ class DisplayMIKE1DResults(object):
     def execute(self, parameters, messages):
         nodes_featureclass = parameters[1].ValueAsText
         reaches_featureclass = parameters[2].ValueAsText
+        display_type = parameters[3].ValueAsText
+        arcpy.AddMessage(display_type)
 
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
@@ -1537,10 +1545,22 @@ class DisplayMIKE1DResults(object):
                                  new_name=os.path.basename(nodes_featureclass).replace(".shp", ""))
                 layer.showLabels = True
             else:
-                layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE1D_results_nodes.lyr",
-                         nodes_featureclass.replace(".shp",""), group=None, workspace_type = "SHAPEFILE_WORKSPACE", new_name = os.path.basename(nodes_featureclass).replace(".shp",""))
-            layer.showLabels = False
-        #
+                # layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE1D_results_nodes.lyr",
+                #          nodes_featureclass.replace(".shp",""), group=None, workspace_type = "SHAPEFILE_WORKSPACE", new_name = os.path.basename(nodes_featureclass).replace(".shp",""))
+                if "flood volume" in display_type.lower():
+                    layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE1D_results_nodes_floodvol.lyr",
+                                     nodes_featureclass.replace(".shp", ""), group=None,
+                                     workspace_type="SHAPEFILE_WORKSPACE",
+                                     new_name=os.path.basename(nodes_featureclass).replace(".shp", ""))
+                    layer.showLabels = True
+                elif "headloss" in display_type.lower():
+                    layer = addLayer(
+                        os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE1D_results_nodes.lyr",
+                        nodes_featureclass.replace(".shp", ""), group=None,
+                        workspace_type="SHAPEFILE_WORKSPACE",
+                        new_name=os.path.basename(nodes_featureclass).replace(".shp", ""))
+                    layer.showLabels = False
+        arcpy.RefreshTOC()
         # def addLayer(layer_source, source):
         #     layer = arcpy.mapping.Layer(layer_source)
         #     layer = arcpy.mapping.AddLayer(df, weirLayer, 'TOP')
