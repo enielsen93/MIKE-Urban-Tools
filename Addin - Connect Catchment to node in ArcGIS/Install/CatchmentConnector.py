@@ -70,6 +70,16 @@ class ConnectCatchment(object):
         
         mike_urban_database = os.path.dirname(arcpy.Describe(catchLayer).catalogPath).replace("\mu_Geometry", "")
         is_sqlite = True if ".sqlite" in mike_urban_database else False
+
+        def find_duplicates(strings):
+            return list(set([x for x in strings if strings.count(x) > 1]))
+
+        msm_CatchConLink = os.path.join(catchLayer.workspacePath, "msm_CatchConLink")
+        duplicates = find_duplicates([row[0] for row in arcpy.da.SearchCursor(msm_CatchConLink, ["MUID"])])
+        if duplicates:
+            # arcpy.AddMessage(["('%s')" % "', '".join(duplicates)])
+            if pythonaddins.MessageBox(["Duplicates found in msm_CatchConLink MUID: ('%s'). Continue?" % "', '".join(duplicates)], "Continue", 1) != "OK":
+                exit()
         
         catchments_selected = []
         ID_fields = ["MUID","FID","OBJECTID","OID"]
@@ -89,7 +99,8 @@ class ConnectCatchment(object):
                 msm_Node = os.path.join(catchLayer.workspacePath, "msm_Node")
                 ms_Catchment = os.path.join(catchLayer.workspacePath, "ms_Catchment")
                 msm_CatchCon = os.path.join(catchLayer.workspacePath, "msm_CatchCon")
-                msm_CatchConLink = os.path.join(catchLayer.workspacePath, "msm_CatchConLink")
+
+                msm_CatchConLink
 
                 catchments_existing = []
                 
