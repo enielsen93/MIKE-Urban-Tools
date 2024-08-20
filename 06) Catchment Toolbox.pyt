@@ -41,12 +41,12 @@ class Toolbox(object):
         self.alias  = "Catchments"
 
         # List of tool classes associated with this toolbox
-        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, AlteredCatchments, CheckCatchments, FAS2Deloplande, TransferCatchments, GetImperviousness, GetImperviousnessFlora, DuplicateCatchments, GenerateCatchmentConnections, SetImperviousness, CatchmentProcessingScalgo]
+        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, CheckCatchments, FAS2Deloplande, TransferCatchments, DuplicateCatchments, GenerateCatchmentConnections, SetImperviousness, CatchmentProcessingScalgo]
 
 class CatchmentProcessing(object):
     def __init__(self):
-        self.label       = "Calculate imperviousness"
-        self.description = "Calculate imperviousness of catchments from shapefiles delineating impervious areas"
+        self.label       = "1a) Calculate imperviousness"
+        self.description = "1a) Calculate imperviousness of catchments from shapefiles delineating impervious areas"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -242,8 +242,8 @@ class CatchmentProcessing(object):
 
 class CatchmentProcessingAlt(object):
     def __init__(self):
-        self.label       = "Calculate imperviousness (set to field of shapefile)"
-        self.description = "Calculate imperviousness of catchments from shapefiles delineating impervious areas"
+        self.label       = "1b) Calculate imperviousness (set to field of shapefile)"
+        self.description = "1b) Calculate imperviousness of catchments from shapefiles delineating impervious areas"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -458,8 +458,8 @@ class CatchmentProcessingAlt(object):
 
 class CatchmentProcessingScalgo(object):
     def __init__(self):
-        self.label = "Calculate imperviousness based on areal cover from SCALGO LIVE"
-        self.description = "Calculate imperviousness based on areal cover from SCALGO LIVE"
+        self.label = "1c) Calculate imperviousness based on areal cover from SCALGO LIVE"
+        self.description = "1c) Calculate imperviousness based on areal cover from SCALGO LIVE"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -716,8 +716,8 @@ class AlteredCatchments(object):
 
 class CheckCatchments(object):
     def __init__(self):
-        self.label       = "Check catchments"
-        self.description = "Check catchments"
+        self.label       = "2) Check catchments"
+        self.description = "2) Check catchments"
 
     def getParameterInfo(self):
         #Define parameter definitions
@@ -853,8 +853,8 @@ class CheckCatchments(object):
 
 class FAS2Deloplande(object):
     def __init__(self):
-        self.label       = "Assign FAS Data to Catchments"
-        self.description = "Assign FAS Data to Catchments"
+        self.label       = "b) Assign FAS Data to Catchments"
+        self.description = "b) Assign FAS Data to Catchments"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1029,8 +1029,8 @@ class FAS2Deloplande(object):
 
 class TransferCatchments(object):
     def __init__(self):
-        self.label       = "Transfer Catchments from shapefile to Mike Urban Model"
-        self.description = "Transfer Catchments from shapefile to Mike Urban Model"
+        self.label       = "3) Transfer Catchments from shapefile to Mike Urban Model"
+        self.description = "3) Transfer Catchments from shapefile to Mike Urban Model"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1375,8 +1375,8 @@ class GetImperviousness(object):
                 
 class DuplicateCatchments(object):
     def __init__(self):
-        self.label       = "Solve Catchments with identical MUIDs"
-        self.description = "Solve Catchments with identical MUIDs"
+        self.label       = "4) Solve Catchments with identical MUIDs"
+        self.description = "4) Solve Catchments with identical MUIDs"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1554,8 +1554,8 @@ class DuplicateCatchments(object):
 
 class GenerateCatchmentConnections(object):
     def __init__(self):
-        self.label       = "Generate Catchment Connections"
-        self.description = "Generate Catchment Connections"
+        self.label       = "a) Generate Catchment Connections"
+        self.description = "a) Generate Catchment Connections"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -1684,8 +1684,8 @@ class GenerateCatchmentConnections(object):
 
 class SetImperviousness(object):
     def __init__(self):
-        self.label = "Set Imperviousness"
-        self.description = "Set Imperviousness"
+        self.label = "1d) Set Imperviousness"
+        self.description = "1d) Set Imperviousness"
         self.canRunInBackground = False
 
     def getParameterInfo(self):
