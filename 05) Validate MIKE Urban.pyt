@@ -54,8 +54,8 @@ class Toolbox(object):
 
 class CheckMikeUrbanDatabase(object):
     def __init__(self):
-        self.label       = "Validate Mike Urban Database"
-        self.description = "Validate Mike Urban Database"
+        self.label       = "1) Validate Mike Urban Database"
+        self.description = "1) Validate Mike Urban Database"
 
     def getParameterInfo(self):
         #Define parameter definitions
@@ -343,7 +343,7 @@ class CheckMikeUrbanDatabase(object):
                     except Exception as e:
                         arcpy.AddError(row)
                         raise(e)
-                    if geometryInvertLevel != row[2]:
+                    if round(geometryInvertLevel,2) != round(row[2],2):
                         arcpy.AddWarning("Invert Level of basin node %s is different from invert level of basin geometry %s (%1.2f - %1.2f)" % (row[0], row[1], row[2], geometryInvertLevel))
         
         if set_basin_cross_section_area:
@@ -446,8 +446,8 @@ class CheckMikeUrbanDatabase(object):
 
 class CleanupMUS(object):
     def __init__(self):
-        self.label = "Cleanup missing elements from MUS files"
-        self.description = "Cleanup missing elements from MUS files"
+        self.label = "a) Cleanup missing elements from MUS files"
+        self.description = "a) Cleanup missing elements from MUS files"
 
     def getParameterInfo(self):
         # Define parameter definitions
