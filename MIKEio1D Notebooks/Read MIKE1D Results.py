@@ -7,17 +7,23 @@ import cProfile
 from alive_progress import alive_bar
 import math
 import warnings
-
-extension = "5"
-MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_050\SON_050.mdb"
-res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_050\SON_050_N_CDS5_156Base.res1d"
+from scipy.optimize import bisect
 
 
-filter_to_extent = [571648, 6219583, 572698, 6220380]
+extension = ""
+MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_051\SON_051_uden_kf.mdb"
+res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_051\SON_051_uKF_N_CDS5_120Base.res1d"
+
+ms_Catchment = os.path.join(MU_model, "ms_Catchment" if ".mdb" in MU_model else "msm_Catchment")
+msm_CatchCon = os.path.join(MU_model, "msm_CatchCon")
+
+filter_to_extent = [571411, 6219168, 573227, 6220444]
+
 if filter_to_extent:
     print("Skipping all reaches and nodes outside extent %s" % filter_to_extent)
 
 print("Initializing")
+
 nodes = {}
 reaches = {}
 class Node:
@@ -84,7 +90,9 @@ class Reach:
         self.min_end_water_level = None
         self.max_start_water_level = None
         self.max_end_water_level = None
+        self.material = None
         self.skip = False
+        self.tau = None
 
     @property
     def energy_line_gradient(self):
@@ -98,9 +106,49 @@ class Reach:
     def fill_degree(self):
         if all((self.max_start_water_level, self.uplevel, self.diameter)):
             return (self.max_start_water_level-self.uplevel)/self.diameter*1e2
-    # @property
-    # def shape(self):
-    #     return arcpy.Polyline(arcpy.Array([arcpy.Point(*self.start_coordinate), arcpy.Point(*self.end_coordinate)]))
+
+    @property
+    def slope(self):
+        if self.uplevel and self.dwlevel and self.length:
+            return (self.uplevel-self.dwlevel)/self.length
+        else:
+            return 10e-3
+
+    @property
+    def QFull(self, resolution = 0.000001):
+        if self.material[0].lower() == "p":
+            k = 0.001 # Plastic roughness
+        else:
+            k = 0.0015 # Concrete roughness (used for all except plastic
+
+        g = 9.82  # m2/s
+        kinematic_viscosity = 0.0000013  # m2/s
+        hydraulic_radius = self.diameter / 4.0 # for full pipes
+        def colebrookWhite(v):
+            Re = v * hydraulic_radius / kinematic_viscosity # Reynolds number
+            f = 0.01 # initial guess for friction number
+            # Iteratively solve the Colebrook-White equation for friction factor f
+            for i in range(4):
+                f = 2 / (6.4 - 2.45 * np.log(k / hydraulic_radius + 4.7 / (Re * np.sqrt(f)))) ** 2
+
+            # Energy line gradient
+            I = f * (v ** 2 / (2 * g * hydraulic_radius))
+
+            # Return the difference between calculated and actual slope (should equal zero)
+            return I-self.slope
+
+        v = bisect(colebrookWhite, 1e-5, 500, xtol=2e-5, maxiter=50, disp=True)
+        # Return the discharge
+        if v:
+            return v * (self.diameter / 2.0) ** 2 * np.pi
+        else:
+            return None
+
+class Catchment:
+    def __init__(self, muid):
+        self.muid = muid
+        self.nodeid = None
+        self.nodeid_exists = None
 
 print("Reading MIKE Database")
 if MU_model and ".mdb" in MU_model:
@@ -126,7 +174,7 @@ if MU_model and ".mdb" in MU_model:
                 reaches[row[0]].net_type_no = row[1]
                 reaches[row[0]].type = "Weir"
 
-            cursor.execute('select MUID, NetTypeNo, Diameter, uplevel, uplevel_c, dwlevel, dwlevel_c from msm_Link')
+            cursor.execute('select MUID, NetTypeNo, Diameter, uplevel, uplevel_c, dwlevel, dwlevel_c, materialid from msm_Link')
             rows = cursor.fetchall()
             for row in rows:
                 reaches[row[0]] = Reach(row[0])
@@ -134,7 +182,27 @@ if MU_model and ".mdb" in MU_model:
                 reaches[row[0]].diameter = row[2]
                 reaches[row[0]].uplevel = row[3] if row[3] else row[4]
                 reaches[row[0]].dwlevel = row[5] if row[5] else row[6]
+                reaches[row[0]].material = row[7]
 
+        check_catchment_connections = True
+
+        catchments = {}
+        if check_catchment_connections:
+            cursor.execute('SELECT MUID FROM ms_Catchment')
+            rows = cursor.fetchall()
+            for row in rows:
+                catchments[row[0]] = Catchment(row[0])
+
+            cursor.execute('SELECT CatchID, NodeID FROM msm_CatchCon')
+            rows = cursor.fetchall()
+            for row in rows:
+                catchments[row[0]].nodeid = row[1]
+
+            for catchment in catchments.values():
+                if catchment.nodeid in nodes:
+                    catchment.nodeid_exists = True
+                else:
+                    catchment.nodeid_exists = False
 
 elif MU_model and ".sqlite" in MU_model:
     with arcpy.da.SearchCursor(os.path.join(MU_model, "msm_Node"), ["MUID", "Diameter", "NetTypeNo", "GroundLevel", "CriticalLevel", "InvertLevel"]) as cursor:
@@ -152,13 +220,14 @@ elif MU_model and ".sqlite" in MU_model:
             reaches[row[0]].net_type_no = row[1]
             reaches[row[0]].type = "Weir"
 
-    with arcpy.da.SearchCursor(os.path.join(MU_model, "msm_Link"), ["MUID", "NetTypeNo", "Diameter", "uplevel", "uplevel_c", "dwlevel", "dwlevel_c"]) as cursor:
+    with arcpy.da.SearchCursor(os.path.join(MU_model, "msm_Link"), ["MUID", "NetTypeNo", "Diameter", "uplevel", "uplevel_c", "dwlevel", "dwlevel_c", "MaterialID"]) as cursor:
         for row in cursor:
             reaches[row[0]] = Reach(row[0])
             reaches[row[0]].net_type_no = row[1]
             reaches[row[0]].diameter = row[2]
             reaches[row[0]].uplevel = row[3] if row[3] else row[4]
             reaches[row[0]].dwlevel = row[5] if row[5] else row[6]
+            reaches[row[0]].material = row[7]
 
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_017_sc2\KOM_Plan_017_sc2_CDS_5Base.res1d"
 print("Reading %s" % res1d_file)
@@ -202,23 +271,46 @@ nodes_new_filename = getAvailableFilename(os.path.join(output_folder, os.path.ba
 links_new_filename = getAvailableFilename(os.path.join(output_folder, os.path.basename(res1d_file).replace(".res1d","_links%s.shp" % extension)))
 
 print("Creating Nodes")
-nodes_output_filepath = arcpy.CreateFeatureclass_management(output_folder, os.path.basename(nodes_new_filename), "POINT")[0]
+while True:
+    try:
+        nodes_output_filepath = arcpy.CreateFeatureclass_management(output_folder, os.path.basename(nodes_new_filename), "POINT")[0]
+        break
+    except arcpy.ExecuteError as e:
+        if "ERROR 000464: Cannot get exclusive schema lock" in str(e):
+            input("The file %s is locked. Press enter to retry, after unlocking the file..." % (os.path.join(output_folder, os.path.basename(nodes_new_filename))))
+        else:
+            raise
+
 arcpy.management.AddField(nodes_output_filepath, "MUID", "TEXT")
 arcpy.management.AddField(nodes_output_filepath, "NetTypeNo", "SHORT")
 for field in ["Diameter", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "max_hl", "max_I_V", "flow_area", "flow_diam", "end_depth", "Surcha", "SurchaBal", "MaxSurcha"]:
     arcpy.management.AddField(nodes_output_filepath, field, "FLOAT", 8, 2)
 
 print("Creating Links")
-links_output_filepath = arcpy.CreateFeatureclass_management(output_folder, os.path.basename(links_new_filename), "POLYLINE")[0]
+while True:
+    try:
+        links_output_filepath = arcpy.CreateFeatureclass_management(output_folder, os.path.basename(links_new_filename), "POLYLINE")[0]
+        break
+    except arcpy.ExecuteError as e:
+        if "ERROR 000464: Cannot get exclusive schema lock" in str(e):
+            input("The file %s is locked. Press enter to retry, after unlocking the file..." % (
+                os.path.join(output_folder, os.path.basename(nodes_new_filename))))
+        else:
+            raise
 arcpy.management.AddField(links_output_filepath, "MUID", "TEXT")
 arcpy.management.AddField(links_output_filepath, "NetTypeNo", "SHORT")
-for field in ["Diameter", "MaxQ", "SumQ", "EndQ", "MinQ", "MaxV", "FillDeg", "EnergyGr", "FrictionLo"]:
+for field in ["Diameter", "MaxQ", "SumQ", "EndQ", "MinQ", "MaxV", "FillDeg", "EnergyGr", "FrictionLo", "MaxTau"]:
     arcpy.management.AddField(links_output_filepath, field, "FLOAT", 8, 4)
+
+def bretting(y, max_discharge, full_discharge, di):
+    q_div_qf = 0.46 - 0.5 * math.cos(np.pi * y / di) + 0.04 * math.cos(2 * np.pi * y / di)
+    # return q_div_qf
+    return q_div_qf - max_discharge / full_discharge
 
 timeseries = [time.timestamp() for time in df.time_index]
 print("Reading and writing Reach Results")
 with alive_bar(len(reaches), force_tty=True) as bar:
-    with arcpy.da.InsertCursor(links_output_filepath, ["SHAPE@", "MUID", "Diameter", "MaxQ", "SumQ", "NetTypeNo", "EndQ", "MinQ", "MaxV", "EnergyGr", "FrictionLo", "FillDeg"]) as cursor:
+    with arcpy.da.InsertCursor(links_output_filepath, ["SHAPE@", "MUID", "Diameter", "MaxQ", "SumQ", "NetTypeNo", "EndQ", "MinQ", "MaxV", "EnergyGr", "FrictionLo", "FillDeg", "MaxTau"]) as cursor:
         for muid in set(reaches.keys()):
             reach = reaches[muid]
             if not reach.skip:
@@ -238,6 +330,26 @@ with alive_bar(len(reaches), force_tty=True) as bar:
                     reach.min_end_water_level = np.min(abs(reach_end_values))
                     reach.max_start_water_level = np.max(abs(reach_start_values))
                     reach.max_end_water_level = np.max(abs(reach_end_values))
+
+                    # Calculate tau
+                    full_discharge = reach.QFull
+                    if reach.max_discharge < full_discharge:
+                        water_level = bisect(bretting, 0, reach.diameter, args = (reach.max_discharge, full_discharge, reach.diameter), xtol = 0.002, maxiter = 100)
+                        radius = reach.diameter/2
+                        theta = 2 * math.acos((radius - water_level) / radius)
+                        if water_level < radius / 2:
+                            wet_perimeter = radius*theta
+                            wet_area = (radius**2*(theta-math.sin(theta)))/2
+                        else:
+                            wet_perimeter = 2*np.pi*radius - radius*theta
+                            wet_area = np.pi * radius**2 - (radius**2*(theta-math.sin(theta)))/2
+                        hydraulic_radius = wet_area / wet_perimeter
+                        reach.tau = 999.7 * 9.81 * reach.slope * hydraulic_radius
+                    else:
+                        reach.tau = 1e3
+
+                # print(water_level)
+
                 except Exception as e:
                     if muid in res1d.structures.keys():
                         try:
@@ -251,17 +363,17 @@ with alive_bar(len(reaches), force_tty=True) as bar:
                         except Exception as e:
                             warnings.warn("Failed to get discharge from %s" % (muid))
 
-                if True:
-                    if all((reach.min_start_water_level, reach.min_end_water_level, reach.max_start_water_level, reach.max_end_water_level)):
-                        energy_line_gradient = reach.energy_line_gradient
-                        friction_loss = reach.friction_loss
-                    else:
-                        energy_line_gradient = 0
-                        friction_loss = 0
-                    cursor.insertRow([reach.shape, muid, reach.diameter if reach.diameter else 0, reach.max_discharge if reach.max_discharge else 0, reach.sum_discharge if reach.sum_discharge else 0,
-                                  reach.net_type_no if reach.net_type_no is not None else 0, reach.end_discharge if reach.end_discharge else 0,
-                                      reach.min_discharge if reach.min_discharge else 0, reach.max_flow_velocity if reach.max_flow_velocity else 0,
-                                      energy_line_gradient, friction_loss, reach.fill_degree if reach.fill_degree else 0])
+                # if True:
+                if all((reach.min_start_water_level, reach.min_end_water_level, reach.max_start_water_level, reach.max_end_water_level)):
+                    energy_line_gradient = reach.energy_line_gradient
+                    friction_loss = reach.friction_loss
+                else:
+                    energy_line_gradient = 0
+                    friction_loss = 0
+                cursor.insertRow([reach.shape, muid, reach.diameter or 0, reach.max_discharge or 0, reach.sum_discharge or 0,
+                              reach.net_type_no or 0, reach.end_discharge or 0,
+                                  reach.min_discharge or 0, reach.max_flow_velocity or 0,
+                                  energy_line_gradient, friction_loss, reach.fill_degree or 0, reach.tau or 0])
             bar()
 res1d_quantities = res1d.quantities
 
@@ -335,21 +447,32 @@ with arcpy.da.InsertCursor(nodes_output_filepath, ["SHAPE@", "MUID", "Diameter",
 
                 if muid in [reach.tonode for reach in reaches.values()] and muid in [reach.fromnode for reach in reaches.values()]:
                     try:
-                        water_levels = [reach.max_end_water_level for reach in reaches.values() if reach.tonode == muid and reach.type == "Link"]
+                        water_levels = [reach.max_end_water_level for reach in reaches.values() if reach.tonode == muid and reach.type == "Link" and reach.max_end_water_level]
                         node.inlet_waterlevel = np.max(water_levels) if water_levels else 0
                         water_levels = [reach.max_start_water_level for reach in reaches.values() if reach.fromnode == muid and reach.type == "Link"]
                         node.outlet_waterlevel = np.max(water_levels) if water_levels else 0
-                        node.max_headloss = node.inlet_waterlevel - node.outlet_waterlevel
-                        inlet_velocities = [reach.max_flow_velocity for reach in reaches.values() if reach.tonode == muid and reach.type == "Link"]
+                        node.max_headloss = node.inlet_waterlevel - node.outlet_waterlevel if all([node.inlet_waterlevel, node.outlet_waterlevel]) else 0
+                        inlet_velocities = [reach.max_flow_velocity for reach in reaches.values() if reach.tonode == muid and reach.type == "Link" and reach.max_flow_velocity]
                         node.max_inlet_velocity = np.max(inlet_velocities) if inlet_velocities else 0
 
                     except Exception as e:
                         print(muid)
                         print(traceback.format_exc())
                         print(e)
-                cursor.insertRow([arcpy.Point(query_node.XCoordinate, query_node.YCoordinate), muid, node.diameter if node.diameter else 0,
-                                  node.invert_level, node.max_level, node.flood_depth, node.flood_volume if not mike_flood_volume else mike_flood_volume,
-                                  node.net_type_no if node.net_type_no is not None else 0, node.max_headloss if node.max_headloss else 0,
-                                  node.max_inlet_velocity if node.max_inlet_velocity else 0, node.flow_area, node.flow_area_diameter, node.end_depth if node.end_depth else 0,
-                                  surcharge if surcharge else 0, surcharge_balance if surcharge_balance else 0, max_surcharge if max_surcharge else 0])
+                cursor.insertRow([arcpy.Point(query_node.XCoordinate, query_node.YCoordinate), muid, node.diameter or 0,
+                                  node.invert_level, node.max_level, node.flood_depth, node.flood_volume or 0,
+                                  node.net_type_no or 0, node.max_headloss or 0,
+                                  node.max_inlet_velocity or 0, node.flow_area, node.flow_area_diameter, node.end_depth or 0,
+                                  surcharge or 0, surcharge_balance or 0, max_surcharge or 0])
             bar()
+
+
+import winsound
+winsound.Beep(1000, 500)
+
+if len([catchment for catchment in catchments.values() if not catchment.nodeid])>0:
+    print("%d catchments not connected. ('%s')" % (len([catchment for catchment in catchments.values() if not catchment.nodeid_exists]), "', '".join([catchment.muid for catchment in catchments.values() if not catchment.nodeid])))
+
+if len([catchment for catchment in catchments.values() if not catchment.nodeid_exists])>0:
+    print("%d catchments connected to missing node. ('%s')" % (len([catchment for catchment in catchments.values() if not catchment.nodeid_exists]),
+                                                               "', '".join([catchment.muid for catchment in catchments.values() if not catchment.nodeid_exists])))
