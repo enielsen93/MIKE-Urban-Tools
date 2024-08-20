@@ -115,7 +115,7 @@ arcpy.Dissolve_management(output_file, output_shape_file, dissolve_field=["Class
 
 def renameField(shape_file, old_field_name, new_field_name):
     arcpy.AddField_management(output_shape_file, new_field_name, "FLOAT", field_precision=15, field_scale=5)
-    arcpy.CalculateField_management(output_shape_file, new_field_name, "!%s!" % (old_field_\name), "PYTHON_9.3", "")
+    arcpy.CalculateField_management(output_shape_file, new_field_name, "!%s!" % (old_field_name), "PYTHON_9.3", "")
     arcpy.DeleteField_management(output_shape_file, old_field_name)
 
 
