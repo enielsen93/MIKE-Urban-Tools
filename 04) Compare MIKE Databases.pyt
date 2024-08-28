@@ -56,7 +56,7 @@ class CompareMikeModels(object):
             datatype="DEWorkspace",
             parameterType="Required",
             direction="Input")
-        database1.filter.list = ["sqlite"]
+        database1.filter.list = ["sqlite", "mdb"]
 
         database2 = arcpy.Parameter(
             displayName="MIKE Model to compare to reference model",
@@ -64,7 +64,7 @@ class CompareMikeModels(object):
             datatype="DEWorkspace",
             parameterType="Required",
             direction="Input")
-        database2.filter.list = ["sqlite"]
+        database2.filter.list = ["sqlite", "mdb"]
 
         check_features = arcpy.Parameter(
             displayName="Check these features:",
@@ -229,8 +229,9 @@ class CompareMikeModels(object):
                 idx = compare_rows(features_1[MUID], features_2[MUID], fields = fields)
                 if idx:
                     MUIDs_field_changed[MUID] = [fields[i] for i in idx]
-
-            if "Catchment" in feature:
+            arcpy.AddMessage("RACHEL!")
+            if "catchment" in feature.lower():
+                arcpy.AddMessage("BOB!")
                 msm_CatchCon_1 = {}
                 msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_CatchCon"))
                                        if not ignore_field(field.name) and not field.name == "MUID"]
