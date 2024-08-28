@@ -35,6 +35,7 @@ class FieldCalculator(object):
             name="featureclass",
             datatype="GPFeatureLayer",
             parameterType="Required",
+            multiValue = "True",
             direction="Input")
         
         field = arcpy.Parameter(
@@ -61,12 +62,12 @@ class FieldCalculator(object):
     def updateParameters(self, parameters):
         if not parameters[0].Value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
-            featureclass = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if
-                     lyr.getSelectionSet() and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
-            if featureclass:
-                parameters[0].value = featureclass
+            featureclasses = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if
+                     lyr.getSelectionSet() and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]]
+            if featureclasses:
+                parameters[0].value = "; ".join([featureclass for featureclass in featureclasses])
         if parameters[0].Value and not parameters[1].Value:
-            parameters[1].filter.list = [f.name for f in arcpy.Describe(parameters[0].Value).fields]
+            parameters[1].filter.list = [f.name for f in arcpy.Describe(parameters[0].ValueAsText.split(";")[0]).fields]
 
 
         return
@@ -75,37 +76,55 @@ class FieldCalculator(object):
         return
 
     def execute(self, parameters, messages):
-        featureclass = parameters[0].ValueAsText
+        featureclasses = parameters[0].ValueAsText.split(";")
         field = parameters[1].ValueAsText
         value = parameters[2].ValueAsText
 
-        MU_database = os.path.dirname(arcpy.Describe(featureclass).catalogPath).replace("\mu_Geometry", "").replace("!delete!","")
-        featureclass_name = arcpy.Describe(featureclass).name
-        arcpy.AddMessage(featureclass)
-        selection = [row[0] for row in arcpy.da.SearchCursor(featureclass, ["muid"])]
-        arcpy.AddMessage("Confirm Query - Might be hidden behind window!")
-        # userquery = pythonaddins.MessageBox(
-        #     "Assign value to %d features?" % (len(selection)),
-        #     "Confirm Assignment", 4)
+        for featureclass in featureclasses:
+            MU_database = os.path.dirname(arcpy.Describe(featureclass).catalogPath).replace("\mu_Geometry", "").replace("!delete!","")
+            print(MU_database)
+            featureclass_name = arcpy.Describe(featureclass).name
+            arcpy.AddMessage(featureclass)
+            selection = [row[0] for row in arcpy.da.SearchCursor(featureclass, ["muid"])]
+            arcpy.AddMessage("Confirm Query - Might be hidden behind window!")
+            userquery = pythonaddins.MessageBox(
+                "Assign value to %d features?" % (len(selection)),
+                "Confirm Assignment", 4)
+            if len(selection)>100:
+                userquery = pythonaddins.MessageBox(
+                    "Are you sure? Assign value to %d features?" % (len(selection)),
+                    "Confirm Assignment", 4)
+            if userquery == "Yes":
+                arcpy.AddMessage(MU_database)
+                if ".sqlite" in MU_database:
+                    try:
+                        connection = sqlite3.connect(
+                                    MU_database)
+                        update_cursor = connection.cursor()
+                        update_query = "UPDATE %s SET %s = %s WHERE MUID IN %s" % (featureclass_name.replace("main.",""), field, value,
+                                                                                     "('%s')" % ("','".join(selection)))
+                        update_cursor.execute(update_query)
+                        connection.commit()
+                        connection.close()
+                    except Exception as e:
+                        import traceback
+                        arcpy.AddWarning(traceback.format_exc())
+                        raise (e)
 
-        # if userquery == "Yes":
-        arcpy.AddMessage(MU_database)
-        try:
-            connection = sqlite3.connect(
-                        MU_database)
-            update_cursor = connection.cursor()
-            update_query = "UPDATE %s SET %s = %s WHERE MUID IN %s" % (featureclass_name.replace("main.",""), field, value,
-                                                                         "('%s')" % ("','".join(selection)))
-            update_cursor.execute(update_query)
-            connection.commit()
-            connection.close()
-        except Exception as e:
-            import traceback
-            arcpy.AddWarning(traceback.format_exc())
-            raise (e)
+                    finally:
+                        if connection:
+                            connection.close()
+                elif ".mdb" in MU_database:
+                    edit = arcpy.da.Editor(MU_database)
+                    edit.startEditing(False, True)
+                    edit.startOperation()
+                    print(featureclass)
+                    with arcpy.da.UpdateCursor(arcpy.Describe(featureclass).catalogPath, [field], where_clause = "MUID IN %s" % ("('%s')" % ("','".join(selection)))) as cursor:
+                        for row in cursor:
+                            row[0] = value
+                            cursor.updateRow(row)
 
-        finally:
-            if connection:
-                connection.close()
+                    edit.stopOperation()
+                    edit.stopEditing(True)
         return
         
