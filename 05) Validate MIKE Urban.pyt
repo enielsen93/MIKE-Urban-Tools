@@ -343,7 +343,7 @@ class CheckMikeUrbanDatabase(object):
                     except Exception as e:
                         arcpy.AddError(row)
                         raise(e)
-                    if round(geometryInvertLevel,2) != round(row[2],2):
+                    if geometryInvertLevel != row[2]:
                         arcpy.AddWarning("Invert Level of basin node %s is different from invert level of basin geometry %s (%1.2f - %1.2f)" % (row[0], row[1], row[2], geometryInvertLevel))
         
         if set_basin_cross_section_area:
