@@ -2050,7 +2050,8 @@ class CalculateSlopeOfPipe(object):
             name="pipe_layer",
             datatype="GPFeatureLayer",
             parameterType="Required",
-            direction="Input")
+            direction="Input",
+            multiValue = True)
 
         parameters = [pipe_layer]
         return parameters
@@ -2062,51 +2063,52 @@ class CalculateSlopeOfPipe(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]]
             if links:
-                parameters[0].value = links
+                parameters[0].value = ";".join(links)
         return
 
     def updateMessages(self, parameters): #optional
         return
 
     def execute(self, parameters, messages):
-        pipe_layer = parameters[0].Value
-        
-        links_OID = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["OID@"])]
-        OID_fieldname = arcpy.Describe(pipe_layer).OIDFieldName
-        
-        MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry","")
-        
-        msm_Node = os.path.join(MU_database, "msm_Node")
-        
-        nodes_invert_level = {row[0]: row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "InvertLevel"])}
-               
-        arcpy.SetProgressorLabel("Networking Database")
-        network = networker.NetworkLinks(MU_database, map_only = "link", filter_sql_query = "%s IN (%s)" % (OID_fieldname, ', '.join([str(OID) for OID in links_OID])))
-        
-        edit = arcpy.da.Editor(MU_database)
-        edit.startEditing(False, True)
-        edit.startOperation()
+        pipe_layers = parameters[0].ValueAsText.split(";")
 
-        arcpy.SetProgressor("step", "Calculating slope of pipes", 0, len(links_OID), 1)
-        with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath, ["MUID", "Slope_C", "UpLevel", "DwLevel"], where_clause = "%s IN (%s)" % (OID_fieldname, ', '.join([str(OID) for OID in links_OID]))) as cursor:
-            for row_i, row in enumerate(cursor):
-                try:
-                    arcpy.SetProgressorPosition(row_i)
-                    uplevel = nodes_invert_level[network.links[row[0]].fromnode] if not row[2] else row[2]
-                    dwlevel = nodes_invert_level[network.links[row[0]].tonode] if not row[3] else row[3]
-                    length = network.links[row[0]].length
-                    slope = (uplevel-dwlevel)/length*1e2
-                    row[1] = slope
-                    # arcpy.AddMessage(row)
-                    # arcpy.AddMessage((uplevel, dwlevel, length, slope))
-                    cursor.updateRow(row)
-                except Exception as e:
-                    arcpy.AddError(traceback.format_exc())
-                    arcpy.AddError(row)
-        edit.stopOperation()
-        edit.stopEditing(True)
+        for pipe_layer in pipe_layers:
+            links_OID = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["OID@"])]
+            OID_fieldname = arcpy.Describe(pipe_layer).OIDFieldName
+
+            MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry","")
+
+            msm_Node = os.path.join(MU_database, "msm_Node")
+
+            nodes_invert_level = {row[0]: row[1] for row in arcpy.da.SearchCursor(msm_Node, ["MUID", "InvertLevel"])}
+
+            arcpy.SetProgressorLabel("Networking Database")
+            network = networker.NetworkLinks(MU_database, map_only = "link", filter_sql_query = "%s IN (%s)" % (OID_fieldname, ', '.join([str(OID) for OID in links_OID])))
+
+            edit = arcpy.da.Editor(MU_database)
+            edit.startEditing(False, True)
+            edit.startOperation()
+
+            arcpy.SetProgressor("step", "Calculating slope of pipes", 0, len(links_OID), 1)
+            with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath, ["MUID", "Slope_C", "UpLevel", "DwLevel"], where_clause = "%s IN (%s)" % (OID_fieldname, ', '.join([str(OID) for OID in links_OID]))) as cursor:
+                for row_i, row in enumerate(cursor):
+                    try:
+                        arcpy.SetProgressorPosition(row_i)
+                        uplevel = nodes_invert_level[network.links[row[0]].fromnode] if not row[2] else row[2]
+                        dwlevel = nodes_invert_level[network.links[row[0]].tonode] if not row[3] else row[3]
+                        length = network.links[row[0]].length
+                        slope = (uplevel-dwlevel)/length*1e2
+                        row[1] = slope
+                        # arcpy.AddMessage(row)
+                        # arcpy.AddMessage((uplevel, dwlevel, length, slope))
+                        cursor.updateRow(row)
+                    except Exception as e:
+                        arcpy.AddError(traceback.format_exc())
+                        arcpy.AddError(row)
+            edit.stopOperation()
+            edit.stopEditing(True)
         return
 
 
