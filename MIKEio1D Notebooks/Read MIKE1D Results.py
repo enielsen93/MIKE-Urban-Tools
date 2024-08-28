@@ -11,13 +11,15 @@ from scipy.optimize import bisect
 
 
 extension = ""
+# MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Fredensvang\MIKE\FRE_005\FRE_005.sqlite"
+# res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Fredensvang\MIKE\FRE_005\FRE_005_m1d - Result Files\FRE_005_CDS5_156_240_valideringBaseDefault_Network_HD.res1d"
 MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_051\SON_051_uden_kf.mdb"
-res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_051\SON_051_uKF_N_CDS5_120Base.res1d"
+res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_051\SON_051_N_CDS5_240_120Base.res1d"
 
 ms_Catchment = os.path.join(MU_model, "ms_Catchment" if ".mdb" in MU_model else "msm_Catchment")
 msm_CatchCon = os.path.join(MU_model, "msm_CatchCon")
 
-filter_to_extent = [571411, 6219168, 573227, 6220444]
+filter_to_extent = [571725, 6219445, 572853, 6220467]
 
 if filter_to_extent:
     print("Skipping all reaches and nodes outside extent %s" % filter_to_extent)
@@ -229,6 +231,24 @@ elif MU_model and ".sqlite" in MU_model:
             reaches[row[0]].dwlevel = row[5] if row[5] else row[6]
             reaches[row[0]].material = row[7]
 
+    check_catchment_connections = True
+
+    catchments = {}
+    if check_catchment_connections:
+        with arcpy.da.SearchCursor(os.path.join(MU_model, "msm_Catchment"), ["MUID"]) as cursor:
+            for row in cursor:
+                catchments[row[0]] = Catchment(row[0])
+
+        with arcpy.da.SearchCursor(os.path.join(MU_model, "msm_CatchCon"), ["CatchID", "NodeID"]) as cursor:
+            for row in cursor:
+                catchments[row[0]].nodeid = row[1]
+
+        for catchment in catchments.values():
+            if catchment.nodeid in nodes:
+                catchment.nodeid_exists = True
+            else:
+                catchment.nodeid_exists = False
+
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_017_sc2\KOM_Plan_017_sc2_CDS_5Base.res1d"
 print("Reading %s" % res1d_file)
 # queries = []
@@ -300,7 +320,7 @@ while True:
 arcpy.management.AddField(links_output_filepath, "MUID", "TEXT")
 arcpy.management.AddField(links_output_filepath, "NetTypeNo", "SHORT")
 for field in ["Diameter", "MaxQ", "SumQ", "EndQ", "MinQ", "MaxV", "FillDeg", "EnergyGr", "FrictionLo", "MaxTau"]:
-    arcpy.management.AddField(links_output_filepath, field, "FLOAT", 8, 4)
+    arcpy.management.AddField(links_output_filepath, field, "FLOAT", 10, 6)
 
 def bretting(y, max_discharge, full_discharge, di):
     q_div_qf = 0.46 - 0.5 * math.cos(np.pi * y / di) + 0.04 * math.cos(2 * np.pi * y / di)
@@ -322,7 +342,7 @@ with alive_bar(len(reaches), force_tty=True) as bar:
                     reach.max_discharge = np.max(abs(reach_discharge))
                     reach.min_discharge = np.min(reach_discharge)
                     reach.sum_discharge = np.trapz(abs(reach_discharge), timeseries)
-                    reach.end_discharge = abs(reach_discharge[-1])
+                    reach.end_discharge = np.round((abs(reach_discharge[-1])),2)
                     reach.max_flow_velocity = np.max(abs(query_result.iloc[:,1]))
                     reach_start_values = query_result.iloc[:,2]
                     reach_end_values = query_result.iloc[:,3]
@@ -359,7 +379,7 @@ with alive_bar(len(reaches), force_tty=True) as bar:
                             reach.max_discharge = np.max(abs(reach_discharge))
                             reach.min_discharge = np.min(reach_discharge)
                             reach.sum_discharge = np.trapz(abs(reach_discharge), timeseries)
-                            reach.end_discharge = abs(reach_discharge[-1])
+                            reach.end_discharge = np.round(abs(reach_discharge[-1]),4)
                         except Exception as e:
                             warnings.warn("Failed to get discharge from %s" % (muid))
 
