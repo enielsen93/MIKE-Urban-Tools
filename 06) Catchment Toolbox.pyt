@@ -9,6 +9,14 @@ import pythonaddins
 import hashlib
 import xlwt
 import csv
+if "mapping" in dir(arcpy):
+    arcgis_pro = False
+    import arcpy.mapping as arcpymapping
+    from arcpy.mapping import MapDocument as arcpyMapDocument
+else:
+    arcgis_pro = True
+    import arcpy.mp as arcpymapping
+    from arcpy.mp import ArcGISProject as arcpyMapDocument
 
 def getAvailableFilename(filepath):
     if arcpy.Exists(filepath):
@@ -31,8 +39,128 @@ def splitWhereclause(iterator):
     where_clauses = []
     for i in range(len(idx)-1):
         where_clauses.append("('%s')" % ("','".join([str(name) for name in iterator[idx[i]:idx[i+1]]])))
-
     return where_clauses
+
+arcgis_pro = False
+def addLayer(layer_source, source, group=None, workspace_type="ACCESS_WORKSPACE", new_name=None,
+                     definition_query=None):
+    if ".sqlite" in source:
+        source_layer = arcpymapping.LayerFile(layer_source) if arcgis_pro else arcpy.mapping.Layer(source)
+        # if not "objectid" in [field.name.lower() for field in arcpy.ListFields(source)]:
+        #     import sqlite3
+        #     with sqlite3.connect(MU_database) as connection:
+        #         update_cursor = connection.cursor()
+        #         sql_expression = """
+        #         PRAGMA foreign_keys=off;
+        #         BEGIN TRANSACTION;
+        #
+        #         ALTER TABLE %s RENAME TO delete_table;
+        #
+        #         CREATE TABLE %s
+        #         (
+        #           column1 datatype [ NULL | NOT NULL ],
+        #           column2 datatype [ NULL | NOT NULL ],
+        #           ...
+        #           CONSTRAINT constraint_name UNIQUE (uc_col1, uc_col2, ... uc_col_n)
+        #         );
+        #
+        #         INSERT INTO table_name SELECT * FROM old_table;
+        #
+        #         COMMIT;
+        #
+        #         PRAGMA foreign_keys=on;
+        #         """
+        #         try:
+        #             update_cursor.execute("ALTER TABLE %s ADD COLUMN OBJECTID INTEGER" % os.path.basename(source))
+        #             sql_expression = "CREATE INDEX OBJECTID ON %s(OBJECTID)" % os.path.basename(source)
+        #             update_cursor.execute(sql_expression)
+        #         except Exception as e:
+        #             arcpy.AddMessage(source)
+        #             raise(e)
+
+        if group:
+            if arcgis_pro:
+                update_layer = df.addLayerToGroup(group, source_layer, "BOTTOM")
+            else:
+                arcpymapping.AddLayerToGroup(df, group, source_layer, "BOTTOM")
+        else:
+            if arcgis_pro:
+                update_layer = df.addLayer(source_layer, "BOTTOM")
+            else:
+                arcpymapping.AddLayer(df, source_layer, "BOTTOM")
+
+        if not arcgis_pro: update_layer = df.listLayers(mxd, source_layer.name, df)[0] if arcgis_pro else \
+        arcpy.mapping.ListLayers(mxd, source_layer.name, df)[0]
+
+        if arcgis_pro:
+            new_connection_properties = update_layer.connectionProperties
+            new_connection_properties["workspace_factory"] = 'Sql'
+            new_connection_properties["connection_info"]["database"] = os.path.dirname(source)
+            update_layer.updateConnectionProperties()
+        else:
+            if ".sqlite" in source:
+                layer = arcpymapping.Layer(layer_source)
+                update_layer.visible = layer.visible
+                update_layer.labelClasses = layer.labelClasses
+                update_layer.showLabels = layer.showLabels
+                update_layer.name = layer.name
+                update_layer.definitionQuery = definition_query
+
+                try:
+                    arcpymapping.UpdateLayer(df, update_layer, layer, symbology_only=True)
+                except Exception as e:
+                    arcpy.AddWarning(source)
+                    pass
+            else:
+                update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))),
+                                               workspace_type, os.path.basename(source))
+
+        # layer_source_mike_plus = layer_source.replace("MOUSE", "MIKE+") if "MOUSE" in layer_source and os.path.exists(layer_source.replace("MOUSE", "MIKE+")) else None
+        # layer_source = layer_source_mike_plus if layer_source_mike_plus else layer_source
+        # layer = arcpymapping.Layer(layer_source)
+        # update_layer.visible = layer.visible
+        # update_layer.labelClasses = layer.labelClasses
+        # update_layer.showLabels = layer.showLabels
+        # update_layer.name = layer.name
+        # update_layer.definitionQuery = definition_query
+
+        try:
+            arcpymapping.UpdateLayer(df, update_layer, layer, symbology_only=True)
+        except Exception as e:
+            arcpy.AddWarning(source)
+            pass
+    else:
+        # arcpy.AddMessage(layer_source)
+        layer = arcpymapping.LayerFile(layer_source) if arcgis_pro else arcpymapping.Layer(layer_source)
+        if group:
+            if arcgis_pro:
+                df.addLayerToGroup(group, layer, "BOTTOM")
+            else:
+                arcpymapping.AddLayerToGroup(df, group, layer, "BOTTOM")
+        else:
+            if arcgis_pro:
+                df.addLayer(layer, "BOTTOM")
+            else:
+                arcpymapping.AddLayer(df, layer, "BOTTOM")
+        update_layer = df.listLayers(layer.listLayers()[0].name)[0] if arcgis_pro else \
+        arcpymapping.ListLayers(mxd, layer.name, df)[0]
+        if definition_query:
+            update_layer.definitionQuery = definition_query
+        if new_name:
+            update_layer.name = new_name
+
+        if arcgis_pro:
+            df.updateConnectionProperties(update_layer.connectionProperties['connection_info']['database'],
+                                          os.path.dirname(source.replace(r"\mu_Geometry", "")))
+        else:
+            update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))),
+                                           workspace_type, os.path.basename(source))
+
+    if "msm_Node" in source:
+        for label_class in (update_layer.listLabelClasses() if arcgis_pro else update_layer.labelClasses):
+            if show_depth:
+                label_class.expression = label_class.expression.replace("return labelstr",
+                                                                        'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
 
 from arcpy import env
 class Toolbox(object):
@@ -41,7 +169,7 @@ class Toolbox(object):
         self.alias  = "Catchments"
 
         # List of tool classes associated with this toolbox
-        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, CheckCatchments, FAS2Deloplande, TransferCatchments, DuplicateCatchments, GenerateCatchmentConnections, SetImperviousness, CatchmentProcessingScalgo]
+        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, CheckCatchments, FAS2Deloplande, TransferCatchments, DuplicateCatchments, GenerateCatchmentConnections, SetImperviousness, CatchmentProcessingScalgo, CatchmentSlopeAnalysis]
 
 class CatchmentProcessing(object):
     def __init__(self):
@@ -562,7 +690,7 @@ class CatchmentProcessingScalgo(object):
             #                          value_to_nodata=0)
 
             # raster_clipped = arcpy.management.Clip(raster, None, r"in_memory\raster_clipped", in_template_dataset = ms_Catchment_copy)[0]
-            raster_polygon = arcpy.RasterToPolygon_conversion(in_raster=raster, out_polygon_features=r"in_memory\raster_to_polygon",
+            raster_polygon = arcpy.RasterToPolygon_conversion(in_raster=raster, out_polygon_features=r"C:\Papirkurv\raster_to_polygon",
                                              simplify="SIMPLIFY", raster_field="Value",
                                              create_multipart_features="SINGLE_OUTER_PART", max_vertices_per_feature="")[0]
 
@@ -571,8 +699,9 @@ class CatchmentProcessingScalgo(object):
                 for row in cursor:
                     cursor.deleteRow()
 
-            intersect_polygon = arcpy.Intersect_analysis(in_features="%s #;%s #" % (raster_polygon, ms_Catchment),
-                                                         out_feature_class=r"in_memory\intersect", join_attributes="ALL",
+            arcpy.AddMessage((raster_polygon, arcpy.Describe(ms_Catchment).catalogPath))
+            intersect_polygon = arcpy.Intersect_analysis(in_features="%s #;%s #" % (raster_polygon, arcpy.Describe(ms_Catchment).catalogPath),
+                                                         out_feature_class=r"C:\Papirkurv\intersect\intersect", join_attributes="ALL",
                                                          cluster_tolerance="-1 Unknown", output_type="INPUT")[0]
 
             # arcpy.CopyFeatures_management(intersect_polygon, r"C:\Papirkurv\Bob.shp")
@@ -1754,4 +1883,441 @@ class SetImperviousness(object):
             #         "Catchments without Model Records [msm_HModA] (imperviousness not set): '" + "', '".join(
             #             np.array(MUIDs)[np.where(catchmentsWithoutModelParameters)]) + "'")
                 # arcpy.CopyFeatures_management(catchspatialjoin,r"C:/Dokumenter/catchspatialjoin")
+        return
+
+class CatchmentSlopeAnalysis(object):
+    def __init__(self):
+        self.label = "5) Calculate Slope from Catchment to Sewage System"
+        self.description = "5) Calculate Slope from Catchment to Sewage System"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        # Input Features parameter
+        catchment_layer = arcpy.Parameter(
+            displayName="Catchments Layer:",
+            name="ms_Catchment",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+        catchment_layer.filter.list = ["Polygon"]
+
+        raster = arcpy.Parameter(
+            displayName="Terrain Raster Path:",
+            name="raster",
+            datatype="GPRasterLayer",
+            parameterType="Required",
+            direction="Input")
+
+        initial_depth = arcpy.Parameter(
+            displayName="Initial depth (e.g. below frost line) [m]:",
+            name="initial_depth",
+            datatype="GPDouble",
+            parameterType="Required",
+            direction="Input")
+        initial_depth.value = 1.0
+
+        resolution = arcpy.Parameter(
+            displayName="Resolution of analysis (cell size) [m]:",
+            name="resolution",
+            datatype="GPLong",
+            category="Additional Settings",
+            parameterType="Required",
+            direction="Input")
+        resolution.value = 8
+
+        required_slope = arcpy.Parameter(
+            displayName="Required Slope [m/m]:",
+            name="required_slope",
+            datatype="GPDouble",
+            category="Calculate Vertical Difference",
+            parameterType="Optional",
+            direction="Input")
+        required_slope.value = 20e-3
+
+
+        parameters = [catchment_layer, raster, initial_depth, resolution, required_slope]
+
+        return parameters
+
+    def isLicensed(self):  # optional
+        return True
+
+    def updateParameters(self, parameters):  # optional
+        return
+
+    def updateMessages(self, parameters):  # optional
+
+        return
+
+    def execute(self, parameters, messages):
+        catchment_layer = parameters[0].ValueAsText
+        raster = parameters[1].ValueAsText
+        initial_depth = parameters[2].Value
+        resolution = parameters[3].Value
+        required_slope = parameters[4].Value
+
+        mxd = arcpy.mapping.MapDocument("CURRENT")
+        df = arcpy.mapping.ListDataFrames(mxd)[0]
+
+        arcpy.env.overwriteOutput = True
+
+        # Define input data
+        MU_database = os.path.dirname(arcpy.Describe(catchment_layer).catalogPath).replace("\mu_Geometry", "")
+        msm_Node = os.path.join(MU_database, "msm_Node")
+        msm_Catchment = catchment_layer
+        msm_CatchCon = os.path.join(MU_database, "msm_CatchCon")
+
+        # MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
+        # if not os.path.exists(MIKE_folder):
+        #     os.mkdir(MIKE_folder)
+        # MIKE_gdb = os.path.join(MIKE_folder, empty_group_layer.name)
+        # no_dir = True
+        # dir_ext = 0
+        # while no_dir:
+        #     try:
+        #         if arcpy.Exists(MIKE_gdb):
+        #             os.rmdir(MIKE_gdb)
+        #         os.mkdir(MIKE_gdb)
+        #         no_dir = False
+        #     except Exception as e:
+        #         dir_ext += 1
+        #         MIKE_gdb = os.path.join(MIKE_folder, "%s_%d" % (empty_group_layer.name, dir_ext))
+        # arcpy.env.scratchWorkspace = MIKE_gdb
+
+        catchments_output = r"in_memory\catchments_export"
+        clipped_raster = "in_memory\DTM_clipped"
+        clipped_raster_resampled = "in_memory\DTM_c"
+        raster_points = "in_memory\DTM_clipped_resampled_points"
+        catchment_loop = "in_memory\Catchment_loop"
+
+        output_raster_path = getAvailableFilename(os.path.join(arcpy.env.scratchGDB, "Slope"))
+        output_vertical_add_raster_path = getAvailableFilename(os.path.join(arcpy.env.scratchGDB, "VerticalAdd"))
+
+        arcgis_pro = False
+
+        def addLayer(layer_source, source, group=None, workspace_type="ACCESS_WORKSPACE", new_name=None,
+                     definition_query=None):
+            if ".sqlite" in source:
+                source_layer = arcpymapping.LayerFile(layer_source) if arcgis_pro else arcpy.mapping.Layer(source)
+                # if not "objectid" in [field.name.lower() for field in arcpy.ListFields(source)]:
+                #     import sqlite3
+                #     with sqlite3.connect(MU_database) as connection:
+                #         update_cursor = connection.cursor()
+                #         sql_expression = """
+                #         PRAGMA foreign_keys=off;
+                #         BEGIN TRANSACTION;
+                #
+                #         ALTER TABLE %s RENAME TO delete_table;
+                #
+                #         CREATE TABLE %s
+                #         (
+                #           column1 datatype [ NULL | NOT NULL ],
+                #           column2 datatype [ NULL | NOT NULL ],
+                #           ...
+                #           CONSTRAINT constraint_name UNIQUE (uc_col1, uc_col2, ... uc_col_n)
+                #         );
+                #
+                #         INSERT INTO table_name SELECT * FROM old_table;
+                #
+                #         COMMIT;
+                #
+                #         PRAGMA foreign_keys=on;
+                #         """
+                #         try:
+                #             update_cursor.execute("ALTER TABLE %s ADD COLUMN OBJECTID INTEGER" % os.path.basename(source))
+                #             sql_expression = "CREATE INDEX OBJECTID ON %s(OBJECTID)" % os.path.basename(source)
+                #             update_cursor.execute(sql_expression)
+                #         except Exception as e:
+                #             arcpy.AddMessage(source)
+                #             raise(e)
+
+                if group:
+                    if arcgis_pro:
+                        update_layer = df.addLayerToGroup(group, source_layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayerToGroup(df, group, source_layer, "BOTTOM")
+                else:
+                    if arcgis_pro:
+                        update_layer = df.addLayer(source_layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayer(df, source_layer, "BOTTOM")
+
+                if not arcgis_pro: update_layer = df.listLayers(mxd, source_layer.name, df)[0] if arcgis_pro else \
+                    arcpy.mapping.ListLayers(mxd, source_layer.name, df)[0]
+
+                if arcgis_pro:
+                    new_connection_properties = update_layer.connectionProperties
+                    new_connection_properties["workspace_factory"] = 'Sql'
+                    new_connection_properties["connection_info"]["database"] = os.path.dirname(source)
+                    update_layer.updateConnectionProperties()
+                else:
+                    if ".sqlite" in source:
+                        layer = arcpymapping.Layer(layer_source)
+                        update_layer.visible = layer.visible
+                        update_layer.labelClasses = layer.labelClasses
+                        update_layer.showLabels = layer.showLabels
+                        update_layer.name = layer.name
+                        update_layer.definitionQuery = definition_query
+
+                        try:
+                            arcpymapping.UpdateLayer(df, update_layer, layer, symbology_only=True)
+                        except Exception as e:
+                            arcpy.AddWarning(source)
+                            pass
+                    else:
+                        update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))),
+                                                       workspace_type, os.path.basename(source))
+
+                # layer_source_mike_plus = layer_source.replace("MOUSE", "MIKE+") if "MOUSE" in layer_source and os.path.exists(layer_source.replace("MOUSE", "MIKE+")) else None
+                # layer_source = layer_source_mike_plus if layer_source_mike_plus else layer_source
+                # layer = arcpymapping.Layer(layer_source)
+                # update_layer.visible = layer.visible
+                # update_layer.labelClasses = layer.labelClasses
+                # update_layer.showLabels = layer.showLabels
+                # update_layer.name = layer.name
+                # update_layer.definitionQuery = definition_query
+
+                try:
+                    arcpymapping.UpdateLayer(df, update_layer, layer, symbology_only=True)
+                except Exception as e:
+                    arcpy.AddWarning(source)
+                    pass
+            else:
+                # arcpy.AddMessage(layer_source)
+                layer = arcpymapping.LayerFile(layer_source) if arcgis_pro else arcpymapping.Layer(layer_source)
+                if group:
+                    if arcgis_pro:
+                        df.addLayerToGroup(group, layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayerToGroup(df, group, layer, "BOTTOM")
+                else:
+                    if arcgis_pro:
+                        df.addLayer(layer, "BOTTOM")
+                    else:
+                        arcpymapping.AddLayer(df, layer, "TOP")
+                update_layer = df.listLayers(layer.listLayers()[0].name)[0] if arcgis_pro else \
+                    arcpymapping.ListLayers(mxd, layer.name, df)[0]
+                if definition_query:
+                    update_layer.definitionQuery = definition_query
+                if new_name:
+                    update_layer.name = new_name
+
+                if arcgis_pro:
+                    df.updateConnectionProperties(update_layer.connectionProperties['connection_info']['database'],
+                                                  os.path.dirname(source.replace(r"\mu_Geometry", "")))
+                else:
+                    update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))),
+                                                   workspace_type, os.path.basename(source))
+
+            if "msm_Node" in source:
+                for label_class in (update_layer.listLabelClasses() if arcgis_pro else update_layer.labelClasses):
+                    if show_depth:
+                        label_class.expression = label_class.expression.replace("return labelstr",
+                                                                                'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
+
+        # graphing MU_database
+        import mikegraph
+        graph = mikegraph.Graph(MU_database)
+        graph.map_network()
+
+        catchments_MUID = [row[0] for row in arcpy.da.SearchCursor(msm_Catchment, ["MUID"])]
+        arcpy.AddMessage("Analyzing %d Catchments" % len(catchments_MUID))
+        catchments = [graph.catchments_dict[muid] for muid in catchments_MUID]
+        arcpy.Select_analysis(arcpy.Describe(catchment_layer).catalogPath,
+                              catchments_output, where_clause="MUID IN ('%s')" % "', '".join([catchment.MUID for catchment in catchments]))
+        arcpy.AddField_management(catchments_output, 'NodeID', 'TEXT')
+
+        with arcpy.da.UpdateCursor(catchments_output, ["MUID", "NodeID"]) as cursor:
+            for row in cursor:
+                for catchment in catchments:
+                    if catchment.MUID == row[0]:
+                        row[1] = catchment.nodeID
+                        cursor.updateRow(row)
+                        break
+
+        arcpy.management.Clip(raster, "#", clipped_raster, in_template_dataset=catchments_output,
+                              clipping_geometry="ClippingGeometry", nodata_value=-999)
+        arcpy.management.Resample(
+            in_raster=clipped_raster,
+            out_raster=clipped_raster_resampled,
+            cell_size="%d %d" % (resolution, resolution),
+            resampling_type="NEAREST"
+        )
+
+        desc = arcpy.Describe(clipped_raster_resampled)
+
+        raster = arcpy.Raster(clipped_raster_resampled)
+        raster_array = arcpy.RasterToNumPyArray(raster)
+        cell_size = raster.meanCellHeight  # Assuming square cells
+        raster_extent = raster.extent
+        lower_left = arcpy.Point(raster.extent.XMin, raster.extent.YMin)
+
+        raster_array_slope = np.zeros(raster_array.shape, dtype=float)
+
+        # Create a spatial reference object for the raster
+        spatial_ref = desc.spatialReference
+
+        def getRasterValue(x, y):
+            # Convert the coordinates to row and column indices
+
+            col = int((x - lower_left.X) / cell_size)
+            row = int((y - lower_left.Y) / cell_size)
+            # Handle case where y-coordinate decreases as row index increases
+            row = rows - 1 - row
+            if row < rows and col < cols:
+                return raster_array[row, col]
+            else:
+                return -999
+
+        arcpy.CreateFeatureclass_management(
+            out_path=os.path.dirname(raster_points),
+            out_name=os.path.basename(raster_points),
+            geometry_type='POINT'
+            # spatial_reference=raster.spatialReference
+        )
+        arcpy.AddField_management(raster_points, 'VALUE', 'DOUBLE')
+        arcpy.AddField_management(raster_points, 'oldID', 'FLOAT', field_scale=0, field_precision=15)
+
+        points_slope = np.zeros(raster_array.shape, dtype=float).flatten()
+        points_slope.fill(-999)
+
+        points_vertical_add = np.zeros(raster_array.shape, dtype=float).flatten()
+        points_vertical_add.fill(-999)
+        i = 0
+        arcpy.SetProgressor("step", "Converting Raster to Points", 0, int(raster_array.size), 1)
+        with arcpy.da.InsertCursor(raster_points, ['SHAPE@', 'VALUE', "oldID"]) as cursor:
+            rows, cols = raster_array.shape
+            # with alive_bar(rows * cols, force_tty=True) as bar:
+            for row in range(rows):
+                for col in range(cols):
+                    # Calculate the coordinates for the cell center
+                    if raster_array[rows - 1 - row, col] != -999:
+                        x = lower_left.X + col * cell_size + cell_size / 2
+                        y = lower_left.Y + row * cell_size + cell_size / 2
+
+                        # Create a point geometry
+                        point = arcpy.Point(x, y)
+
+                        point_geom = arcpy.PointGeometry(point, raster.spatialReference)
+
+                        # Insert the point and value into the feature class
+                        try:
+                            cursor.insertRow([point_geom, raster_array[rows - 1 - row, col], i])
+                        except Exception as e:
+                            pass
+                    i+= 1
+                arcpy.SetProgressorPosition(i)
+                        # bar()
+
+        # Loop over each cell in the raster array
+        rows, cols = raster_array.shape
+
+        class Node:
+            def __init__(self, muid, shape, critical_level):
+                self.muid = muid
+                self.shape = shape
+                self.critical_level = critical_level
+
+        nodes = {}
+        with arcpy.da.SearchCursor(msm_Node, ["muid", "SHAPE@", "InvertLevel"]) as cursor:
+            for row in cursor:
+                nodes[row[0]] = Node(row[0], row[1], row[2])
+
+        # with arcpy.da.SearchCursor(node_result_file, ["MUID", "Max_Elev"]) as cursor:
+        #     for row in cursor:
+        #         if row[0] in nodes:
+        #             nodes[row[0]].critical_level = row[1]
+
+        with arcpy.da.SearchCursor(catchments_output, ["OID@", "MUID"]) as cursor:
+            for row in cursor:
+                for catchment in catchments:
+                    if row[1] == catchment.MUID:
+                        catchment.OID = row[0]
+
+        arcpy.MakeFeatureLayer_management(raster_points, "points_layer")
+
+        arcpy.SetProgressor("step", "Converting Raster to Points", 0, int(raster_array.size), 1)
+        arcpy.SetProgressorPosition(i)
+
+        with arcpy.da.SearchCursor(catchments_output, ["MUID", "NodeID", "SHAPE@"]) as catchment_cursor:
+            # with alive_bar(len([row for row in catchment_cursor]), force_tty=True) as bar:
+            arcpy.SetProgressor("step", "Analyzing Catchments", 0, int(len([row for row in catchment_cursor])), 1)
+            catchment_cursor.reset()
+            for i, catchment_row in enumerate(catchment_cursor):
+                node_id = catchment_row[1]
+                if not node_id:
+                    print("No Node_ID for catchment %s" % (catchment_row[0]))
+                    continue
+                arcpy.Select_analysis(arcpy.Describe(msm_Catchment).catalogPath, catchment_loop,
+                                      where_clause="MUID = '%s'" % catchment_row[0])
+
+                arcpy.SelectLayerByLocation_management(
+                    in_layer="points_layer",  # Layer to select from
+                    overlap_type="WITHIN",  # Spatial relationship
+                    select_features=catchment_loop  # The polygon features
+                )
+
+                links = [link for link in graph.network.links.values() if
+                         link.fromnode == node_id or link.tonode == node_id]
+
+                links_3d = []
+                for link in links:
+                    fromnode_3d = arcpy.Point(nodes[link.fromnode].shape.centroid.X,
+                                              nodes[link.fromnode].shape.centroid.Y,
+                                              nodes[link.fromnode].critical_level)
+                    tonode_3d = arcpy.Point(nodes[link.tonode].shape.centroid.X,
+                                            nodes[link.tonode].shape.centroid.Y, nodes[link.tonode].critical_level)
+
+                    links_3d.append(arcpy.Polyline(arcpy.Array([fromnode_3d, tonode_3d]), None, True))
+
+                with arcpy.da.SearchCursor("points_layer", ["SHAPE@", "oldID", "VALUE"]) as cursor:
+                    for row in cursor:
+                        shortest_distance = 1e9
+                        nearest_point = None
+                        for link in links_3d:
+                            point, _, distance, _ = link.queryPointAndDistance(row[0])
+                            if distance < shortest_distance:
+                                shortest_distance = distance
+                                nearest_point = point
+                        frostfri_dybde = initial_depth
+                        if shortest_distance > 1:
+                            points_slope[int(row[1])] = (row[
+                                                             2] - frostfri_dybde - nearest_point.centroid.Z) / shortest_distance * 1e3
+                            points_vertical_add[int(row[1])] = required_slope * min(shortest_distance, 10) + 10e-3 * max(0,
+                                                                                                                shortest_distance - 10) - (
+                                                                           row[
+                                                                               2] - frostfri_dybde - nearest_point.centroid.Z)
+
+                arcpy.SetProgressorPosition(i)
+
+        slope_raster = arcpy.NumPyArrayToRaster(
+            in_array=np.flipud(points_slope.reshape(raster_array.shape)),
+            lower_left_corner=lower_left,
+            x_cell_size=cell_size,
+            y_cell_size=cell_size,
+            value_to_nodata=-999  # Set this if you have a specific NoData value
+        )
+        # raster_from_array.spatialReference = spatial_ref
+        slope_raster.save(output_raster_path)
+
+        vertical_add_raster = arcpy.NumPyArrayToRaster(
+            in_array=np.flipud(points_vertical_add.reshape(raster_array.shape)),
+            lower_left_corner=lower_left,
+            x_cell_size=cell_size,
+            y_cell_size=cell_size,
+            value_to_nodata=-999  # Set this if you have a specific NoData value
+        )
+        vertical_add_raster.save(output_vertical_add_raster_path)
+
+        addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchment_elevation_adjustment.lyr",
+                             output_vertical_add_raster_path, workspace_type="FILEGDB_WORKSPACE")
+
+        addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchment_slope.lyr",
+                 output_raster_path, workspace_type="FILEGDB_WORKSPACE")
+
+
+        # print(output_vertical_add_raster_path)
+
         return
