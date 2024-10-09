@@ -7,7 +7,7 @@ import os
 import sys
 import numpy as np
 import sqlite3
-# import pythonaddins
+import pythonaddins
 
 
 class Toolbox(object):
@@ -101,6 +101,8 @@ class FieldCalculator(object):
                         connection = sqlite3.connect(
                                     MU_database)
                         update_cursor = connection.cursor()
+                        arcpy.AddMessage("UPDATE %s SET %s = %s WHERE MUID IN %s" % (featureclass_name.replace("main.",""), field, value,
+                                                                                     "('%s')" % ("','".join(selection))))
                         update_query = "UPDATE %s SET %s = %s WHERE MUID IN %s" % (featureclass_name.replace("main.",""), field, value,
                                                                                      "('%s')" % ("','".join(selection)))
                         update_cursor.execute(update_query)
