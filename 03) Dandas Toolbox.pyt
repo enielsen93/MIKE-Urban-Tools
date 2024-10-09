@@ -114,8 +114,16 @@ class Dandas2MULinks(object):
             datatype="Boolean",
             parameterType="Optional",
             direction="Input")
+
+        ignore_elevation_difference = arcpy.Parameter(
+            displayName="Remove elevation difference for manhole / link if less than [m]:",
+            name="ignore_elevation_difference",
+            category="Additional Settings",
+            datatype="GPDouble",
+            parameterType="Optional",
+            direction="Input")
 		
-        params = [dandas_knuder, dandas_ledninger, afloebkodeparameter, afloebkategori, coordinate_system, only_import_extent, import_catchments]
+        params = [dandas_knuder, dandas_ledninger, afloebkodeparameter, afloebkategori, coordinate_system, only_import_extent, import_catchments, ignore_elevation_difference]
         return params
 
     def isLicensed(self):
@@ -154,6 +162,7 @@ class Dandas2MULinks(object):
         coordinate_system = parameters[4].Value
         only_import_extent = parameters[5].Value
         import_catchments = parameters[6].Value
+        ignore_elevation_difference = parameters[7].Value
 
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
@@ -456,16 +465,18 @@ class Dandas2MULinks(object):
                             linkDictionary["MaterialID"] = materialList[material] if material in materialList else 'Concrete (Normal)'
                         else:
                             linkDictionary["MaterialID"] = 'Concrete (Normal)'
-                        
+
                         if link_delledning.find("BundloebskoteOpst") is not None:
                             if (link_delledning.find("DeltaKoteOpst") is not None and 
                                 not link_delledning.find("DeltaKoteOpst").text == "0.00"):
-                                linkDictionary["UpLevel"] = float(link_delledning.find("BundloebskoteOpst").text)
+                                if abs(nodesDict[linkDictionary["FROMNODE"]][2] - float(link_delledning.find("BundloebskoteOpst").text))>ignore_elevation_difference:
+                                    linkDictionary["UpLevel"] = float(link_delledning.find("BundloebskoteOpst").text)
                             
                         if link_delledning.find("BundloebskoteNedst") is not None:
                             if (link_delledning.find("DeltaKoteNedst") is not None and 
                                     not link_delledning.find("DeltaKoteNedst").text == "0.00"):
-                                linkDictionary["DwLevel"] = float(link_delledning.find("BundloebskoteNedst").text)
+                                if abs(nodesDict[linkDictionary["TONODE"]][2] - float(link_delledning.find("BundloebskoteNedst").text))>ignore_elevation_difference:
+                                    linkDictionary["DwLevel"] = float(link_delledning.find("BundloebskoteNedst").text)
                         
                         if link_delledning.find("Fald") is not None:
                             linkDictionary["Slope_C"] = float(link_delledning.find("Fald").text)/10
@@ -842,7 +853,7 @@ class CopyMikeUrbanFeatures(object):
             # parameters[2].filter.list = []  
         return
 
-    def execute(self, parameters, messages):   
+    def execute(self, parameters, messages):
         MU_database = parameters[0].valueAsText
         msm_Nodes = parameters[1].values
         msm_Links = parameters[2].values
@@ -851,7 +862,7 @@ class CopyMikeUrbanFeatures(object):
         MU_database = parameters[0].valueAsText
         is_sqlite = True if ".sqlite" in MU_database else False
         arcpy.env.overwriteOutput = True
-        
+
         import random
         nodes_count = 0
         if msm_Nodes:
@@ -860,7 +871,7 @@ class CopyMikeUrbanFeatures(object):
                 nodes_in_msm_Node = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
                 for node in nodes_in_msm_Node:
                     nodes_count += 1
-        
+
         link_count = 0
         if msm_Links:
             for i, msm_Link in enumerate(msm_Links):
@@ -868,7 +879,7 @@ class CopyMikeUrbanFeatures(object):
                 links_in_msm_Link = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
                 for link in links_in_msm_Link:
                     link_count += 1
-        
+
         catchment_count = 0
         if ms_Catchments:
             for i, ms_Catchment in enumerate(ms_Catchments):
@@ -876,11 +887,16 @@ class CopyMikeUrbanFeatures(object):
                 catchments_in_ms_Catchment = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
                 for catchment in catchments_in_ms_Catchment:
                     catchment_count += 1
-        
-        if pythonaddins.MessageBox("You are copying %d manholes, %d pipes, and %d catchments. Continue?" % (nodes_count, link_count, catchment_count), 
-                                                    "Confirm copy?", 1) == "OK":
+
+        if is_sqlite:
+            arcpy.AddMessage("SQLITE database. Using XML file in MIKE+ for import.")
+            with open(os.path.dirname(os.path.realpath(__file__)) + r"\Data\XML\DDS_to_MIKE+.xml", 'r') as f:
+                xml_txt = f.readlines()
+
+        if pythonaddins.MessageBox("You are copying %d manholes, %d pipes, and %d catchments. Continue?" % (nodes_count, link_count, catchment_count),
+                                   "Confirm copy?", 1) == "OK":
             if msm_Nodes:
-               
+
                 for i, msm_Node in enumerate(msm_Nodes):
                     reference_MU_database = os.path.dirname(arcpy.Describe(msm_Node).catalogPath)
                     nodes_in_database = [row[0] for row in arcpy.da.SearchCursor(MU_database + "\msm_Node", ["MUID"])]
@@ -888,11 +904,11 @@ class CopyMikeUrbanFeatures(object):
                     nodes_in_msm_Node = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
                     duplicate_nodes = np.intersect1d(nodes_in_database, nodes_in_msm_Node)
                     if duplicate_nodes.size > 0:
-                        response = pythonaddins.MessageBox("The following manholes are already in the Mike Urban Database: %s" % ", ".join(duplicate_nodes) 
-                                                            + " Would you like to remove the existing manholes first? (No: The tool will add those duplicate manholes anyway."
-                                                            + " Cancel: Skip those manholes)", 
-                                                            "Remove duplicate features?", 3)
-                        if is_sqlite:
+                        response = pythonaddins.MessageBox("The following manholes are already in the Mike Urban Database: %s" % ", ".join(duplicate_nodes)
+                                                           + " Would you like to remove the existing manholes first? (No: The tool will add those duplicate manholes anyway."
+                                                           + " Cancel: Skip those manholes)",
+                                                           "Remove duplicate features?", 3)
+                        if is_sqlite and response == "Yes":
                             arcpy.AddError("Function not supported for .sqlite database")
                             return
                         else:
@@ -910,24 +926,37 @@ class CopyMikeUrbanFeatures(object):
 
                     if is_sqlite:
                         MUIDs = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
-                        sql_expression = "ATTACH DATABASE %s AS source; SELECT * INTO main.msm_Node FROM source.msm_Node WHERE MUID IN ('%s')" % (reference_MU_database, "', '".join(MUIDs))
-                        arcpy.AddMessage(sql_expression)
-                        return
+                        # sql_expression = "ATTACH DATABASE %s AS source; SELECT * INTO main.msm_Node FROM source.msm_Node WHERE MUID IN ('%s')" % (reference_MU_database, "', '".join(MUIDs))
+
+                        source_lineno = \
+                            [i for i, line in enumerate(xml_txt) if '<JobPropertyValue property="Source"' in line][0]
+                        xml_txt[source_lineno] = re.sub('value *= *"[^"]+"', 'value="%s"' % reference_MU_database,
+                                                        xml_txt[source_lineno])
+
+                        msm_Node_where_clause_lineno = [i for i, line in enumerate(xml_txt) if '"msm_Node_where_clause"' in line][0]
+                        xml_txt[msm_Node_where_clause_lineno] = re.sub('value *= *"[^"]+"', "value=\"MUID IN ('%s')\"" % "', '".join(MUIDs),
+                                                                       xml_txt[msm_Node_where_clause_lineno])
+
+                        # arcpy.AddMessage(sql_expression)
                     else:
                         arcpy.Append_management(selected, MU_database + "\msm_Node", schema_type = "NO_TEST")
-            
+
             if msm_Links:
                 links_in_database = [row[0] for row in arcpy.da.SearchCursor(MU_database + "\msm_Link", ["MUID"])]
                 for i, msm_Link in enumerate(msm_Links):
+                    reference_MU_database = os.path.dirname(arcpy.Describe(msm_Link).catalogPath)
                     selected = arcpy.Select_analysis(msm_Link, "in_memory\msm_Link_%d" % (i))
                     links_in_msm_Link = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
                     duplicate_links = np.intersect1d(links_in_database, links_in_msm_Link)
                     if duplicate_links.size > 0:
-                        response = pythonaddins.MessageBox("The following pipes are already in the Mike Urban Database: %s" % ", ".join(duplicate_links) 
-                                                            + " Would you like to remove the existing pipes first? (No: The tool will add those duplicate pipes anyway."
-                                                            + " Cancel: Skip those pipes)", 
-                                                            "Remove duplicate features?", 3)
+                        response = pythonaddins.MessageBox("The following pipes are already in the Mike Urban Database: %s" % ", ".join(duplicate_links)
+                                                           + " Would you like to remove the existing pipes first? (No: The tool will add those duplicate pipes anyway."
+                                                           + " Cancel: Skip those pipes)",
+                                                           "Remove duplicate features?", 3)
                         if response == "Yes":
+                            if is_sqlite:
+                                arcpy.AddError("Function not supported for .sqlite database")
+                                return
                             edit = arcpy.da.Editor(MU_database)
                             edit.startEditing(False, True)
                             edit.startOperation()
@@ -938,24 +967,36 @@ class CopyMikeUrbanFeatures(object):
                             edit.stopEditing(True)
                         elif response == "Cancel":
                             selected = arcpy.Select_analysis(selected, "in_memory\msm_Link_%d_filtered" % (i), where_clause = "MUID NOT IN ('%s')" % "', '".join(duplicate_links))
-                    try:
-                        # arcpy.AddMessage([field.name.lower() for field in arcpy.ListFields(MU_database + "\msm_Link")])
-                        if not "fromnode" in [field.name.lower() for field in arcpy.ListFields(MU_database + "\msm_Link")]:
-                            arcpy.DeleteField_management(selected, ["FROMNODE","TONODE"])
-                        elif "fromnode" in [field.name.lower() for field in arcpy.ListFields(MU_database + "\msm_Link")] and not "fromnode" in [field.name.lower() for field in arcpy.ListFields(selected)]:
-                            for field in ["FROMNODE","TONODE"]:
-                                arcpy.AddField_management(selected, field, "TEXT", field_length = 50, field_is_nullable="NULLABLE")
-                            # pythonaddins.MessageBox("Attempting to add FROMNODE and TONODE to %s. Close the Mike Urban model before proceeding." % (MU_database + "\msm_Link"), "Close Mike Urban", 0) 
-                            # for field in ["FROMNODE", "TONODE"]:
-                                # arcpy.AddField_management(MU_database + "\msm_Link", field, "TEXT", field_length = 255)
-                        arcpy.Append_management(selected, MU_database + "\msm_Link", schema_type = "NO_TEST")
-                    except Exception as e:
+                    if is_sqlite:
+                        MUIDs = [row[0] for row in arcpy.da.SearchCursor(selected, ["MUID"])]
+                        source_lineno = [i for i,line in enumerate(xml_txt) if '<JobPropertyValue property="Source"' in line][0]
+                        xml_txt[source_lineno] = re.sub('value *= *"[^"]+"', 'value="%s"' % reference_MU_database, xml_txt[source_lineno])
 
-                        arcpy.AddError("FromNode and ToNode not found in Mike Urban Database. Try manually copying the Pipes")
-                        arcpy.AddError(traceback.format_exc())
-                        arcpy.AddError(e)
-                        # raise(e)
-            
+                        msm_Link_where_clause_lineno = \
+                            [i for i, line in enumerate(xml_txt) if '"msm_Link_where_clause"' in line][0]
+                        xml_txt[msm_Link_where_clause_lineno] = re.sub('value *= *"[^"]+"',
+                                                                       "value=\"MUID IN ('%s')\"" % "', '".join(MUIDs),
+                                                                       xml_txt[msm_Link_where_clause_lineno])
+                    else:
+                        try:
+                            # arcpy.AddMessage([field.name.lower() for field in arcpy.ListFields(MU_database + "\msm_Link")])
+                            if not "fromnode" in [field.name.lower() for field in arcpy.ListFields(MU_database + "\msm_Link")]:
+                                arcpy.DeleteField_management(selected, ["FROMNODE","TONODE"])
+                            elif "fromnode" in [field.name.lower() for field in arcpy.ListFields(MU_database + "\msm_Link")] and not "fromnode" in [field.name.lower() for field in arcpy.ListFields(selected)]:
+                                for field in ["FROMNODE","TONODE"]:
+                                    arcpy.AddField_management(selected, field, "TEXT", field_length = 50, field_is_nullable="NULLABLE")
+                                # pythonaddins.MessageBox("Attempting to add FROMNODE and TONODE to %s. Close the Mike Urban model before proceeding." % (MU_database + "\msm_Link"), "Close Mike Urban", 0)
+                                # for field in ["FROMNODE", "TONODE"]:
+                                # arcpy.AddField_management(MU_database + "\msm_Link", field, "TEXT", field_length = 255)
+                            arcpy.Append_management(selected, MU_database + "\msm_Link", schema_type = "NO_TEST")
+                        except Exception as e:
+
+                            arcpy.AddError("FromNode and ToNode not found in Mike Urban Database. Try manually copying the Pipes")
+                            arcpy.AddError(traceback.format_exc())
+                            arcpy.AddError(e)
+                            # raise(e)
+
+
             if ms_Catchments:
                 # arcpy.AddMessage(ms_Catchments)
                 for i, ms_Catchment in enumerate(ms_Catchments):
@@ -963,7 +1004,7 @@ class CopyMikeUrbanFeatures(object):
                     arcpy.AddMessage(arcpy.Describe(ms_Catchment).catalogPath)
                     if not ".mdb" in arcpy.Describe(ms_Catchment).catalogPath:
                         selected = arcpy.Select_analysis(ms_Catchment, "in_memory\ms_Catchment_%d" % (i))
-                    
+
                         ms_CatchmentMUIDs = [row[0] for row in arcpy.da.SearchCursor(selected,"MUID")]
                         duplicateMUIDs = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"ms_Catchment"),"MUID",where_clause = "MUID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
                         duplicateHModA = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"msm_HModA"),"CatchID",where_clause = "CatchID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
@@ -1014,10 +1055,10 @@ class CopyMikeUrbanFeatures(object):
                         # fields = [field.name for field in arcpy.ListFields(MU_database + "\msm_HModA") if not field.name == "OBJECTID"]
                         # arcpy.AddMessage(fields)    
                         # with arcpy.da.InsertCursor(MU_database + "\msm_HModA", ["CatchID","ImpArea","ParAID","LocalNo","ConcTime","RFactor","ILoss","CoeffNo","TACoeff"]) as target_cursor:
-                            # with arcpy.da.SearchCursor(os.path.join(input_database, "msm_HModA"), fields, where_clause = "CatchID IN ('%s')" % "', '".join(MUIDs)) as reference_cursor:
-                                # for row in reference_cursor:
-                                    # arcpy.AddMessage(row)
-                                    # target_cursor.insertRow(("gay",0,"-DEFAULT-",0,7,0.9,0.0006,0,0.33))
+                        # with arcpy.da.SearchCursor(os.path.join(input_database, "msm_HModA"), fields, where_clause = "CatchID IN ('%s')" % "', '".join(MUIDs)) as reference_cursor:
+                        # for row in reference_cursor:
+                        # arcpy.AddMessage(row)
+                        # target_cursor.insertRow(("gay",0,"-DEFAULT-",0,7,0.9,0.0006,0,0.33))
                         # # arcpy.AddMessage(selected_HModA)
                         # arcpy.CopyFeatures_management(selected_HModA, "K:\Hydrauliske modeller\Papirkurv\SonsOfKemet")
                         arcpy.management.Append(selected_HModA, MU_database + "\msm_HModA")
@@ -1025,7 +1066,13 @@ class CopyMikeUrbanFeatures(object):
                         arcpy.AddMessage("CatchID IN ('%s')" % "', '".join(MUIDs))
                         arcpy.AddMessage([row[0] for row in arcpy.da.SearchCursor(selected_CatchCon, ["CatchID"])])
                         arcpy.management.Append(selected_CatchCon, MU_database + "\msm_CatchCon")
-        
+            if is_sqlite:
+                import tempfile
+                output_path = os.path.join(tempfile.gettempdir(), '%s.xml' % os.path.basename(reference_MU_database).split(".")[0])
+                with open(output_path,'w') as f:
+                    f.writelines(xml_txt)
+                import subprocess
+                subprocess.call('explorer /select,"%s"' % output_path)
         return
 
 
