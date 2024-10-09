@@ -203,7 +203,7 @@ class PipeDimensionToolTAPro(object):
             parameterType="optional",
             direction="Input")
         keep_largest_diameter.category = "Additional settings"
-        keep_largest_diameter.value = True
+        keep_largest_diameter.value = False
         
         change_material = arcpy.Parameter(
             displayName="Change material (Plastic if less than 500 mm, concrete if greater than or equal to 500 mm",
@@ -765,7 +765,7 @@ class PipeDimensionToolResultFile(object):
             parameterType="optional",
             direction="Input")
         keep_largest_diameter.category = "Additional settings"
-        keep_largest_diameter.value = True
+        keep_largest_diameter.value = False
 
         change_material = arcpy.Parameter(
             displayName="Change material (Plastic if less than 500 mm, concrete if greater than or equal to 500 mm",
@@ -1035,7 +1035,7 @@ class upgradeDimensions(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and "diameter" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
             if links:
                 parameters[0].value = links
 
@@ -1149,7 +1149,7 @@ class downgradeDimensions(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and "diameter" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
             if links:
                 parameters[0].value = links
         return
