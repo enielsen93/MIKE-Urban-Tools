@@ -73,7 +73,7 @@ class CompareMikeModels(object):
             parameterType="Required",
             multiValue=True,
             direction="Input")
-        check_features.filter.list = ["msm_Catchment", "msm_Node", "msm_Link", "msm_Weir", "msm_Orifice"]
+        check_features.filter.list = ["msm_Catchment", "msm_Node", "msm_Link", "msm_Weir", "msm_Orifice", "msm_Project", "msm_HParA", "msm_BBoundary"]
         check_features.value = ["msm_Catchment", "msm_Node", "msm_Link", "msm_Weir", "msm_Orifice"]
 
         ignore_fields = arcpy.Parameter(
@@ -164,7 +164,12 @@ class CompareMikeModels(object):
                 feature_path_2 = feature_path_2.replace("msm_Catchment", "ms_Catchment")
 
             result_layer = getAvailableFilename(os.path.join(arcpy.env.scratchGDB, feature))
-            arcpy.CreateFeatureclass_management(arcpy.env.scratchGDB, os.path.basename(result_layer),
+
+            if arcpy.Describe(feature_path_1).dataType == "FeatureClass":
+                arcpy.CreateFeatureclass_management(arcpy.env.scratchGDB, os.path.basename(result_layer),
+                                                template=feature_path_1)
+            else:
+                arcpy.CreateTable_management(arcpy.env.scratchGDB, os.path.basename(result_layer),
                                                 template=feature_path_1)
 
             arcpy.AddField_management(result_layer, "fields", "TEXT", field_is_nullable="NULLABLE")
@@ -184,7 +189,7 @@ class CompareMikeModels(object):
 
             MUID_field_i = [i for i, field in enumerate(fields) if field.lower() == "muid"][0]
 
-            if "SHAPE@" not in fields:
+            if "SHAPE@" not in fields and arcpy.Describe(feature_path_1).dataType == "FeatureClass":
                 fields.append("SHAPE@")
 
             arcpy.SetProgressor("step","Checking feature %s" % (feature_path_1), 0, len([1 for row in arcpy.da.SearchCursor(feature_path_1, "muid")]), 1)
@@ -214,12 +219,17 @@ class CompareMikeModels(object):
 
             def compare_rows(row1, row2, fields = None):
                 fields_diff = []
-                for field_i in range(len(row1)):
-                    if fields and fields[field_i] == "SHAPE@AREA":
-                        if abs(abs(row1[field_i]) - abs(row2[field_i])) > 1:
+                try:
+                    for field_i in range(len(row1)):
+                        if fields and fields[field_i] == "SHAPE@AREA":
+                            if abs(abs(row1[field_i]) - abs(row2[field_i])) > 1:
+                                fields_diff.append(field_i)
+                        elif row1[field_i] != row2[field_i]:
                             fields_diff.append(field_i)
-                    elif row1[field_i] != row2[field_i]:
-                        fields_diff.append(field_i)
+                except Exception as e:
+                    arcpy.AddMessage(row1)
+                    arcpy.AddMessage(row2)
+                    arcpy.AddMessage(field_i)
                 return fields_diff
 
             arcpy.SetProgressor("step","Comparing rows for feature %s" % (feature), 0, len(MUIDs_to_check), 1)
@@ -229,9 +239,8 @@ class CompareMikeModels(object):
                 idx = compare_rows(features_1[MUID], features_2[MUID], fields = fields)
                 if idx:
                     MUIDs_field_changed[MUID] = [fields[i] for i in idx]
-            arcpy.AddMessage("RACHEL!")
+
             if "catchment" in feature.lower():
-                arcpy.AddMessage("BOB!")
                 msm_CatchCon_1 = {}
                 msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_CatchCon"))
                                        if not ignore_field(field.name) and not field.name == "MUID"]
@@ -287,19 +296,33 @@ class CompareMikeModels(object):
                         cursor.insertRow(row)
 
             #arcpy.AddMessage(fields)
-            geometry_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == "shape@"][0]
-            MUID_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == "muid"][0]
-            with arcpy.da.InsertCursor(result_layer, ["MUID", "SHAPE@", "fields"]) as cursor:
-                for MUID in MUIDs_field_changed.keys():
-                    row = (features_1[MUID][MUID_field_i], features_1[MUID][geometry_field_i],
-                           ", ".join(MUIDs_field_changed[MUID]))
-                    cursor.insertRow(row)
+            if arcpy.Describe(feature_path_1).dataType == "FeatureClass":
+                geometry_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == "shape@"][0]
+                MUID_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == "muid"][0]
+                with arcpy.da.InsertCursor(result_layer, ["MUID", "SHAPE@", "fields"]) as cursor:
+                    for MUID in MUIDs_field_changed.keys():
+                        row = (features_1[MUID][MUID_field_i], features_1[MUID][geometry_field_i],
+                               ", ".join(MUIDs_field_changed[MUID]))
+                        cursor.insertRow(row)
+            else:
+                MUID_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == "muid"][0]
+                with arcpy.da.InsertCursor(result_layer, ["MUID", "fields"]) as cursor:
+                    for MUID in MUIDs_field_changed.keys():
+                        row = (features_1[MUID][MUID_field_i], ", ".join(MUIDs_field_changed[MUID]))
+                        cursor.insertRow(row)
 
-            newlayer = arcpy.mapping.Layer(result_layer)
-            arcpy.AddMessage(newlayer.name)
-            newlayer.name = newlayer.name + " (%d features)" % (np.sum(
-                [1 for row in arcpy.da.SearchCursor(result_layer, ["MUID"])]))
-            update_layer = arcpy.mapping.AddLayerToGroup(df, empty_group_layer, newlayer, "TOP")
+            arcpy.AddMessage(result_layer)
+            if arcpy.Describe(feature_path_1).dataType == "FeatureClass":
+                newlayer = arcpy.mapping.Layer(result_layer)
+                arcpy.AddMessage(newlayer.name)
+                newlayer.name = newlayer.name + " (%d features)" % (np.sum(
+                    [1 for row in arcpy.da.SearchCursor(result_layer, ["MUID"])]))
+                update_layer = arcpy.mapping.AddLayerToGroup(df, empty_group_layer, newlayer, "TOP")
+            else:
+                newlayer = arcpy.mapping.TableView(result_layer)
+                newlayer.name = newlayer.name + " (%d features)" % (np.sum(
+                    [1 for row in arcpy.da.SearchCursor(result_layer, ["MUID"])]))
+                update_layer = arcpy.mapping.AddTableView(df, newlayer)
 
         return
 
