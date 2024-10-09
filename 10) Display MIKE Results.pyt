@@ -147,8 +147,16 @@ class DisplayFloodReturnPeriodFun(object):
         breakChainOnNodes.category = "Additional settings"
         breakChainOnNodes.category = "Get Catchment Area"
         breakChainOnNodes.enabled = False
-            
-        parameters = [erfFile, observationPeriod, critical_return_period, mike_urban_database, flowFile, traceNetwork, reaches, breakChainOnNodes]
+
+        use_critical_level = arcpy.Parameter(
+            displayName="Use Critical Level from nodes",
+            name="use_critical_level",
+            datatype="Boolean",
+            parameterType="Optional",
+            direction="Input")
+        use_critical_level.enabled = True
+
+        parameters = [erfFile, observationPeriod, critical_return_period, mike_urban_database, flowFile, traceNetwork, reaches, breakChainOnNodes, use_critical_level]
         
         return parameters
 
@@ -189,7 +197,8 @@ class DisplayFloodReturnPeriodFun(object):
         flowFile = parameters[4].ValueAsText
         traceNetwork = parameters[5].ValueAsText
         reaches = parameters[6].ValueAsText
-        # break_chain_on_nodes = parameters[8].ValueAsText
+        # break_chain_on_nodes = parameters[7].ValueAsText
+        use_critical_level = parameters[8].Value
 
         MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
         if not os.path.exists(MIKE_folder):
@@ -215,7 +224,7 @@ class DisplayFloodReturnPeriodFun(object):
         MUIDsHCrit = {}
         with arcpy.da.SearchCursor(msm_Node,["MUID","GroundLevel","CriticalLevel"]) as cursor:
             for row in cursor:
-                if row[2]:
+                if use_critical_level and row[2]:
                     MUIDsHCrit[row[0]] = row[2]
                 else:
                     MUIDsHCrit[row[0]] = row[1]
