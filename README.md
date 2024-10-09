@@ -3,7 +3,7 @@ Tools for DHI MIKE Urban through ArcGIS
 
 <b>To install tools:</b>
 <ul>
-  <li>Download ZIP and export to a local folder.</li>
+  <li>[Download ZIP](https://github.com/enielsen93/MIKE-Urban-Tools/archive/refs/heads/main.zip) and export to a local folder.</li>
   <li>Open ArcMap or ArcGIS Pro.</li>
   <li>Browse to folder in the catalog and the tools will now be available.</li>
 </ul>
