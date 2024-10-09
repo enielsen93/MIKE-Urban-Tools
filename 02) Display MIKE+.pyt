@@ -324,9 +324,9 @@ class DisplaySqliteStep1(object):
                     update_layer.replaceDataSource(unicode(os.path.dirname(source.replace(r"\mu_Geometry", ""))),
                                                    workspace_type, os.path.basename(source))
 
-            arcpy.AddMessage("Bob")
+            # arcpy.AddMessage("Bob")
             if "msm_Node" in source:
-                arcpy.AddMessage("Bob")
+                # arcpy.AddMessage("Bob")
                 for label_class in (update_layer.listLabelClasses() if arcgis_pro else update_layer.labelClasses):
                     if not show_depth:
                         import re
