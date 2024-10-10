@@ -8,14 +8,14 @@ import traceback
 import warnings
 
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_Plan_027\KOM_CDS_5_sc3Base.res1d"
-result_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Musikkvartereret\PlanScenarie1\MK_Planscenarie2d_003\CDS10_4hr_143_Plan_NW_us1800Base.XRF"
-MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Musikkvartereret\PlanScenarie1\MK_Planscenarie2d_003\MK_Planscenarie2d_003.mdb"
-post_name = "_2e"
+MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Musikkvartereret\Status Model\MK_Status_Jun2024\MK_Status_Juni2024.mdb"
+result_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Musikkvartereret\Status Model\MK_Status_Jun2024\MK_Status_CDS20_N_240_143Base.XRF"
+post_name = ""
 msm_Node = os.path.join(MU_model, "msm_Node")
 # res1d_file = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_STATUS_001\KOM_STATUS_CDS20Base.res1d"
 # MU_model = r"C:\Users\ELNN\OneDrive - Ramboll\Documents\Aarhus Vand\Kongelund og Marselistunnel\MIKE\KOM_STATUS_001\KOM_STATUS_001.mdb"
 
-filter_to_extent = [714917, 6178886, 717251, 6180931]
+filter_to_extent = [714931, 6178354, 718457, 6181549]
 
 if filter_to_extent:
     print("Skipping all reaches and nodes outside extent %s" % filter_to_extent)
