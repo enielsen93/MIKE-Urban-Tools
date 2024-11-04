@@ -296,6 +296,8 @@ class PipeDimensionToolTAPro(object):
     def execute(self, parameters, messages):
         pipe_layer = parameters[0].ValueAsText
         MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry", "")
+        MU_database = MU_database.replace("!delete!", "")
+        arcpy.AddMessage(MU_database)
         reaches = parameters[1].ValueAsText
         reaches = reaches + ";Link" if reaches else "Link"
         result_field = parameters[2].ValueAsText
@@ -637,7 +639,7 @@ class PipeDimensionToolTAPro(object):
                         else:
                             if change_material:
                                 material = "Concrete (Normal)" if diameter > 0.45 else "Plastic"
-                            arcpy.AddMessage("Changed %s from %d to %d" % (row[3], row[1] * 1e3, D[Di]))
+                            arcpy.AddMessage("Changed %s from %d to %d" % (row[3], row[1] * 1e3 if row[1] else 0, D[Di]))
                             # arcpy.AddMessage("UPDATE msm_Link SET Diameter = %1.3f, SET MaterialID = %s WHERE MUID = %s" % (diameter, material, row[3]))
                             update_cursor.execute(
                                 "UPDATE msm_Link SET Diameter = %1.3f, MaterialID = '%s' WHERE MUID = '%s'" % (
@@ -1048,6 +1050,7 @@ class upgradeDimensions(object):
         pipe_layer = parameters[0].Value
         change_material = parameters[1].Value
         MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry", "")
+        MU_database = MU_database.replace("!delete!", "")
         is_sqlite = True if ".sqlite" in MU_database else False
 
         MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer,["MUID"])]
@@ -1060,9 +1063,8 @@ class upgradeDimensions(object):
             with sqlite3.connect(
                     MU_database) as connection:
                 update_cursor = connection.cursor()
-                D_plastic = np.array(diameters_plastic)
-                D_concrete = np.array(diameters_concrete)
-                with arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).catalogPath, ["MUID", "Diameter", "MaterialID"],
+
+                with arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).catalogPath.replace("!delete!",""), ["MUID", "Diameter", "MaterialID"],
                                            where_clause="MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
                     for row in cursor:
                         if change_material:
@@ -1084,10 +1086,6 @@ class upgradeDimensions(object):
             edit.startEditing(False, True)
             edit.startOperation()
 
-
-
-            D_plastic = np.array(diameters_plastic)
-            D_concrete = np.array(diameters_concrete)
             with arcpy.da.UpdateCursor(arcpy.Describe(pipe_layer).catalogPath,["MUID", "Diameter", "MaterialID"], where_clause = "MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
                 for row in cursor:
                     if change_material:
@@ -1161,6 +1159,7 @@ class downgradeDimensions(object):
         pipe_layer = parameters[0].Value
         change_material = parameters[1].Value
         MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry", "")
+        MU_database = MU_database.replace("!delete!", "")
         is_sqlite = True if ".sqlite" in MU_database else False
 
         MUIDs = [row[0] for row in arcpy.da.SearchCursor(pipe_layer,["MUID"])]
@@ -1175,7 +1174,7 @@ class downgradeDimensions(object):
                 update_cursor = connection.cursor()
                 D_plastic = np.array(diameters_plastic)
                 D_concrete = np.array(diameters_concrete)
-                with arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).catalogPath, ["MUID", "Diameter", "MaterialID"],
+                with arcpy.da.SearchCursor(arcpy.Describe(pipe_layer).catalogPath.replace("!delete!",""), ["MUID", "Diameter", "MaterialID"],
                                            where_clause="MUID IN ('%s')" % ("', '".join(MUIDs))) as cursor:
                     for row in cursor:
                         if change_material:
