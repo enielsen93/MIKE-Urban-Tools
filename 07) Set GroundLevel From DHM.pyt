@@ -106,6 +106,13 @@ class GetTerrainElevation(object):
         # if nodes:
         # parameters[0].value = nodes[0]
 
+        if not parameters[0].value:
+            mxd = arcpy.mapping.MapDocument("CURRENT")
+            nodes = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Point'
+                    and "groundlevel" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+            if nodes:
+                parameters[0].value = nodes
+
         if parameters[0].altered:
             parameters[2].filter.list = [f.name.lower() for f in arcpy.Describe(parameters[0].value).fields]
             if "GroundLevel".lower() in parameters[2].filter.list:
@@ -180,9 +187,11 @@ class GetTerrainElevation(object):
                     update_cursor = connection.cursor()
                     for muid in point_layer_shapes.keys():
                         x, y = point_layer_shapes[muid][0], point_layer_shapes[muid][1]
+                        terrain_elevation = round(getTerrainElevation(x,y), decimals)
                         update_cursor.execute(
-                            "UPDATE msm_Node SET %s = %1.3f WHERE MUID = '%s'" % (
+                            "UPDATE msm_Node SET %s = %s WHERE MUID = '%s'" % (
                             field, getTerrainElevation(x, y), muid))
+                        arcpy.AddMessage("Set %s to %1.2f" % (muid, terrain_elevation))
 
             else:
                 with arcpy.da.UpdateCursor(arcpy.Describe(point_layer).catalogPath, [OID_field, field],
@@ -199,6 +208,7 @@ class GetTerrainElevation(object):
                                 arcpy.AddWarning("Warning: Found NoData on location %s" % ("%1.2f %1.2f" % (x, y)))
                             else:
                                 pointcursor.updateRow(row)
+                                arcpy.AddMessage("Set GroundLevel to %1.2f" % terrain_elevation)
                         except Exception as e:
                             arcpy.AddError("Error on row %s" % row[1])
                             arcpy.AddError(e.message)
