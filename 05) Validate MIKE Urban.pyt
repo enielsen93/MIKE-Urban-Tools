@@ -274,7 +274,7 @@ class CheckMikeUrbanDatabase(object):
         with arcpy.da.SearchCursor(catchments, ["MUID", "Area", "SHAPE@AREA"], where_clause = 'Area IS NOT NULL') as cursor:
             for row in cursor:
                 shapeArea = row[2]/1e4 if not is_sqlite else row[2]
-                if abs(abs(shapeArea)-abs(row[1]))/min(row[1],shapeArea)*1e2>10:
+                if min(row[1],shapeArea)>0 and abs(abs(shapeArea)-abs(row[1]))/min(row[1],shapeArea)*1e2>10:
                     catchmentsDrainageAreaDiffer.append(row[0])
                 else:
                     catchmentsDrainageAreaSame.append(row[0])
