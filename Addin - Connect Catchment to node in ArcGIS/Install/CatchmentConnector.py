@@ -63,29 +63,22 @@ class ConnectCatchment(object):
     def onMouseDown(self, x, y, button, shift):
         pass
     def onMouseDownMap(self, x, y, button, shift):
-        print("BOB1")
         nodeLayer = [layer for layer in arcpy.mapping.ListLayers(self.mxd) if layer.longName == manholeLayer.selectedLayer][0]
         if arcpy.Exists(os.path.join(nodeLayer.workspacePath, "msm_Node")):
             nodeLayer = os.path.join(nodeLayer.workspacePath, "msm_Node")
 
-        print("BOB2")
         nodesCount = int(arcpy.GetCount_management(nodeLayer)[0])
 
-        print("BOB3")
         node_i = manholeLayer.find_closest_node([x,y])
-        print("BOB4")
         node = manholeLayer.nodes[node_i].muid
 
         # dist = np.sqrt(np.power(nodesX-x,2)+np.power(nodesY-y,2))
         # node = nodes[np.argmin(dist)]
 
-        print("BOB5")
         catchLayer = [layer for layer in arcpy.mapping.ListLayers(self.mxd) if layer.longName == catchmentLayer.selectedLayer][0]
-        print("BOB6")
         mike_urban_database = os.path.dirname(arcpy.Describe(catchLayer).catalogPath).replace("\mu_Geometry", "")
         is_sqlite = True if ".sqlite" in mike_urban_database else False
 
-        print("BOB7")
         catchments_selected = []
         ID_fields = ["MUID","FID","OBJECTID","OID"]
         fields = arcpy.ListFields(catchLayer)
@@ -93,21 +86,17 @@ class ConnectCatchment(object):
             if ID_field.lower() in [field.name.lower() for field in fields]:
                 break
 
-        print("BOB8")
         with arcpy.da.SearchCursor(catchLayer, [ID_field]) as cursor:
             for i,row in enumerate(cursor):
                 catchments_selected.append(str(row[0]))
 
-        print("BOB9")
         if len(arcpy.ListFields(catchLayer,"NodeID"))>0:
             if pythonaddins.MessageBox("Assign %s to %s (SHP)?" % (", ".join(catchments_selected),node), "Confirm Assignment", 1) == "OK":
                 arcpy.CalculateField_management(catchLayer, "NodeID", '"%s"' % node, "VB")
         else:
-            print("BOB95")
             if is_sqlite:
                 pass
             else:
-                print("BOB12")
                 msm_CatchConLink = os.path.join(catchLayer.workspacePath, "msm_CatchConLink")
                 duplicates = find_duplicates([row[0] for row in arcpy.da.SearchCursor(msm_CatchConLink, ["MUID"])])
                 if duplicates:
@@ -116,15 +105,13 @@ class ConnectCatchment(object):
                             ["Duplicates found in msm_CatchConLink MUID: ('%s'). Continue?" % "', '".join(duplicates)],
                             "Continue", 1) != "OK":
                         exit()
-                print("BOB13")
-            if pythonaddins.MessageBox("Assign %s to %s (MDB)?" % (", ".join(catchments_selected),node), "Confirm Assignment", 1) == "OK":
+            if pythonaddins.MessageBox("Assign %s to %s?" % (", ".join(catchments_selected),node), "Confirm Assignment", 1) == "OK":
                 msm_Node = os.path.join(catchLayer.workspacePath, "msm_Node")
                 ms_Catchment = os.path.join(catchLayer.workspacePath, "ms_Catchment")
                 msm_CatchCon = os.path.join(catchLayer.workspacePath, "msm_CatchCon")
 
                 catchments_existing = []
 
-                print("BOB14")
                 if is_sqlite:
                     with arcpy.da.SearchCursor(msm_CatchCon.replace("!delete!",""), ['CatchID', 'NodeID'], where_clause = "CatchID IN ('%s')" % ("', '".join(catchments_selected))) as cursor:
                         for row in cursor:
@@ -138,15 +125,14 @@ class ConnectCatchment(object):
                         print(update_query)
                         cursor.execute(update_query)
                     catchments_not_existing = list(set(catchments_selected) - set(catchments_existing))
-                    # for catchment in catchments_not_existing:
-                    #     insert_query = r"INSERT INTO msm_CatchCon (catchid, nodeid) VALUES ('%s', '%s')" % (node, catchment)
-                    #     print(insert_query)
-                    #     cursor.execute(insert_query)
+                    for catchment in catchments_not_existing:
+                        insert_query = r"INSERT INTO msm_CatchCon (catchid, nodeid) VALUES ('%s', '%s')" % (node, catchment)
+                        print(insert_query)
+                        cursor.execute(insert_query)
                     conn.commit()
                     # for catchment in catchment_selected:
                         # insert_query = r"INSERT INTO msm_CatchCon (catchid, nodeid) VALUES (%s, %s)" % (catchment, node)
                     conn.close()
-                    print("BOB15")
                 else:
                     with arcpy.da.UpdateCursor(msm_CatchCon, ['CatchID', 'NodeID'], where_clause = "CatchID IN ('%s')" % ("', '".join(catchments_selected))) as cursor:
                         for row in cursor:
