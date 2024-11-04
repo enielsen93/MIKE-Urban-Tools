@@ -524,6 +524,7 @@ class CatchmentProcessingScalgo(object):
         arcpy.env.overwriteOutput = True
         arcpy.AddMessage(impervious_table)
         mike_urban_database = os.path.dirname(arcpy.Describe(ms_Catchment).catalogPath)
+        is_sqlite = True if ".sqlite" in mike_urban_database else False
 
         class Catchment:
             def __init__(self, area):
@@ -537,9 +538,10 @@ class CatchmentProcessingScalgo(object):
 
         catchments = {row[0]: Catchment(row[1]) for row in arcpy.da.SearchCursor(ms_Catchment, ["MUID", "SHAPE@Area"])}
         arcpy.AddMessage([field.name for field in arcpy.ListFields(ms_Catchment)])
-        with arcpy.da.SearchCursor(ms_Catchment, ["MUID", "modelaimparea"]) as cursor:
-            for row in cursor:
-                catchments[row[0]].old_imperviousness = row[1]
+        if is_sqlite:
+            with arcpy.da.SearchCursor(ms_Catchment, ["MUID", "modelaimparea"]) as cursor:
+                for row in cursor:
+                    catchments[row[0]].old_imperviousness = row[1]
 
         # ms_Catchment_copy = arcpy.management.MinimumBoundingGeometry(ms_Catchment, r"C:\Papirkurv\ms_Catchment2", geometry_type = "RECTANGLE_BY_AREA", group_option = "ALL")[0]
         # ms_Catchment_copy = arcpy.management.CopyFeatures(ms_Catchment, r"in_memory\ms_Catchment")[0]
@@ -1434,7 +1436,9 @@ class DuplicateCatchments(object):
         msm_HModA = os.path.join(MU_database, "msm_HModA")
         msm_CatchCon = os.path.join(MU_database, "msm_CatchCon")
 
-        if not os.path.exists(msm_CatchCon):
+        arcpy.AddMessage("WARNING: EXPLODE MULTIPART REMOVES CORRESPONDING MSM_HMODA ROWS.")
+
+        if not arcpy.Exists(msm_CatchCon):
             arcpy.AddMessage("Assuming it is not part of a MIKE database as %s does not exist" % msm_CatchCon)
             MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchments, ["MUID"])]
             MUIDs_duplicate = set()
@@ -1472,7 +1476,6 @@ class DuplicateCatchments(object):
 
         else:
             MUIDs = [row[0] for row in arcpy.da.SearchCursor(catchments, ["MUID"])]
-
             # max_catchcon_MUID = np.max([row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database, 'ms_Catchment'), ["MUID"])])
 
             arcpy.SetProgressorLabel("Creating Workspace")
@@ -1502,75 +1505,103 @@ class DuplicateCatchments(object):
             for feature_class in [ms_Catchment, msm_HModA, msm_CatchCon]:
                 arcpy.Copy_management(feature_class, os.path.join(arcpy.env.scratchWorkspace, os.path.basename(feature_class)))
 
+            # Initialize an empty set to store MUIDs that appear more than once
             MUIDs_duplicate = set()
             for MUID in MUIDs:
-                if MUIDs.count(MUID)>1:
+                # If the MUID appears more than once in the list, add it to the duplicates set
+                if MUIDs.count(MUID) > 1:
                     MUIDs_duplicate.add(MUID)
 
-            MUIDs_reassigned = {MUID:[] for MUID in MUIDs_duplicate}
+            # Create a dictionary where keys are duplicate MUIDs and values are empty lists (to hold reassigned MUIDs)
+            MUIDs_reassigned = {MUID: [] for MUID in MUIDs_duplicate}
+
+            # Start with the same list of MUIDs, which will later include newly reassigned ones
             MUIDs_used = MUIDs
 
+            # Loop through each duplicate MUID
             for MUID_duplicate in MUIDs_duplicate:
-                idx_of_duplicates = [i for i,MUID in enumerate(MUIDs) if MUID == MUID_duplicate][1:]
+                # Find the index of all occurrences of the duplicate MUID (except the first one)
+                idx_of_duplicates = [i for i, MUID in enumerate(MUIDs) if MUID == MUID_duplicate][1:]
 
+                # For each duplicate occurrence, generate a new unique MUID
                 for idx in idx_of_duplicates:
-                    i = 2
-                    new_MUID = MUID_duplicate + "s%d" % i
+                    i = 2  # Start the suffix at 2 for the first duplicate
+                    new_MUID = MUID_duplicate + "s%d" % i  # Create the first new MUID by appending 's2'
+
+                    # Increment the suffix until the new MUID is unique in the list of used MUIDs
                     while new_MUID in MUIDs_used:
                         i += 1
                         new_MUID = MUID_duplicate + "s%d" % i
 
+                    # Store the newly generated MUID in the reassignment dictionary
                     MUIDs_reassigned[MUID_duplicate].append(new_MUID)
+                    # Add the new MUID to the list of used MUIDs to ensure uniqueness
                     MUIDs_used.append(new_MUID)
 
+            # Dictionary to store rows from the msm_HModA table where MUIDs are duplicated
             msm_HModA_table = {}
-            with arcpy.da.SearchCursor(msm_HModA, '*' , "CatchID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
+            # Use an ArcPy SearchCursor to fetch all rows with CatchID matching the duplicate MUIDs
+            with arcpy.da.SearchCursor(msm_HModA, '*') as cursor:
                 for row in cursor:
-                    msm_HModA_table[row[1]] = row
+                    msm_HModA_table[row[1]] = row  # Store rows with the MUID as the key
             arcpy.AddMessage((msm_HModA, "CatchID IN ('%s')" % ("', '".join(MUIDs_duplicate)), msm_HModA_table))
 
+            # Dictionary to store rows from the msm_CatchCon table where MUIDs are duplicated
             msm_CatchCon_table = {}
-            with arcpy.da.SearchCursor(msm_CatchCon, '*' , "CatchID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
+            # Use a SearchCursor to fetch rows from msm_CatchCon where CatchID matches duplicate MUIDs
+            with arcpy.da.SearchCursor(msm_CatchCon, '*',
+                                       "CatchID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
                 for row in cursor:
-                    msm_CatchCon_table[row[2]] = row
+                    msm_CatchCon_table[row[2]] = row  # Store rows with the CatchID as the key
 
-            MUIDs_reassigned_loop = {MUID:0 for MUID in MUIDs_reassigned.keys()}# dictionairy to check how many times the loop has found this MUID
-            with arcpy.da.UpdateCursor(catchments, ['MUID'], "MUID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
+            # Dictionary to track how many times each duplicate MUID has been reassigned
+            MUIDs_reassigned_loop = {MUID: 0 for MUID in MUIDs_reassigned.keys()}
+
+            # Use an UpdateCursor to update the catchments table, replacing duplicate MUIDs with reassigned ones
+            with arcpy.da.UpdateCursor(catchments, ['MUID'],
+                                       "MUID IN ('%s')" % ("', '".join(MUIDs_duplicate))) as cursor:
                 for row in cursor:
-                    MUID = row[0]
-                    if row[0] in MUIDs_reassigned:
-                        if MUIDs_reassigned_loop[row[0]] > 0:
-                            arcpy.AddMessage(row)
-                            row[0] = MUIDs_reassigned[row[0]][MUIDs_reassigned_loop[row[0]]-1]
-                            arcpy.AddMessage(row)
-                            cursor.updateRow(row)
-                            arcpy.AddMessage(row)
+                    MUID = row[0]  # Current MUID in the row
+                    if row[0] in MUIDs_reassigned:  # If the MUID is one of the duplicates
+                        if MUIDs_reassigned_loop[row[0]] > 0:  # If it's been reassigned before
+                            old_MUID = row[0]
+                            new_MUID = MUIDs_reassigned[row[0]][MUIDs_reassigned_loop[row[0]] - 1]
+                            row[0] = new_MUID  # Replace with the next reassigned MUID in the list
+                            cursor.updateRow(row)  # Update the row with the new MUID
+                            arcpy.AddMessage("Updated row from %s to %s in catchments table." % (old_MUID, new_MUID))
+                        # Increment the reassignment counter for this MUID
                         MUIDs_reassigned_loop[MUID] += 1
 
+            # For each duplicate MUID, assign the original MUID as the first element in its reassignment list
             for MUID in MUIDs_reassigned:
                 MUIDs_reassigned[MUID][0] = MUID
             arcpy.AddMessage(msm_HModA_table)
+
+            # Use an InsertCursor to add new rows to the msm_HModA table with the reassigned MUIDs
             with arcpy.da.InsertCursor(msm_HModA, '*') as cursor:
                 for original_MUID in MUIDs_reassigned.keys():
                     for new_MUID in MUIDs_reassigned[original_MUID]:
-                        row = list(msm_HModA_table[original_MUID])
-                        row[1] = new_MUID
-                        arcpy.AddMessage(row)
-                        cursor.insertRow(row)
+                        row = list(msm_HModA_table[original_MUID])  # Copy the original row
+                        row[1] = new_MUID  # Replace the MUID with the reassigned one
+                        cursor.insertRow(row)  # Insert the new row with the updated MUID
+                    arcpy.AddMessage("Inserted new row %s in msm_HModA table." % row)
 
+
+            # Variable to track how many new MUIDs are created
             new_MUID_i = 0
+            # Find the maximum MUID in the msm_CatchCon table (to generate new unique MUIDs)
             catch_con_max_MUID = np.max([row[0] for row in arcpy.da.SearchCursor(msm_CatchCon, ["MUID"])])
+
+            # Use an InsertCursor to add new rows to msm_CatchCon with the reassigned MUIDs
             with arcpy.da.InsertCursor(msm_CatchCon, '*') as cursor:
                 for original_MUID in MUIDs_reassigned.keys():
                     for new_MUID in MUIDs_reassigned[original_MUID]:
                         new_MUID_i += 1
-                        temp_row = list(msm_CatchCon_table[original_MUID])
-                        temp_row[2] = new_MUID
-                        arcpy.AddMessage((catch_con_max_MUID, new_MUID_i))
-                        temp_row[1] = catch_con_max_MUID + new_MUID_i
-                        arcpy.AddMessage(row)
-                        row = temp_row
-                        cursor.insertRow(row)
+                        temp_row = list(msm_CatchCon_table[original_MUID])  # Copy the original row
+                        temp_row[2] = new_MUID  # Update the MUID to the reassigned one
+                        temp_row[1] = catch_con_max_MUID + new_MUID_i  # Assign a new unique MUID value
+                        cursor.insertRow(temp_row)  # Insert the updated row into the table
+                        arcpy.AddMessage("Inserted new row %s into msm_CatchCon table." % temp_row)
       
         
         return
@@ -2141,8 +2172,9 @@ class CatchmentSlopeAnalysis(object):
             catchment_cursor.reset()
             for i, catchment_row in enumerate(catchment_cursor):
                 node_id = catchment_row[1]
+                arcpy.AddMessage(node_id)
                 if not node_id:
-                    print("No Node_ID for catchment %s" % (catchment_row[0]))
+                    arcpy.AddMessage("No Node_ID for catchment %s" % (catchment_row[0]))
                     continue
                 arcpy.Select_analysis(arcpy.Describe(msm_Catchment).catalogPath, catchment_loop,
                                       where_clause="MUID = '%s'" % catchment_row[0])
@@ -2155,7 +2187,7 @@ class CatchmentSlopeAnalysis(object):
 
                 links = [link for link in graph.network.links.values() if
                          link.fromnode == node_id or link.tonode == node_id]
-
+                arcpy.AddMessage(links)
                 links_3d = []
                 for link in links:
                     fromnode_3d = arcpy.Point(nodes[link.fromnode].shape.centroid.X,
@@ -2172,6 +2204,7 @@ class CatchmentSlopeAnalysis(object):
                         nearest_point = None
                         for link in links_3d:
                             point, _, distance, _ = link.queryPointAndDistance(row[0])
+                            # arcpy.AddMessage(distance)
                             if distance < shortest_distance:
                                 shortest_distance = distance
                                 nearest_point = point
