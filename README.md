@@ -3,8 +3,7 @@ Tools for DHI MIKE Urban through ArcGIS
 
 <b>To install tools:</b>
 <ul>
-  <li>Click green "Code" Button.</li>
-  <li>Download ZIP and export to a local folder.</li>
+  <li>[Download ZIP](https://github.com/enielsen93/MIKE-Urban-Tools/archive/refs/heads/main.zip) and export to a local folder.</li>
   <li>Open ArcMap or ArcGIS Pro.</li>
   <li>Browse to folder in the catalog and the tools will now be available.</li>
 </ul>
@@ -14,6 +13,8 @@ Tools for DHI MIKE Urban through ArcGIS
 ```
 python -m pip install https://github.com/enielsen93/networker/tarball/master
 python -m pip install https://github.com/enielsen93/ColebrookWhite/tarball/master
+python -m pip install https://github.com/enielsen93/mikegraph/tarball/master
+
 ```
 If ArcGIS is not default Python Interpreter, replace <python> with path, i.e.: 
 
