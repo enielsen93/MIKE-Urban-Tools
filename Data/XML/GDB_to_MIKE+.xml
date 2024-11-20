@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Jobs xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Jobs>
+    <JobSerializationEntity>
+      <JobConfig>
+        <Job property="Job1" value="True" jobNodeType="Job" />
+        <JobProps>
+          <JobPropertyValue property="SourceType" value="Geodatabase" jobNodeType="JobProperty" />
+          <JobPropertyValue property="Source" value="SourceGDB" jobNodeType="JobProperty" />
+          <JobPropertyValue property="SourceMask" value="" jobNodeType="JobProperty" />
+          <JobPropertyValue property="TargetType" value="MUPlusDB" jobNodeType="JobProperty" />
+          <JobPropertyValue property="Target" value="" jobNodeType="JobProperty" />
+          <JobPropertyValue property="TargetMask" value="" jobNodeType="JobProperty" />
+          <JobPropertyValue property="ParseStringCulture" value="Default" jobNodeType="JobProperty" />
+          <JobPropertyValue property="Variables" value="True" jobNodeType="Variable" />
+          <JobPropertyValue property="Topology" value="False" jobNodeType="Topology" />
+          <JobPropertyValue property="DissolvedLine" value="Merge" jobNodeType="DissolvedLine" />
+          <JobPropertyValue property="Connectivity" value="ConnectionFromGeo" jobNodeType="TopologyItem" />
+          <JobPropertyValue property="SnapTolerance" value="0.1" jobNodeType="TopologyItem" />
+        </JobProps>
+        <ReprojectionRequired>true</ReprojectionRequired>
+      </JobConfig>
+      <Sections>
+        <SectionConfiguration>
+          <Section xsi:type="TablePropertyValueForUISerialization" property="Section1" value="True" tableNodeType="Section">
+            <ChildAssginItems />
+            <TableNodeProperties>
+              <item>
+                <key>
+                  <string>UnitKey</string>
+                </key>
+                <value>
+                  <anyType xsi:type="xsd:int">-1</anyType>
+                </value>
+              </item>
+            </TableNodeProperties>
+          </Section>
+          <SectionProps>
+            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="geometry" value="geometry" tableNodeType="AssignmentItem">
+              <ChildAssginItems />
+              <TableNodeProperties>
+                <item>
+                  <key>
+                    <string>UnitKey</string>
+                  </key>
+                  <value>
+                    <anyType xsi:type="xsd:int">1000</anyType>
+                  </value>
+                </item>
+              </TableNodeProperties>
+            </TablePropertyValue>
+            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="Source" value="SourceName" tableNodeType="SectionProperty">
+              <ChildAssginItems />
+              <TableNodeProperties>
+                <item>
+                  <key>
+                    <string>UnitKey</string>
+                  </key>
+                  <value>
+                    <anyType xsi:type="xsd:int">-1</anyType>
+                  </value>
+                </item>
+              </TableNodeProperties>
+            </TablePropertyValue>
+            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="Target" value="msm_Catchment" tableNodeType="SectionProperty">
+              <ChildAssginItems />
+              <TableNodeProperties>
+                <item>
+                  <key>
+                    <string>UnitKey</string>
+                  </key>
+                  <value>
+                    <anyType xsi:type="xsd:int">-1</anyType>
+                  </value>
+                </item>
+              </TableNodeProperties>
+            </TablePropertyValue>
+            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="TransferMode" value="AppendUpdate" tableNodeType="SectionProperty">
+              <ChildAssginItems />
+              <TableNodeProperties>
+                <item>
+                  <key>
+                    <string>UnitKey</string>
+                  </key>
+                  <value>
+                    <anyType xsi:type="xsd:int">-1</anyType>
+                  </value>
+                </item>
+              </TableNodeProperties>
+            </TablePropertyValue>
+            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="Sort" value="" tableNodeType="SectionProperty">
+              <ChildAssginItems />
+              <TableNodeProperties>
+                <item>
+                  <key>
+                    <string>UnitKey</string>
+                  </key>
+                  <value>
+                    <anyType xsi:type="xsd:int">-1</anyType>
+                  </value>
+                </item>
+              </TableNodeProperties>
+            </TablePropertyValue>
+            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="Distinct" value="" tableNodeType="SectionProperty">
+              <ChildAssginItems />
+              <TableNodeProperties>
+                <item>
+                  <key>
+                    <string>UnitKey</string>
+                  </key>
+                  <value>
+                    <anyType xsi:type="xsd:int">-1</anyType>
+                  </value>
+                </item>
+              </TableNodeProperties>
+            </TablePropertyValue>
+            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="Filter" value="" tableNodeType="SectionProperty">
+              <ChildAssginItems />
+              <TableNodeProperties>
+                <item>
+                  <key>
+                    <string>UnitKey</string>
+                  </key>
+                  <value>
+                    <anyType xsi:type="xsd:int">-1</anyType>
+                  </value>
+                </item>
+              </TableNodeProperties>
+            </TablePropertyValue>
+            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="MUID" value="MUID" tableNodeType="AssignmentItem">
+              <ChildAssginItems />
+              <TableNodeProperties>
+                <item>
+                  <key>
+                    <string>UnitKey</string>
+                  </key>
+                  <value>
+                    <anyType xsi:type="xsd:int">-1</anyType>
+                  </value>
+                </item>
+              </TableNodeProperties>
+            </TablePropertyValue>
+            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="Assignment" value="" tableNodeType="Assignment">
+              <ChildAssginItems />
+              <TableNodeProperties>
+                <item>
+                  <key>
+                    <string>UnitKey</string>
+                  </key>
+                  <value>
+                    <anyType xsi:type="xsd:int">-1</anyType>
+                  </value>
+                </item>
+              </TableNodeProperties>
+            </TablePropertyValue>
+          </SectionProps>
+        </SectionConfiguration>
+      </Sections>
+    </JobSerializationEntity>
+  </Jobs>
+</Jobs>
