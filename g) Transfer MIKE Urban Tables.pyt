@@ -6,6 +6,7 @@ import arcpy
 import numpy as np
 from arcpy import env
 import re
+import os
 
 class Toolbox(object):
     def __init__(self):
@@ -72,6 +73,7 @@ class TransferMikeUrbanSettings(object):
         return
 
     def execute(self, parameters, messages):
+        arcpy.env.overwriteOutput = True
         arcpy.TableToTable_conversion(in_rows=parameters[0].ValueAsText + r"\msm_Project", out_path=parameters[1].ValueAsText, out_name="msm_Project")
         
         tables = ["msm_LTSInit", "msm_LTSInito", "msm_LTSJobStart", "msm_LTSJobStop", "msm_LTSResult", "msm_LTSResultL", "msm_LTSResultN", "msm_LTSRunM", "msm_LTSRunS"]
@@ -131,11 +133,13 @@ class TransferMikeUrbanSettingsCustom(object):
         return
 
     def execute(self, parameters, messages):
+        arcpy.env.overwriteOutput = True
         tables = parameters[2].values
         getRealTable = re.compile(r"([^ ]+)")
         for table in tables:
             table = getRealTable.findall(table)[0]
             try:
+                arcpy.management.Delete(os.path.join(parameters[1].ValueAsText, table))
                 arcpy.TableToTable_conversion(in_rows=parameters[0].ValueAsText + r"\\" + table, out_path=parameters[1].ValueAsText, out_name=table)
             except Exception as e:
                 arcpy.AddError("Can't transfer table %s" % (table))
