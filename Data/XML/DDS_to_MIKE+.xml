@@ -13,7 +13,7 @@
           <JobPropertyValue property="TargetMask" value="" jobNodeType="JobProperty" />
           <JobPropertyValue property="ParseStringCulture" value="Default" jobNodeType="JobProperty" />
           <JobPropertyValue property="Variables" value="True" jobNodeType="Variable" />
-          <JobPropertyValue property="Topology" value="True" jobNodeType="Topology" />
+          <JobPropertyValue property="Topology" value="False" jobNodeType="Topology" />
           <JobPropertyValue property="DissolvedLine" value="Merge" jobNodeType="DissolvedLine" />
           <JobPropertyValue property="Connectivity" value="GeoFromConnection" jobNodeType="TopologyItem" />
           <JobPropertyValue property="SnapTolerance" value="0.1" jobNodeType="TopologyItem" />
