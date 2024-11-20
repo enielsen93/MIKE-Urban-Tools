@@ -112,6 +112,9 @@ class DisplaySqliteStep1(object):
         return True
 
     def updateParameters(self, parameters):  # optional
+        # MU_database = parameters[0].ValueAsText
+        if parameters[0].ValueAsText and '"' in parameters[0].ValueAsText:
+            parameters[0].Value = parameters[0].ValueAsText.replace('"','')
         return
 
     def updateMessages(self, parameters):  # optional

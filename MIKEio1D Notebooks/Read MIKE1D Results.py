@@ -53,7 +53,7 @@ class Node:
     @property
     def flood_volume(self):
         reservoir_height = -0.25
-        if self.diameter and self.flood_depth:
+        if self.diameter and self.flood_depth>0:
             node_area = self.diameter**2*np.pi/4
             integral1 = (math.exp(7*min(1,(self.flood_depth-reservoir_height)))/7-math.exp(7*0)/7)*node_area
             integral2 = (max(1, (self.flood_depth-reservoir_height))-1)*node_area*1000

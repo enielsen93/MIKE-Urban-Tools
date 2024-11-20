@@ -125,6 +125,8 @@ class DisplayMikeUrban(object):
         return True
 
     def updateParameters(self, parameters):  # optional
+        if parameters[0].ValueAsText and '"' in parameters[0].ValueAsText:
+            parameters[0].Value = parameters[0].ValueAsText.replace('"','')
         return
 
     def updateMessages(self, parameters):  # optional
