@@ -248,6 +248,16 @@ class PipeDimensionToolTAPro(object):
         pipe_layer = parameters[0].ValueAsText
         runoff_file = parameters[3].ValueAsText
 
+        mxd = arcpy.mapping.MapDocument("CURRENT")
+        links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if
+                 lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
+                 and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and (
+                             "sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)][
+            0]
+
+        if links:
+            parameters[0].value = links
+
         if pipe_layer and not runoff_file:
             MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry", "")
             MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
@@ -263,31 +273,6 @@ class PipeDimensionToolTAPro(object):
                         parameters[i] = parameters_dict[config_parameter]
                     except Exception as e:
                         pass
-
-        #pipe_layer = parameters[0].ValueAsText
-        #MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)
-        
-        #if ".sqlite" in MU_database:
-        #    parameters[2].Enabled = False
-        #else:
-        #    parameters[2].Enabled = True
-        # mxd = arcpy.mapping.MapDocument("CURRENT")  
-        # df = arcpy.mapping.ListDataFrames(mxd)[0]  
-        # workspaces = set()
-        # for lyr in arcpy.mapping.ListLayers(mxd, df):
-            # if lyr.supports("workspacepath"):
-                # workspaces.add(lyr.workspacePath)
-
-
-        # if parameters[0].altered:
-            # pipe_layer = parameters[0].ValueAsText
-            # MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)
-            # parameters[2].filter.list = [f.name for f in arcpy.Describe(MU_database + "\msm_Link").fields]
-
-        # if parameters[9].ValueAsText:
-            # parameters[10].enabled = True
-        # else:
-            # parameters[10].enabled = False
         return
 
     def updateMessages(self, parameters): #optional
@@ -315,14 +300,6 @@ class PipeDimensionToolTAPro(object):
         MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
         if not os.path.exists(MIKE_folder):
             os.mkdir(MIKE_folder)
-        #
-        # config_folder = os.path.join(MIKE_folder, "Config")
-        # if not os.path.exists(config_folder):
-        #     os.mkdir(config_folder)
-        # config_file = os.path.join(config_folder, os.path.splitext(os.path.basename(MU_database))[0] + ".ini")
-        #
-        # config = Config(config_file)
-        # config.write(parameters)
 
         MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
         no_dir = True
@@ -358,15 +335,6 @@ class PipeDimensionToolTAPro(object):
         is_sqlite = True if ".sqlite" in MU_database else False
 
         msm_Link = os.path.join(MU_database, "msm_Link")
-        msm_Node = os.path.join(MU_database, "msm_Node")
-        msm_Orifice = os.path.join(MU_database, "msm_Orifice")
-        msm_Weir = os.path.join(MU_database, "msm_Weir")
-        msm_Pump = os.path.join(MU_database, "msm_Pump")
-        msm_CatchCon = os.path.join(MU_database, "msm_CatchCon")
-        ms_Catchment = os.path.join(MU_database, "msm_Catchment") if is_sqlite else os.path.join(MU_database,
-                                                                                                 "ms_Catchment")
-        msm_HParA = os.path.join(MU_database, "msm_HParA")
-        ms_TabD = os.path.join(MU_database, "ms_TabD")
 
         arcpy.SetProgressorLabel("Mapping Network")
         graph = mikegraph.Graph(MU_database, useMaxInFlow = useMaxInflow)
@@ -380,20 +348,6 @@ class PipeDimensionToolTAPro(object):
                 arcpy.AddMessage(
                     "Removed edge %s-%s because %s is included in list of nodes to end trace at" % (edge[0], edge[1]))
 
-        # if useMaxInflow:
-        #     maxInflow = {}
-        #     with arcpy.da.SearchCursor(msm_Node, ["MUID", "InletControlNo", "MaxInlet"],
-        #                                where_clause="[MaxInlet] IS NOT NULL AND [InletControlNo] = 0") as cursor:
-        #         for row in cursor:
-        #             maxInflow[row[0]] = row[2]
-        #             arcpy.AddMessage("Added additional discharge %1.3f m3/s to node %s" % (row[2], row[0]))
-        #             breakEdges = [edge for edge in graph.graph.edges if edge[1] == row[0]]
-        #             graph.graph.remove_edges_from(breakEdges)
-        #             for edge in breakEdges:
-        #                 arcpy.AddMessage(
-        #                     "Removed edge %s-%s because of additional discharge" % (
-        #                     edge[0], edge[1]))
-
 
         arcpy.AddMessage(graph.maxInflow)
 
@@ -404,15 +358,11 @@ class PipeDimensionToolTAPro(object):
         rainseries.scaling_factor = scaling_factor
 
         target_manholes = [graph.network.links[link].fromnode for link in selected_pipes]
-        connected_sources = []
         arcpy.SetProgressor("step", "Tracing to every pipe selected", 0, len(target_manholes), 1)
-
-        # critical_node = {'MUID': None, 'Slope': None, 'Elevation Difference': None, 'Distance': None}
 
         timearea_curves = {}
         peak_discharge = {}
         peak_discharge_time = {}
-        total_catchments = []
 
         graphs_count = 0
 
@@ -458,9 +408,6 @@ class PipeDimensionToolTAPro(object):
             peak_discharge_time[target_manhole] = np.argmax(timearea_curves[target_manhole])
 
 
-        # arcpy.AddMessage(("total catchments", total_catchments))
-        # arcpy.AddMessage(("total_red_opl", total_red_opl))
-
         if writeDFS0:
             dfs0_text = np.empty((2 + len(timearea_curves[timearea_curves.keys()[0]])), dtype=object)
             dfs0_text[0] = "\t".join(["Discharge[meter^3/sec]:Instantaneous"] * len(timearea_curves.keys()))
@@ -476,19 +423,6 @@ class PipeDimensionToolTAPro(object):
             with open(filepath, 'w') as f:
                 for i in range(len(dfs0_text)):
                     f.write(dfs0_text[i] + "\n")
-            # import mikeio
-            # dfs0_template = mikeio.dfs.Dfs0(get_start_time)
-            # for target_manhole in hydrographs.keys():
-            # filepath = os.path.join(writeDFS0, target_manhole + ".txt")
-            # with open(filepath,'w') as f:
-            # f.write("Discharge[meter^3/sec]:Instantaneous\n")
-            # f.write("Time\t%s\n" % target_manhole)
-            # for discharge_i, discharge in enumerate((hydrographs[target_manhole])):
-            # f.write("%s\t%1.6f\n" % (series.index[0] + datetime.timedelta(minutes=discharge_i), discharge))
-            # dfs0 = mikeio.dfs0.Dfs0()
-            # dfs0.write(filepath, data = [np.concatenate((hydrograph_summed,np.zeros((60))))], start_time = dfs0_template.start_time,
-            # items = [mikeio.eum.ItemInfo("Discharge", mikeio.eum.EUMType.Discharge, unit = mikeio.eum.EUMUnit.meter_pow_3_per_sec)],
-            # title=target_manhole, dt = 60)
 
         arcpy.SetProgressorLabel("Calculating Pipe Dimensions")
         arcpy.AddMessage(peak_discharge)
@@ -500,24 +434,6 @@ class PipeDimensionToolTAPro(object):
                 field_name = "%s_%d" % (field_name, i)
             arcpy.AddField_management(shapefile, field_name, datatype)
             return field_name
-
-        # arcpy.SetProgressorLabel("Creating debug output")
-        # debug_output = True
-        # if debug_output:
-        # if len(target_manholes)==1:
-        # with open(r"C:\Papirkurv\Hydrograph.csv", 'w') as f:
-        # for discharge in runoffs:
-        # f.write("%s\n" % ("\t".join([str(d) for d in discharge])))
-        # debug_output_fc = str(arcpy.CopyFeatures_management(pipe_layer, getAvailableFilename(arcpy.env.scratchGDB + "\debug_output")))
-        # RedOpl_field = addField(debug_output_fc, "RedOpl", "FLOAT")
-        # QMax_field = addField(debug_output_fc, "QMax", "FLOAT")
-        # QMaxT_field = addField(debug_output_fc, "QMaxT", "FLOAT")
-        # with arcpy.da.UpdateCursor(debug_output_fc, ["MUID", RedOpl_field, QMax_field, QMaxT_field], where_clause = "MUID IN ('%s')" % ("','".join(selected_pipes))) as cursor:
-        # for row in cursor:
-        # row[1] = total_red_opl[msm_Link_Network.links[row[0]].fromnode]
-        # row[2] = peak_discharge[msm_Link_Network.links[row[0]].fromnode]
-        # row[3] = peak_discharge_time[msm_Link_Network.links[row[0]].fromnode]
-        # cursor.updateRow(row)
 
         if debug_output:
             try:
@@ -702,16 +618,6 @@ class PipeDimensionToolTAPro(object):
                 arcpy.AddError(row)
                 arcpy.AddError(traceback.format_exc())
                 raise (e)
-        # edit.stopOperation()
-        # edit.stopEditing(True)
-        # import pickle
-        # import saveParameters
-        # save_parameters = saveParameters.Parameters(parameters)
-        # arcpy.AddMessage(save_parameters.parameters)
-        # for parameter in save_parameters.parameters:
-        #     arcpy.AddMessage((type(parameter.Value), type(parameter.ValueAsText)))
-        # with open(r"C:\Papirkurv\Parameters",'w') as f:
-        #     pickle.dump(save_parameters.parameters, f)
         return
 
 
@@ -1037,7 +943,7 @@ class upgradeDimensions(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and "diameter" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and "diameter" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)][0]
             if links:
                 parameters[0].value = links
 
@@ -1147,7 +1053,7 @@ class downgradeDimensions(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and "diameter" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and "diameter" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)][0]
             if links:
                 parameters[0].value = links
         return
@@ -1532,7 +1438,7 @@ class InterpolateInvertLevels(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)][0]
             if links:
                 parameters[0].value = links
         return
@@ -1705,7 +1611,7 @@ class GetMinimumSlope(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)][0]
             if links:
                 parameters[0].value = links
         return
@@ -1717,7 +1623,7 @@ class GetMinimumSlope(object):
         pipe_layer = parameters[0].Value
         end_node_critical = parameters[1].Value
         MU_database = (os.path.dirname(os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)) if ".mdb" in arcpy.Describe(pipe_layer).catalogPath else
-                        os.path.dirname(arcpy.Describe(pipe_layer).catalogPath))
+                        os.path.dirname(arcpy.Describe(pipe_layer).catalogPath)).replace("!delete!","")
         msm_Node = os.path.join(MU_database, "msm_Node")
         msm_Link = os.path.join(MU_database, "msm_Link")
 
@@ -1807,10 +1713,10 @@ class GetMinimumSlope(object):
             # arcpy.Select_analysis(msm_Link, msm_Link_result, where_clause="MUID IN ('%s')" % ("', '".join(links_MUIDs)))
         else:
             msm_Link_result = msm_Link
-            edit = arcpy.da.Editor(MU_database)
+            edit = arcpy.da.Editor(MU_database.replace("!delete!",""))
             edit.startEditing(False, True)
             edit.startOperation()
-            with arcpy.da.UpdateCursor(msm_Link, ["MUID", "Slope_C" if not ".sqlite" in MU_database else "Slope"],
+            with arcpy.da.UpdateCursor(msm_Link.replace("!delete!",""), ["MUID", "Slope_C" if not ".sqlite" in MU_database else "Slope"],
                                        where_clause="MUID IN ('%s')" % ("', '".join(links_MUIDs))) as cursor:
                 for row in cursor:
                     fromnode = msm_Link_Network.links[row[0]].fromnode
@@ -2062,7 +1968,7 @@ class CalculateSlopeOfPipe(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)]
             if links:
                 parameters[0].value = ";".join(links)
         return
@@ -2229,7 +2135,7 @@ class SetDischargeRegulation(object):
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if
                      lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                     and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+                     and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)][0]
             if links:
                 parameters[0].value = links
         return
