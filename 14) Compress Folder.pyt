@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import zipfile
 import numpy as np
@@ -306,7 +307,7 @@ class CopyFolder(object):
 
         arcpy.AddMessage("Mapping source folder")
 
-        class file:
+        class File:
             def __init__(self, mtime, size):
                 self.mtime = mtime
                 self.size = size
@@ -316,15 +317,14 @@ class CopyFolder(object):
         # file_sizes = []
         input_files = {}
 
-        def list_files_scandir(path='.'):
-            with scandir(path) as entries:
-                for entry in entries:
-                    if entry.is_file() and os.path.splitext(entry.path)[-1].lower() in file_formats:
-                        input_files[entry.path] = file(entry.stat().st_mtime, entry.stat().st_size)
-                    elif include_subfolders and entry.is_dir():
-                        list_files_scandir(entry.path)
+        def list_files_scandir_input(path):
+            for entry in scandir(path):
+                if entry.is_file() and os.path.splitext(entry.path)[-1].lower() in file_formats:
+                    input_files[entry.path] = File(entry.stat().st_mtime, entry.stat().st_size)
+                elif include_subfolders and entry.is_dir():
+                    list_files_scandir_input(entry.path)
 
-        list_files_scandir(folder)
+        list_files_scandir_input(folder)
 
         # for (dir_path, dir_names, filenames) in os.walk(folder):
         #     for filename in filenames:
@@ -350,57 +350,71 @@ class CopyFolder(object):
 
         output_files = {}
 
-        def list_files_scandir(path='.'):
-            with scandir(path) as entries:
-                for entry in entries:
-                    if entry.is_file():
-                        output_files[entry.path] = file(entry.stat().st_mtime, entry.stat().st_size)
-                    elif entry.is_dir():
-                        list_files_scandir(entry.path)
+        def list_files_scandir_output(path):
+            for entry in scandir(path):
+                if entry.is_file() and os.path.splitext(entry.path)[-1].lower() in file_formats:
+                    output_files[entry.path] = File(entry.stat().st_mtime, entry.stat().st_size)
+                elif include_subfolders and entry.is_dir():
+                    list_files_scandir_output(entry.path)
 
         # Specify the directory path you want to start from
         directory_path = output_folder
-        list_files_scandir(directory_path)
+        list_files_scandir_output(directory_path)
 
-        completed_filesize = 0
+        # Process each input file for copying or skipping based on conditions
+        completed_filesize = 0  # Track cumulative copied file size for progress tracking
         for input_filepath in input_files:
+            # Get file name, folder path, and file size
             file, file_folder, file_size = os.path.basename(input_filepath), os.path.dirname(input_filepath), \
             input_files[input_filepath].size
+
+            # If output file is set, add file to zip archive if conditions are met
             if output_file:
                 new_file_folder = os.path.join(output_folder, os.path.relpath(file_folder, os.path.dirname(folder)))
                 new_filepath = os.path.join(new_file_folder, os.path.basename(file))
+
+                # Check if file should be copied to zip based on mtime (keep newest condition)
                 if keep_newest == 0 or not new_filepath in output_files.keys() or input_files[input_filepath].mtime > \
                         output_files[new_filepath].mtime:
                     arcname = os.path.join(os.path.relpath(file_folder, folder), os.path.basename(file))
                     arcpy.AddMessage(arcname)
                     new_zip.write(file, arcname=arcname)
+
             elif second_output_folder:
                 new_file_folder = os.path.join(output_folder, os.path.relpath(file_folder, os.path.dirname(folder)))
-                if not os.path.exists(new_file_folder.replace(output_folder, second_output_folder)):
-                    os.makedirs(new_file_folder.replace(output_folder, second_output_folder))
                 new_filepath = os.path.join(new_file_folder, os.path.basename(file))
-                if keep_newest == 0 or os.path.exists(new_filepath) is False or os.path.getmtime(
-                        os.path.join(file_folder, file)) > os.path.getmtime(new_filepath):
-                    arcname = os.path.join(os.path.relpath(file_folder, folder), os.path.basename(file))
-                    arcpy.AddMessage(new_file_folder.replace(output_folder, second_output_folder))
-                    shutil.copy2(os.path.join(file_folder, file),
-                                 new_file_folder.replace(output_folder, second_output_folder))
+                # Copy if conditions on file age and size are met
+                if not keep_newest or not new_filepath in output_files.keys() or input_files[
+                    input_filepath].mtime - 120 > output_files[new_filepath].mtime or (
+                        input_files[input_filepath].mtime > output_files[new_filepath].mtime - 120 and input_files[
+                    input_filepath].size != output_files[new_filepath].size):
+                    # If output folder does not exist, create it
+                    if not os.path.exists(new_file_folder.replace(output_folder, second_output_folder)):
+                        os.makedirs(new_file_folder.replace(output_folder, second_output_folder))
+                    arcpy.AddMessage("Copying %s to %s" % (input_filepath, new_filepath.replace(output_folder, second_output_folder)))
+                    arcpy.AddMessage((output_folder,second_output_folder))
+                    shutil.copy2(input_filepath, new_filepath.replace(output_folder, second_output_folder))
+
             else:
                 new_file_folder = os.path.join(output_folder, os.path.relpath(file_folder, os.path.dirname(folder)))
                 new_filepath = os.path.join(new_file_folder, os.path.basename(file))
+                # Copy if conditions on file age and size are met
                 if not keep_newest or not new_filepath in output_files.keys() or input_files[
-                    input_filepath].mtime - 120 > output_files[new_filepath].mtime or (input_files[
-                    input_filepath].mtime > output_files[new_filepath].mtime-120 and input_files[
+                    input_filepath].mtime - 120 > output_files[new_filepath].mtime or (
+                        input_files[input_filepath].mtime > output_files[new_filepath].mtime - 120 and input_files[
                     input_filepath].size != output_files[new_filepath].size):
-                    # print((input_files[input_filepath].mtime, output_files[new_filepath].mtime))
+                    # If output folder does not exist, create it
                     if not new_filepath in output_files.keys() and not os.path.exists(new_file_folder):
                         os.makedirs(new_file_folder)
                     arcpy.AddMessage("Copying %s to %s" % (os.path.join(file_folder, file), new_filepath))
                     shutil.copy2(input_filepath, new_filepath)
                 else:
+                    # If conditions not met, skip file
                     arcpy.AddMessage("Skipping %s" % os.path.join(file_folder, file))
 
+            # Update progress
             completed_filesize += file_size
-            arcpy.SetProgressorPosition(int(completed_filesize/max(1,total_filesize)*100))
-        # obj.close()
+            arcpy.SetProgressorPosition(int(completed_filesize / max(1, total_filesize) * 100))
+
+        # Close resources if necessary
         return
