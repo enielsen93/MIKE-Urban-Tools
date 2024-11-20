@@ -13,13 +13,13 @@ from scipy.optimize import bisect
 extension = ""
 # MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Fredensvang\MIKE\FRE_005\FRE_005.sqlite"
 # res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Fredensvang\MIKE\FRE_005\FRE_005_m1d - Result Files\FRE_005_CDS5_156_240_valideringBaseDefault_Network_HD.res1d"
-MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_051\SON_051_uden_kf.mdb"
-res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\SON_051\SON_051_N_CDS5_240_120Base.res1d"
+MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Hasle Torv\MIKE_URBAN\HAT_031\HAT_031.sqlite"
+res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Hasle Torv\MIKE_URBAN\HAT_031\HAT_031_m1d - Result Files\HAT_031_CDS_5_156BaseDefault_Network_HD.res1d"
 
 ms_Catchment = os.path.join(MU_model, "ms_Catchment" if ".mdb" in MU_model else "msm_Catchment")
 msm_CatchCon = os.path.join(MU_model, "msm_CatchCon")
 
-filter_to_extent = [571725, 6219445, 572853, 6220467]
+filter_to_extent = [571374, 6224668, 573017, 6226202]
 
 if filter_to_extent:
     print("Skipping all reaches and nodes outside extent %s" % filter_to_extent)
@@ -46,7 +46,7 @@ class Node:
     @property
     def flood_depth(self):
         if self.max_level and self.ground_level:
-            return max(self.max_level - self.ground_level,0)
+            return self.max_level - self.ground_level
         else:
             return 0
 
@@ -95,6 +95,7 @@ class Reach:
         self.material = None
         self.skip = False
         self.tau = None
+        self.depth_difference = None
 
     @property
     def energy_line_gradient(self):
@@ -303,7 +304,7 @@ while True:
 
 arcpy.management.AddField(nodes_output_filepath, "MUID", "TEXT")
 arcpy.management.AddField(nodes_output_filepath, "NetTypeNo", "SHORT")
-for field in ["Diameter", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "max_hl", "max_I_V", "flow_area", "flow_diam", "end_depth", "Surcha", "SurchaBal", "MaxSurcha"]:
+for field in ["Diameter", "Ground_lev", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "max_hl", "max_I_V", "flow_area", "flow_diam", "end_depth", "Surcha", "SurchaBal", "MaxSurcha"]:
     arcpy.management.AddField(nodes_output_filepath, field, "FLOAT", 8, 2)
 
 print("Creating Links")
@@ -319,7 +320,7 @@ while True:
             raise
 arcpy.management.AddField(links_output_filepath, "MUID", "TEXT")
 arcpy.management.AddField(links_output_filepath, "NetTypeNo", "SHORT")
-for field in ["Diameter", "MaxQ", "SumQ", "EndQ", "MinQ", "MaxV", "FillDeg", "EnergyGr", "FrictionLo", "MaxTau"]:
+for field in ["Diameter", "MaxQ", "SumQ", "EndQ", "MinQ", "MaxV", "FillDeg", "EnergyGr", "FrictionLo", "MaxTau", "Depthdiff"]:
     arcpy.management.AddField(links_output_filepath, field, "FLOAT", 10, 6)
 
 def bretting(y, max_discharge, full_discharge, di):
@@ -330,7 +331,7 @@ def bretting(y, max_discharge, full_discharge, di):
 timeseries = [time.timestamp() for time in df.time_index]
 print("Reading and writing Reach Results")
 with alive_bar(len(reaches), force_tty=True) as bar:
-    with arcpy.da.InsertCursor(links_output_filepath, ["SHAPE@", "MUID", "Diameter", "MaxQ", "SumQ", "NetTypeNo", "EndQ", "MinQ", "MaxV", "EnergyGr", "FrictionLo", "FillDeg", "MaxTau"]) as cursor:
+    with arcpy.da.InsertCursor(links_output_filepath, ["SHAPE@", "MUID", "Diameter", "MaxQ", "SumQ", "NetTypeNo", "EndQ", "MinQ", "MaxV", "EnergyGr", "FrictionLo", "FillDeg", "MaxTau", "Depthdiff"]) as cursor:
         for muid in set(reaches.keys()):
             reach = reaches[muid]
             if not reach.skip:
@@ -368,6 +369,11 @@ with alive_bar(len(reaches), force_tty=True) as bar:
                     else:
                         reach.tau = 1e3
 
+                    # Calculate Depth Difference
+                    if reach.fromnode in df.nodes and reach.tonode in df.nodes:
+                        reach.depth_difference = (reach.max_start_water_level - df.nodes[reach.fromnode].BottomLevel) - (reach.max_end_water_level - df.nodes[
+                            reach.tonode].BottomLevel)
+
                 # print(water_level)
 
                 except Exception as e:
@@ -380,6 +386,7 @@ with alive_bar(len(reaches), force_tty=True) as bar:
                             reach.min_discharge = np.min(reach_discharge)
                             reach.sum_discharge = np.trapz(abs(reach_discharge), timeseries)
                             reach.end_discharge = np.round(abs(reach_discharge[-1]),4)
+
                         except Exception as e:
                             warnings.warn("Failed to get discharge from %s" % (muid))
 
@@ -393,12 +400,12 @@ with alive_bar(len(reaches), force_tty=True) as bar:
                 cursor.insertRow([reach.shape, muid, reach.diameter or 0, reach.max_discharge or 0, reach.sum_discharge or 0,
                               reach.net_type_no or 0, reach.end_discharge or 0,
                                   reach.min_discharge or 0, reach.max_flow_velocity or 0,
-                                  energy_line_gradient, friction_loss, reach.fill_degree or 0, reach.tau or 0])
+                                  energy_line_gradient, friction_loss, reach.fill_degree or 0, reach.tau or 0, reach.depth_difference or 0])
             bar()
 res1d_quantities = res1d.quantities
 
 print("Reading and writing Node Results")
-with arcpy.da.InsertCursor(nodes_output_filepath, ["SHAPE@", "MUID", "Diameter", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "NetTypeNo", "max_hl", "max_I_V", "flow_area", "flow_diam", "end_depth", "Surcha", "SurchaBal", "MaxSurcha"]) as cursor:
+with arcpy.da.InsertCursor(nodes_output_filepath, ["SHAPE@", "MUID", "Diameter", "Invert_lev", "Max_elev", "Flood_dep", "Flood_vol", "NetTypeNo", "max_hl", "max_I_V", "flow_area", "flow_diam", "end_depth", "Surcha", "SurchaBal", "MaxSurcha", "Ground_lev"]) as cursor:
     with alive_bar(len(list(df.data.Nodes)), force_tty=True) as bar:
         for query_node in df.data.Nodes:
             muid = query_node.ID
@@ -483,7 +490,7 @@ with arcpy.da.InsertCursor(nodes_output_filepath, ["SHAPE@", "MUID", "Diameter",
                                   node.invert_level, node.max_level, node.flood_depth, node.flood_volume or 0,
                                   node.net_type_no or 0, node.max_headloss or 0,
                                   node.max_inlet_velocity or 0, node.flow_area, node.flow_area_diameter, node.end_depth or 0,
-                                  surcharge or 0, surcharge_balance or 0, max_surcharge or 0])
+                                  surcharge or 0, surcharge_balance or 0, max_surcharge or 0, node.ground_level or 0])
             bar()
 
 

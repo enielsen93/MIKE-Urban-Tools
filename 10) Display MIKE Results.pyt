@@ -1407,7 +1407,7 @@ class DisplayMIKE1DResults(object):
             parameterType="Optional",
             multiValue=True,
             direction="Input")
-        display_type.filter.list = ["Flood volume", "Max Elevation / Headloss"]
+        display_type.filter.list = ["Flood volume", "Max Elevation / Headloss", "Link Depth Difference"]
         display_type.value = "Flood Volume"
 
         parameters = [folder, node_featureclass, reach_featureclass, display_type]
@@ -1540,9 +1540,14 @@ class DisplayMIKE1DResults(object):
             return update_layer
 
         if reaches_featureclass:
-            layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE1D_results_links.lyr",
-                     reaches_featureclass.replace(".shp","")    , group=None, workspace_type="SHAPEFILE_WORKSPACE", new_name = os.path.basename(reaches_featureclass).replace(".shp",""))
-            layer.showLabels = False
+            if "depth difference" in display_type.lower():
+                layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE1D_results_links_depthdiff.lyr",
+                         reaches_featureclass.replace(".shp","")    , group=None, workspace_type="SHAPEFILE_WORKSPACE", new_name = os.path.basename(reaches_featureclass).replace(".shp",""))
+                layer.showLabels = False
+            else:
+                layer = addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE1D_results_links.lyr",
+                         reaches_featureclass.replace(".shp","")    , group=None, workspace_type="SHAPEFILE_WORKSPACE", new_name = os.path.basename(reaches_featureclass).replace(".shp",""))
+                layer.showLabels = False
 
         if nodes_featureclass:
             if "_spill.shp" in nodes_featureclass:
@@ -1562,7 +1567,7 @@ class DisplayMIKE1DResults(object):
                                      workspace_type="SHAPEFILE_WORKSPACE",
                                      new_name=os.path.basename(nodes_featureclass).replace(".shp", ""))
                     layer.showLabels = True
-                elif "headloss" in display_type.lower():
+                if "headloss" in display_type.lower():
                     layer = addLayer(
                         os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE1D_results_nodes.lyr",
                         nodes_featureclass.replace(".shp", ""), group=None,
