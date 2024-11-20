@@ -208,77 +208,81 @@ class GetImperviousnessSPV(object):
         # includeWasteWater = parameters[2].ValueAsText
         showWarnings = parameters[2].Value
         OPL_name = parameters[3].ValueAsText
-        
+
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
         arcpy.env.addOutputsToMap = False
         ms_Catchment = arcpy.CopyFeatures_management(CatchmentLayer, getAvailableFilename(arcpy.env.scratchGDB + "\ms_CatchmentImp", parent = MU_database))[0] if MU_database != "not_available" else CatchmentLayer
         # if not includeWasteWater:
-            # with arcpy.da.UpdateCursor(ms_Catchment[0], ['NetTypeNo']) as cursor:
-                # for row in cursor:
-                    # if row[0] == 3:
-                        # cursor.deleteRow()
-                        
+        # with arcpy.da.UpdateCursor(ms_Catchment[0], ['NetTypeNo']) as cursor:
+        # for row in cursor:
+        # if row[0] == 3:
+        # cursor.deleteRow()
+
+
         SPV_feature = arcpy.CopyFeatures_management(SPV_feature, getAvailableFilename(arcpy.env.scratchGDB + "\SPV_feature", parent = MU_database))[0]
         ms_CatchmentImpLayer = arcpy.MakeFeatureLayer_management(ms_Catchment, "ms_CatchmentImpLayer")
-        
+
         # arcpy.JoinField_management(in_data=ms_Catchment, in_field="MUID", join_table=MU_database + r"\msm_HModA", join_field="CatchID", fields="ImpArea")
 
+        layer_add = arcpy.mapping.Layer(ms_Catchment)
         if MU_database != "not_available":
-            addLayer = arcpy.mapping.Layer(ms_Catchment)
             arcpy.mapping.AddLayer(df, addLayer,"TOP")
             updatelayer = arcpy.mapping.ListLayers(mxd, addLayer, df)[0]
             sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\ms_Catchment_Symbology.lyr")
             arcpy.mapping.UpdateLayer(df,updatelayer,sourcelayer,False)
             updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'FILEGDB_WORKSPACE', unicode(addLayer.datasetName))
-        
+
         try:
-            IntersectFeature = arcpy.Intersect_analysis(in_features=[[addLayer, 2],[SPV_feature, 1]], out_feature_class="GetImperviousnessIntersect", join_attributes="ONLY_FID", cluster_tolerance="-1 Unknown", output_type="INPUT")
+            IntersectFeature = arcpy.Intersect_analysis(in_features=[[layer_add, 2],[SPV_feature, 1]], out_feature_class="GetImperviousnessIntersect", join_attributes="ONLY_FID", cluster_tolerance="-1 Unknown", output_type="INPUT")
         except:
             try:
                 arcpy.AddWarning("Error upon running intersect analysis - attempting a repair on catchment and spildevandsplan layer")
                 arcpy.RepairGeometry_management(SPV_feature)
-                arcpy.RepairGeometry_management(addLayer)
+                arcpy.RepairGeometry_management(layer_add)
                 IntersectFeature = arcpy.Intersect_analysis(in_features=[[addLayer, 2],[SPV_feature, 1]], out_feature_class="GetImperviousnessIntersect", join_attributes="ONLY_FID", cluster_tolerance="-1 Unknown", output_type="INPUT")
             except Exception as e:
                 arcpy.AddError("Exporting layers to Scratch Database")
-                arcpy.CopyFeatures_management(addLayer,arcpy.env.scratchGDB + "\addlayerDebug")
-                arcpy.CopyFeatures_management(SPV_feature,arcpy.env.scratchGDB + "\SPV_featureDebug")
-                arcpy.AddError([[addLayer, 2],[SPV_feature, 1]])
+                arcpy.CopyFeatures_management(layer_add, arcpy.env.scratchGDB + r"\addlayerDebug")
+                arcpy.CopyFeatures_management(SPV_feature,arcpy.env.scratchGDB + r"\SPV_featureDebug")
+                arcpy.AddError(arcpy.env.scratchGDB)
+                arcpy.AddError([[layer_add, 2],[SPV_feature, 1]])
                 raise e
-        
+
         catchmentFeatureArea = {}
         for row in arcpy.da.SearchCursor(ms_Catchment,["OBJECTID","SHAPE@AREA"]):
             catchmentFeatureArea[row[0]-1] = row[1]
         # spvFeature = arcpy.env.scratchGDB + r"\SPV_feature"
-        
+
         rows = int(arcpy.GetCount_management(IntersectFeature)[0])
         catchmentFID = np.empty(rows,dtype=np.int32)
         spvFID = np.empty(rows,dtype=np.int32)
         area = np.empty(rows)
         try:
-            with arcpy.da.SearchCursor(IntersectFeature, ['FID_%s' % (addLayer), 'FID_%s' % (os.path.basename(str(SPV_feature))),'SHAPE@AREA']) as cursor:
+            with arcpy.da.SearchCursor(IntersectFeature, ['FID_%s' % (arcpy.Describe(layer_add).name), 'FID_%s' % (os.path.basename(str(SPV_feature))),'SHAPE@AREA']) as cursor:
                 for i,row in enumerate(cursor):
                     catchmentFID[i] = row[0]-1
                     spvFID[i] = row[1]
                     area[i] = row[2]
         except:
+            arcpy.AddError(IntersectFeature)
             arcpy.AddError([f.name for f in arcpy.ListFields(IntersectFeature)])
-            arcpy.AddError(['FID_%s' % (addLayer),'FID_%s' % (os.path.basename(str(SPV_feature))),'SHAPE@AREA'])
+            arcpy.AddError(['FID_%s' % (arcpy.Describe(layer_add).name),'FID_%s' % (os.path.basename(str(SPV_feature))),'SHAPE@AREA'])
+            arcpy.AddMessage(arcpy.Describe(layer_add))
             raise
 
         catchmentUnique = np.unique(catchmentFID)
         catchmentSPVFID = np.empty(len(catchmentUnique),dtype=np.int32)
         catchmentPercInside = np.empty(len(catchmentUnique),dtype=np.float32)
         catchmentPercOther = np.empty(len(catchmentUnique),dtype=np.float32)
-        
+
         for FIDi,FID in enumerate(catchmentUnique):
             idx = [i for i,v in enumerate(catchmentFID) if v==FID]
             catchmentSPVFID[FIDi] = spvFID[idx[np.argmax(area[idx])]]
             catchmentPercInside[FIDi] = np.max(area[idx])/catchmentFeatureArea[FID]*1e2
             catchmentPercOther[FIDi] = (np.sum(area[idx])-np.max(area[idx]))/catchmentFeatureArea[FID]*1e2
-            
-        
+
+
         arcpy.AddField_management(ms_Catchment, "SPVOpl", "TEXT", field_length=50)
         arcpy.AddField_management(ms_Catchment, "PercInside", "DOUBLE")
         arcpy.AddField_management(ms_Catchment, "PercInOther", "DOUBLE")
@@ -289,7 +293,7 @@ class GetImperviousnessSPV(object):
             for i,row in enumerate(cursor):
                 SPVOplande[i] = row[0]
                 SPVArea[i] = row[1]
-                
+
         SPVOplandeDict = {}
         SPVOplandeAreaDict = {}
         SPVOplandePEDict = {}
@@ -303,17 +307,17 @@ class GetImperviousnessSPV(object):
                         row[7] = round(catchmentPercOther[np.where(catchmentUnique==row[0]-1)[0][0]],2)
                         cursor.updateRow(row)
                         # if row[5] == None:
-                            # row[5] = 0
+                        # row[5] = 0
                         # if row[4] == 0:
-                            # row[3] = -1
+                        # row[3] = -1
                         # if row[1] not in SPVOplandeDict:
-                            # SPVOplandeDict[row[1]] = row[2]*row[3]/1e2
-                            # SPVOplandeAreaDict[row[1]] = row[2]
-                            # SPVOplandePEDict[row[1]] = row[5]
+                        # SPVOplandeDict[row[1]] = row[2]*row[3]/1e2
+                        # SPVOplandeAreaDict[row[1]] = row[2]
+                        # SPVOplandePEDict[row[1]] = row[5]
                         # else:
-                            # SPVOplandeDict[row[1]] = SPVOplandeDict[row[1]] + row[2]*row[3]/1e2
-                            # SPVOplandeAreaDict[row[1]] = SPVOplandeAreaDict[row[1]] + row[2]
-                            # SPVOplandePEDict[row[1]] = SPVOplandePEDict[row[1]] + row[5]
+                        # SPVOplandeDict[row[1]] = SPVOplandeDict[row[1]] + row[2]*row[3]/1e2
+                        # SPVOplandeAreaDict[row[1]] = SPVOplandeAreaDict[row[1]] + row[2]
+                        # SPVOplandePEDict[row[1]] = SPVOplandePEDict[row[1]] + row[5]
         except Exception as e:
             if type(e) == TypeError:
                 for i in [1,2,3]:
@@ -323,22 +327,23 @@ class GetImperviousnessSPV(object):
             arcpy.AddMessage([f.name for f in arcpy.ListFields(ms_Catchment)])
             arcpy.AddMessage(ms_Catchment)
             raise e
-        
+
         # addLayer = arcpy.mapping.Layer(ms_Catchment[0])
         # arcpy.mapping.AddLayer(df, addLayer, "TOP")
         # updatelayer = arcpy.mapping.ListLayers(mxd, os.path.basename(str(ms_Catchment[0])), df)[0]
         # sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\ms_Catchment_SPVOpland.lyr")
         # arcpy.mapping.UpdateLayer(df,updatelayer,sourcelayer,False)
         # updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'FILEGDB_WORKSPACE', unicode(addLayer.datasetName))
-        
+
         # arcpy.mapping.AddLayer(df, arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\ms_Catchment_SPVOpland.lyr"))
         if showWarnings:
-            addLayer = arcpy.mapping.Layer(ms_Catchment[0])
-            arcpy.mapping.AddLayer(df, addLayer, "TOP")
-            updatelayer = arcpy.mapping.ListLayers(mxd, os.path.basename(str(ms_Catchment[0])), df)[0]
+            arcpy.AddMessage(ms_Catchment)
+            layer_add = arcpy.mapping.Layer(ms_Catchment)
+            arcpy.mapping.AddLayer(df, layer_add, "TOP")
+            updatelayer = arcpy.mapping.ListLayers(mxd, os.path.basename(str(ms_Catchment)), df)[0]
             sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Warnings.lyr")
             arcpy.mapping.UpdateLayer(df,updatelayer,sourcelayer,False)
-            updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'FILEGDB_WORKSPACE', unicode(addLayer.datasetName))
+            updatelayer.replaceDataSource(unicode(layer_add.workspacePath), 'FILEGDB_WORKSPACE', unicode(layer_add.datasetName))
         return
 
 class AnalyzeSPV(object):
@@ -377,7 +382,7 @@ class AnalyzeSPV(object):
 			displayName= "Field with imperviousness in Spildevandsplan",  
 			name="imp_field",  
 			datatype="GPString",  
-			parameterType="Required",  
+			parameterType="Optional",
 			direction="Input") 
             
         sheet = arcpy.Parameter(
@@ -456,7 +461,8 @@ class AnalyzeSPV(object):
         oplande_SPV = {}
         with arcpy.da.SearchCursor(SPV_feature, [OPL_name, "SHAPE@AREA", imp_field]) as cursor:
             for row in cursor:
-                oplande_SPV[row[0]] = Opland(row[1]/1e4, float(row[2].replace(",","."))*row[1]/1e4, 0)
+
+                oplande_SPV[row[0]] = Opland(row[1]/1e4, (float(row[2].replace(",",".")) if type(row[2]) is str else row[2])*row[1]/1e4, 0)
         oplande_SPV["None"] = Opland(0,0,0)
         
         if getBookmarkConnections:
