@@ -98,7 +98,8 @@ class RenameMUFeatures(object):
             MUIDs = [row[0] for row in arcpy.da.SearchCursor(linksFile, ["MUID"])]
             u, counts = np.unique(MUIDs, return_counts = True)
             duplicate_MUIDs = u[counts>1]
-            arcpy.AddMessage("MUID LIKE '*l*' OR MUID IN ('%s')" % (', '.join(duplicate_MUIDs)))
+            if duplicate_MUIDs:
+                arcpy.AddMessage("MUID LIKE '*l*' OR MUID IN ('%s')" % (', '.join(duplicate_MUIDs)))
             
             with arcpy.da.UpdateCursor(linksFile, ["MUID", "OID@"], where_clause = "MUID LIKE '*l*' OR MUID IN ('%s')" % ("', '".join(duplicate_MUIDs))) as cursor:
                 for row in cursor:
