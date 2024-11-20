@@ -1828,6 +1828,15 @@ class CatchmentSlopeAnalysis(object):
             direction="Input")
         catchment_layer.filter.list = ["Polygon"]
 
+        msm_Link_field = arcpy.Parameter(
+            displayName="Field from msm_Link to use:",
+            name="msm_Link_field",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
+        msm_Link_field.filter.list = ["InvertLevel", "GroundLevel", "CriticalLevel"]
+        msm_Link_field.value = "InvertLevel"
+
         raster = arcpy.Parameter(
             displayName="Terrain Raster Path:",
             name="raster",
@@ -1861,8 +1870,16 @@ class CatchmentSlopeAnalysis(object):
             direction="Input")
         required_slope.value = 20e-3
 
+        add_debug_output = arcpy.Parameter(
+            displayName="Create feature class with connections:",
+            name="add_debug_output",
+            datatype="GPBoolean",
+            category="Additional Settings",
+            parameterType="Optional",
+            direction="Input")
 
-        parameters = [catchment_layer, raster, initial_depth, resolution, required_slope]
+
+        parameters = [catchment_layer, msm_Link_field, raster, initial_depth, resolution, required_slope, add_debug_output]
 
         return parameters
 
@@ -1878,10 +1895,12 @@ class CatchmentSlopeAnalysis(object):
 
     def execute(self, parameters, messages):
         catchment_layer = parameters[0].ValueAsText
-        raster = parameters[1].ValueAsText
-        initial_depth = parameters[2].Value
-        resolution = parameters[3].Value
-        required_slope = parameters[4].Value
+        msm_Link_field = parameters[1].ValueAsText
+        raster = parameters[2].ValueAsText
+        initial_depth = parameters[3].Value
+        resolution = parameters[4].Value
+        required_slope = parameters[5].Value
+        add_debug_output = parameters[6].Value
 
         mxd = arcpy.mapping.MapDocument("CURRENT")
         df = arcpy.mapping.ListDataFrames(mxd)[0]
@@ -1892,33 +1911,12 @@ class CatchmentSlopeAnalysis(object):
         MU_database = os.path.dirname(arcpy.Describe(catchment_layer).catalogPath).replace("\mu_Geometry", "")
         msm_Node = os.path.join(MU_database, "msm_Node")
         msm_Catchment = catchment_layer
-        msm_CatchCon = os.path.join(MU_database, "msm_CatchCon")
-
-        # MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchGDB), "MIKE URBAN")
-        # if not os.path.exists(MIKE_folder):
-        #     os.mkdir(MIKE_folder)
-        # MIKE_gdb = os.path.join(MIKE_folder, empty_group_layer.name)
-        # no_dir = True
-        # dir_ext = 0
-        # while no_dir:
-        #     try:
-        #         if arcpy.Exists(MIKE_gdb):
-        #             os.rmdir(MIKE_gdb)
-        #         os.mkdir(MIKE_gdb)
-        #         no_dir = False
-        #     except Exception as e:
-        #         dir_ext += 1
-        #         MIKE_gdb = os.path.join(MIKE_folder, "%s_%d" % (empty_group_layer.name, dir_ext))
-        # arcpy.env.scratchWorkspace = MIKE_gdb
 
         catchments_output = r"in_memory\catchments_export"
         clipped_raster = "in_memory\DTM_clipped"
         clipped_raster_resampled = "in_memory\DTM_c"
         raster_points = "in_memory\DTM_clipped_resampled_points"
         catchment_loop = "in_memory\Catchment_loop"
-
-        output_raster_path = getAvailableFilename(os.path.join(arcpy.env.scratchGDB, "Slope"))
-        output_vertical_add_raster_path = getAvailableFilename(os.path.join(arcpy.env.scratchGDB, "VerticalAdd"))
 
         arcgis_pro = False
 
@@ -2042,6 +2040,30 @@ class CatchmentSlopeAnalysis(object):
                         label_class.expression = label_class.expression.replace("return labelstr",
                                                                                 'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
 
+        MIKE_folder = os.path.join(os.path.dirname(arcpy.env.scratchWorkspace), "MIKE URBAN")
+        if not os.path.exists(MIKE_folder):
+            os.mkdir(MIKE_folder)
+        MIKE_gdb = os.path.join(MIKE_folder, os.path.splitext(os.path.basename(MU_database))[0])
+
+        no_dir = True
+        dir_ext = 0
+        while no_dir:
+            try:
+                if arcpy.Exists(MIKE_gdb):
+                    os.rmdir(MIKE_gdb)
+                os.mkdir(MIKE_gdb)
+                no_dir = False
+            except Exception as e:
+                dir_ext += 1
+                MIKE_gdb = os.path.join(MIKE_folder,
+                                        "%s_%d" % (os.path.splitext(os.path.basename(MU_database))[0], dir_ext))
+
+        arcpy.CreateFileGDB_management(MIKE_gdb, "scratch.gdb")
+        arcpy.env.scratchWorkspace = os.path.join(MIKE_gdb, "scratch.gdb")
+
+        output_raster_path = getAvailableFilename(os.path.join(arcpy.env.scratchWorkspace, "Slope"))
+        output_vertical_add_raster_path = getAvailableFilename(os.path.join(arcpy.env.scratchWorkspace, "VerticalAdd"))
+
         # graphing MU_database
         import mikegraph
         graph = mikegraph.Graph(MU_database)
@@ -2071,30 +2093,10 @@ class CatchmentSlopeAnalysis(object):
             resampling_type="NEAREST"
         )
 
-        desc = arcpy.Describe(clipped_raster_resampled)
-
         raster = arcpy.Raster(clipped_raster_resampled)
         raster_array = arcpy.RasterToNumPyArray(raster)
         cell_size = raster.meanCellHeight  # Assuming square cells
-        raster_extent = raster.extent
         lower_left = arcpy.Point(raster.extent.XMin, raster.extent.YMin)
-
-        raster_array_slope = np.zeros(raster_array.shape, dtype=float)
-
-        # Create a spatial reference object for the raster
-        spatial_ref = desc.spatialReference
-
-        def getRasterValue(x, y):
-            # Convert the coordinates to row and column indices
-
-            col = int((x - lower_left.X) / cell_size)
-            row = int((y - lower_left.Y) / cell_size)
-            # Handle case where y-coordinate decreases as row index increases
-            row = rows - 1 - row
-            if row < rows and col < cols:
-                return raster_array[row, col]
-            else:
-                return -999
 
         arcpy.CreateFeatureclass_management(
             out_path=os.path.dirname(raster_points),
@@ -2114,7 +2116,6 @@ class CatchmentSlopeAnalysis(object):
         arcpy.SetProgressor("step", "Converting Raster to Points", 0, int(raster_array.size), 1)
         with arcpy.da.InsertCursor(raster_points, ['SHAPE@', 'VALUE', "oldID"]) as cursor:
             rows, cols = raster_array.shape
-            # with alive_bar(rows * cols, force_tty=True) as bar:
             for row in range(rows):
                 for col in range(cols):
                     # Calculate the coordinates for the cell center
@@ -2134,10 +2135,6 @@ class CatchmentSlopeAnalysis(object):
                             pass
                     i+= 1
                 arcpy.SetProgressorPosition(i)
-                        # bar()
-
-        # Loop over each cell in the raster array
-        rows, cols = raster_array.shape
 
         class Node:
             def __init__(self, muid, shape, critical_level):
@@ -2146,14 +2143,9 @@ class CatchmentSlopeAnalysis(object):
                 self.critical_level = critical_level
 
         nodes = {}
-        with arcpy.da.SearchCursor(msm_Node, ["muid", "SHAPE@", "InvertLevel"]) as cursor:
+        with arcpy.da.SearchCursor(msm_Node, ["muid", "SHAPE@", msm_Link_field]) as cursor:
             for row in cursor:
                 nodes[row[0]] = Node(row[0], row[1], row[2])
-
-        # with arcpy.da.SearchCursor(node_result_file, ["MUID", "Max_Elev"]) as cursor:
-        #     for row in cursor:
-        #         if row[0] in nodes:
-        #             nodes[row[0]].critical_level = row[1]
 
         with arcpy.da.SearchCursor(catchments_output, ["OID@", "MUID"]) as cursor:
             for row in cursor:
@@ -2166,13 +2158,20 @@ class CatchmentSlopeAnalysis(object):
         arcpy.SetProgressor("step", "Converting Raster to Points", 0, int(raster_array.size), 1)
         arcpy.SetProgressorPosition(i)
 
+        if add_debug_output:
+            debug_output_path = getAvailableFilename(os.path.join(arcpy.env.scratchWorkspace, "CatchmentConnections"))
+            arcpy.management.CreateFeatureclass(arcpy.env.scratchWorkspace, os.path.basename(debug_output_path), geometry_type = "POLYLINE", spatial_reference = raster.spatialReference)[0]
+            debug_fields = ["Length", "UpLevel", "DwLevel", "Slope"]
+            for field in debug_fields:
+                arcpy.management.AddField(debug_output_path ,field, "FLOAT", field_precision = 8, field_scale = 4)
+            debug_cursor = arcpy.da.InsertCursor(debug_output_path, ["SHAPE@"] + debug_fields)
+
         with arcpy.da.SearchCursor(catchments_output, ["MUID", "NodeID", "SHAPE@"]) as catchment_cursor:
-            # with alive_bar(len([row for row in catchment_cursor]), force_tty=True) as bar:
             arcpy.SetProgressor("step", "Analyzing Catchments", 0, int(len([row for row in catchment_cursor])), 1)
             catchment_cursor.reset()
+
             for i, catchment_row in enumerate(catchment_cursor):
                 node_id = catchment_row[1]
-                arcpy.AddMessage(node_id)
                 if not node_id:
                     arcpy.AddMessage("No Node_ID for catchment %s" % (catchment_row[0]))
                     continue
@@ -2187,16 +2186,10 @@ class CatchmentSlopeAnalysis(object):
 
                 links = [link for link in graph.network.links.values() if
                          link.fromnode == node_id or link.tonode == node_id]
-                arcpy.AddMessage(links)
+
                 links_3d = []
                 for link in links:
-                    fromnode_3d = arcpy.Point(nodes[link.fromnode].shape.centroid.X,
-                                              nodes[link.fromnode].shape.centroid.Y,
-                                              nodes[link.fromnode].critical_level)
-                    tonode_3d = arcpy.Point(nodes[link.tonode].shape.centroid.X,
-                                            nodes[link.tonode].shape.centroid.Y, nodes[link.tonode].critical_level)
-
-                    links_3d.append(arcpy.Polyline(arcpy.Array([fromnode_3d, tonode_3d]), None, True))
+                    links_3d.append(link.shape_3d(uplevel = nodes[link.fromnode].critical_level, dwlevel = nodes[link.tonode].critical_level))
 
                 with arcpy.da.SearchCursor("points_layer", ["SHAPE@", "oldID", "VALUE"]) as cursor:
                     for row in cursor:
@@ -2204,7 +2197,6 @@ class CatchmentSlopeAnalysis(object):
                         nearest_point = None
                         for link in links_3d:
                             point, _, distance, _ = link.queryPointAndDistance(row[0])
-                            # arcpy.AddMessage(distance)
                             if distance < shortest_distance:
                                 shortest_distance = distance
                                 nearest_point = point
@@ -2213,11 +2205,18 @@ class CatchmentSlopeAnalysis(object):
                             points_slope[int(row[1])] = (row[
                                                              2] - frostfri_dybde - nearest_point.centroid.Z) / shortest_distance * 1e3
                             points_vertical_add[int(row[1])] = required_slope * min(shortest_distance, 10) + 10e-3 * max(0,
-                                                                                                                shortest_distance - 10) - (
-                                                                           row[
-                                                                               2] - frostfri_dybde - nearest_point.centroid.Z)
+                                                                                                                         shortest_distance - 10) - (
+                                                                       row[
+                                                                           2] - frostfri_dybde - nearest_point.centroid.Z)
+                            if add_debug_output:
+                                debug_cursor.insertRow([arcpy.Polyline(arcpy.Array([row[0].centroid, nearest_point.centroid])), shortest_distance, row[2], nearest_point.centroid.Z, points_slope[int(row[1])]])
 
                 arcpy.SetProgressorPosition(i)
+
+        if add_debug_output:
+            del debug_cursor
+            addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchment Connections.lyr", debug_output_path,
+                     workspace_type="FILEGDB_WORKSPACE", new_name = "Catchment Link")
 
         slope_raster = arcpy.NumPyArrayToRaster(
             in_array=np.flipud(points_slope.reshape(raster_array.shape)),
@@ -2226,7 +2225,6 @@ class CatchmentSlopeAnalysis(object):
             y_cell_size=cell_size,
             value_to_nodata=-999  # Set this if you have a specific NoData value
         )
-        # raster_from_array.spatialReference = spatial_ref
         slope_raster.save(output_raster_path)
 
         vertical_add_raster = arcpy.NumPyArrayToRaster(
@@ -2239,12 +2237,10 @@ class CatchmentSlopeAnalysis(object):
         vertical_add_raster.save(output_vertical_add_raster_path)
 
         addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchment_elevation_adjustment.lyr",
-                             output_vertical_add_raster_path, workspace_type="FILEGDB_WORKSPACE")
+                 output_vertical_add_raster_path, workspace_type="FILEGDB_WORKSPACE")
 
         addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchment_slope.lyr",
                  output_raster_path, workspace_type="FILEGDB_WORKSPACE")
 
-
-        # print(output_vertical_add_raster_path)
 
         return
