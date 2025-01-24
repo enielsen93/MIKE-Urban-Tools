@@ -5,7 +5,7 @@
       <JobConfig>
         <Job property="Job1" value="True" jobNodeType="Job" />
         <JobProps>
-          <JobPropertyValue property="SourceType" value="Geodatabase" jobNodeType="JobProperty" />
+          <JobPropertyValue property="SourceType" value="sourceTypeParameter" jobNodeType="JobProperty" />
           <JobPropertyValue property="Source" value="..\..\..\..\ArcGIS\MIKE URBAN\DDS_Import_54\scratch.gdb" jobNodeType="JobProperty" />
           <JobPropertyValue property="SourceMask" value="" jobNodeType="JobProperty" />
           <JobPropertyValue property="TargetType" value="MUPlusDB" jobNodeType="JobProperty" />
@@ -795,7 +795,7 @@
             </TableNodeProperties>
           </Section>
           <SectionProps>
-            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="Source" value="MOUSE_Links" tableNodeType="SectionProperty">
+            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="Source" value="msm_Link" tableNodeType="SectionProperty">
               <ChildAssginItems />
               <TableNodeProperties>
                 <item>
