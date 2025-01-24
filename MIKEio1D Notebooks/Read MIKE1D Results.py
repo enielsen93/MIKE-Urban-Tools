@@ -13,13 +13,29 @@ from scipy.optimize import bisect
 extension = ""
 # MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Fredensvang\MIKE\FRE_005\FRE_005.sqlite"
 # res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Fredensvang\MIKE\FRE_005\FRE_005_m1d - Result Files\FRE_005_CDS5_156_240_valideringBaseDefault_Network_HD.res1d"
-MU_model = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Hasle Torv\MIKE_URBAN\HAT_031\HAT_031.sqlite"
-res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Hasle Torv\MIKE_URBAN\HAT_031\HAT_031_m1d - Result Files\HAT_031_CDS_5_156BaseDefault_Network_HD.res1d"
+# MU_model = r"\\files\Projects\RWA2023N001XX\RWA2023N00109\Hasle Torv\MIKE_URBAN\HAT_051\HAT_051.sqlite"
+res1d_file = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Hasle Torv\MIKE_URBAN\HAT_061\HAT_061_m1d - Result Files\HAT_061_CDS_5_132BaseDefault_Network_HD.res1d"
+
+if not 'MU_model' in locals(): # Guessing where MIKE+ database is. Write path of MIKE-model above if not correct
+    model_folder = os.path.dirname(os.path.dirname(res1d_file))
+    MU_model = os.path.join(model_folder, os.path.basename(model_folder)) + ".sqlite"
+    if os.path.exists(MU_model):
+        print("Assuming MIKE+ database is %s" % (MU_model))
+    else:
+        model_folder = os.path.dirname(res1d_file)
+        MU_model = os.path.join(model_folder, os.path.basename(model_folder)) + ".mdb"
+        if os.path.exists(MU_model):
+            print("Assuming MIKE+ database is %s" % (MU_model))
+        else:
+            raise Exception("Did not find MIKE+ Database %s." % MU_model.replace(".sqlite", ".(sqlite|mdb)"))
 
 ms_Catchment = os.path.join(MU_model, "ms_Catchment" if ".mdb" in MU_model else "msm_Catchment")
 msm_CatchCon = os.path.join(MU_model, "msm_CatchCon")
 
-filter_to_extent = [571374, 6224668, 573017, 6226202]
+filter_to_extent = [571790, 6225063, 572819, 6226104] #HAT40
+# filter_to_extent = [571433, 6224934, 572444, 6225714]
+
+# filter_to_extent = None
 
 if filter_to_extent:
     print("Skipping all reaches and nodes outside extent %s" % filter_to_extent)
@@ -107,6 +123,8 @@ class Reach:
 
     @property
     def fill_degree(self):
+        if self.muid == 'Link_l425':
+            print((self.uplevel, self.diameter, self.max_start_water_level))
         if all((self.max_start_water_level, self.uplevel, self.diameter)):
             return (self.max_start_water_level-self.uplevel)/self.diameter*1e2
 
@@ -495,7 +513,7 @@ with arcpy.da.InsertCursor(nodes_output_filepath, ["SHAPE@", "MUID", "Diameter",
 
 
 import winsound
-winsound.Beep(1000, 500)
+winsound.Beep(300, 200)
 
 if len([catchment for catchment in catchments.values() if not catchment.nodeid])>0:
     print("%d catchments not connected. ('%s')" % (len([catchment for catchment in catchments.values() if not catchment.nodeid_exists]), "', '".join([catchment.muid for catchment in catchments.values() if not catchment.nodeid])))
