@@ -233,7 +233,7 @@ class CopyFolder(object):
 
 
         output_folder = arcpy.Parameter(
-            displayName="Output Location:",
+            displayName="Output Location (exclude folder name):",
             name="output_folder",
             datatype="DEFolder",
             parameterType="Required",
@@ -260,7 +260,14 @@ class CopyFolder(object):
             parameterType="Optional",
             direction="Output")
 
-        parameters = [folder, include_subfolders, file_formats, output_folder, output_file, second_output_folder, keep_newest]
+        debug_logging = arcpy.Parameter(
+            displayName="Debugging:",
+            name="debug_logging",
+            datatype="Boolean",
+            parameterType="Optional",
+            direction="Output")
+
+        parameters = [folder, include_subfolders, file_formats, output_folder, output_file, second_output_folder, keep_newest, debug_logging]
         return parameters
 
     def isLicensed(self):
@@ -304,6 +311,7 @@ class CopyFolder(object):
         output_file = parameters[4].ValueAsText
         second_output_folder = parameters[5].ValueAsText
         keep_newest = parameters[6].Value
+        debug_logging = parameters[7].Value
 
         arcpy.AddMessage("Mapping source folder")
 
@@ -384,6 +392,11 @@ class CopyFolder(object):
                 new_file_folder = os.path.join(output_folder, os.path.relpath(file_folder, os.path.dirname(folder)))
                 new_filepath = os.path.join(new_file_folder, os.path.basename(file))
                 # Copy if conditions on file age and size are met
+                if debug_logging:
+                    arcpy.AddMessage([new_filepath])
+                    arcpy.AddMessage(output_files.keys())
+                    arcpy.AddMessage(new_filepath in output_files.keys())
+                    # arcpy.Message("Exists %s, Newer %s, " :
                 if not keep_newest or not new_filepath in output_files.keys() or input_files[
                     input_filepath].mtime - 120 > output_files[new_filepath].mtime or (
                         input_files[input_filepath].mtime > output_files[new_filepath].mtime - 120 and input_files[
