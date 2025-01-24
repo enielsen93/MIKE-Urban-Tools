@@ -114,14 +114,6 @@ class PipeDimensionToolTAPro(object):
             parameterType="Required",
             direction="Input")
 
-        # flags = arcpy.Parameter(
-            # displayName="Layer to trace upstream network and analyze catchment for",
-            # name="flags",
-            # datatype="GPFeatureLayer",
-            # parameterType="Required",
-            # direction="Input")
-        # flags.filter.list = ["Simple Junction"]
-
         reaches = arcpy.Parameter(
             displayName="Trace network through:",
             name="reaches",
@@ -228,15 +220,6 @@ class PipeDimensionToolTAPro(object):
             parameterType="optional",
             direction="Input")
         show_graphs.category = "Additional settings"
-        # get_start_time = arcpy.Parameter(
-            # displayName="Copy start time from dfs0 file:",
-            # name="get_start_time",
-            # datatype="file",
-            # parameterType="optional",
-            # direction="Input")
-        # get_start_time.filter.list = ["dfs0"]
-        # get_start_time.category = "Additional settings"
-        # get_start_time.enabled = False
 
         parameters = [pipe_layer, reaches, result_field, runoff_file, scaling_factor, breakChainOnNodes, useMaxInflow, slopeOverwrite, writeDFS0, keep_largest_diameter, change_material, debug_output, show_graphs]
         return parameters
@@ -252,10 +235,11 @@ class PipeDimensionToolTAPro(object):
         links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if
                  lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
                  and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and (
-                             "sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)][
+                             "sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)
+                 and lyr.visible][
             0]
 
-        if links:
+        if links and not pipe_layer:
             parameters[0].value = links
 
         if pipe_layer and not runoff_file:
@@ -710,7 +694,7 @@ class PipeDimensionToolResultFile(object):
 
     def execute(self, parameters, messages):
         pipe_layer = parameters[0].ValueAsText
-        MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry", "")
+        MU_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace("\mu_Geometry", "").replace("!delete!","")
         result_field = parameters[1].ValueAsText
         result_layer = parameters[2].ValueAsText
         result_layer_field = parameters[3].ValueAsText
@@ -797,6 +781,7 @@ class PipeDimensionToolResultFile(object):
         arcpy.AddMessage(peak_discharge)
 
         if is_sqlite:
+            arcpy.AddMessage(MU_database)
             with sqlite3.connect(
                     MU_database) as connection:
                 update_cursor = connection.cursor()
@@ -943,7 +928,8 @@ class upgradeDimensions(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and "diameter" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)][0]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and "diameter" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)
+                     and lyr.visible][0]
             if links:
                 parameters[0].value = links
 
@@ -1053,7 +1039,8 @@ class downgradeDimensions(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and "diameter" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)][0]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and "diameter" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)
+                    and lyr.visible][0]
             if links:
                 parameters[0].value = links
         return
@@ -1163,7 +1150,7 @@ class CopyDiameter(object):
             multiValue=True,
             direction="Input")
         match_by.filter.type = "ValueList"
-        match_by.filter.list = ["SHAPE@", "OBJECTID", "MUID"]
+        match_by.filter.list = ["SHAPE@", "OBJECTID", "MUID", "FROMNODE-TONODE"]
         match_by.value = "SHAPE@"
 
         parameters = [reference_feature_layer, target_feature_layer, copy_field, match_by]
@@ -1211,15 +1198,18 @@ class CopyDiameter(object):
         target_feature_layer = parameters[1].Value
         copy_field = parameters[2].ValueAsText.split(";")
         match_by = parameters[3].ValueAsText
-        MU_database = os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath).replace("mu_Geometry","")
-        reference_MU_database = os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath).replace("mu_Geometry","")
+        MU_database = os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath).replace("mu_Geometry","").replace("!delete!","")
+        reference_MU_database = os.path.dirname(arcpy.Describe(reference_feature_layer).catalogPath).replace("mu_Geometry","").replace("!delete!","")
+        target_MU_database = os.path.dirname(arcpy.Describe(target_feature_layer).catalogPath).replace("mu_Geometry",
+                                                                                                          "").replace("!delete!","")
         
         # arcpy.AddMessage(MU_database)
         
         is_sqlite = True if ".sqlite" in MU_database else False
+        arcpy.AddMessage(match_by)
         match_by = match_by.lower().replace("shape@", "shape")
         if is_sqlite:
-            if "shape" in copy_field.lower():
+            if "shape" in [field.lower() for field in copy_field]:
                 arcpy.AddError("Copy field %s is not supported for sqlite" % (copy_field))
             if "shape" in match_by.lower():
                 arcpy.AddError("Match field %s is not supported for sqlite" % (match_by))
@@ -1234,7 +1224,7 @@ class CopyDiameter(object):
                 if not userquery == "Yes":
                     pass
                 else:
-                    if field_for_where_clause == "MUID":
+                    if field_for_where_clause.lower() == "MUID".lower():
                         reference_where_clause = "%s IN ('%s')" % (field_for_where_clause, "', '".join([str(row[0]) for row in arcpy.da.SearchCursor(reference_feature_layer, [field_for_where_clause])])) 
                     else:
                         reference_where_clause = "%s IN (%s)" % (field_for_where_clause, ", ".join([str(row[0]) for row in arcpy.da.SearchCursor(reference_feature_layer, [field_for_where_clause])])) 
@@ -1253,7 +1243,7 @@ class CopyDiameter(object):
                     arcpy.AddMessage("Cancelled both user queries")
                     return
                 else:
-                    if field_for_where_clause == "MUID":
+                    if field_for_where_clause.lower() == "MUID".lower():
                         target_where_clause = "%s IN ('%s')" % (field_for_where_clause, "', '".join([str(row[0]) for row in arcpy.da.SearchCursor(target_feature_layer, [field_for_where_clause])]))
                     else:
                         target_where_clause = "%s IN (%s)" % (field_for_where_clause, ", ".join([str(row[0]) for row in arcpy.da.SearchCursor(target_feature_layer, [field_for_where_clause])])) 
@@ -1287,6 +1277,10 @@ class CopyDiameter(object):
             fields.remove("esri_oid")
         # arcpy.AddMessage(fields)
 
+        arcpy.AddMessage(reference_where_clause)
+        arcpy.AddMessage(arcpy.Describe(reference_feature_layer).catalogPath)
+        arcpy.AddMessage(fields)
+
         with arcpy.da.SearchCursor(arcpy.Describe(reference_feature_layer).catalogPath, fields, where_clause = reference_where_clause) as cursor:
             for row in cursor:
                 reference = Reference()
@@ -1302,12 +1296,19 @@ class CopyDiameter(object):
             fields.remove("ESRI_OID")
 
         # arcpy.AddMessage(fields)
-        match_by_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == match_by.lower().replace("shape","shape@")][0]
+        if match_by.lower() != "FROMNODE-TONODE".lower():
+            # arcpy
+            match_by_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == match_by.lower().replace("shape","shape@")][0]
         # arcpy.AddMessage(fields)
         # arcpy.AddMessage(match_by_field_i)
         
         target_where_clause = target_where_clause if target_where_clause else ""
         # arcpy.AddMessage(reference_where_clause)
+
+        if match_by.lower() == "FROMNODE-TONODE".lower():
+            import networker
+            reference_network = networker.NetworkLinks(reference_MU_database, map_only="link")
+            target_network = networker.NetworkLinks(target_MU_database, map_only="link")
 
         if is_sqlite:
             # arcpy.AddMessage(MU_database)
@@ -1315,32 +1316,50 @@ class CopyDiameter(object):
                         MU_database) as connection:
                 update_cursor = connection.cursor()
                 layer_name = os.path.basename(arcpy.Describe(target_feature_layer).catalogPath).replace("main.","")
-                copy_field = copy_field if type(copy_field) is str else copy_field.split(";")
+                arcpy.AddMessage(copy_field)
+                # copy_field = copy_field if type(copy_field) is str else copy_field.split(";")
                 # arcpy.AddMessage(copy_field)
                 # arcpy.AddMessage(target_where_clause)
                 # arcpy.AddMessage([row[0] for row in arcpy.da.SearchCursor(target_feature_layer, ["MUID"], target_where_clause)])
 
-                for MUID in [row[0] for row in arcpy.da.SearchCursor(target_feature_layer, ["MUID"], target_where_clause)]:
-                    # arcpy.AddMessage(MUID)
-                    # arcpy.AddMessage(target_where_clause)
-                    # arcpy.AddMessage([getattr(reference, "muid") for reference in references])
-                    match = [reference for reference in references if getattr(reference, "muid") == MUID][0]
-                    for field in copy_field:
-                        field_value = getattr(match, field.lower())
-                        # arcpy.AddMessage(type(field_value) is str or type(field_value) is unicode)
-                        
-                        old_field_value = update_cursor.execute("SELECT %s FROM %s WHERE MUID = '%s'" % (field, layer_name, MUID)).fetchone()[0]
-                        sql_expression = "UPDATE %s SET %s = %s WHERE MUID = '%s'" % (layer_name, field,
-                                            "'%s'" % (field_value) if type(field_value) is str or type(field_value) is unicode else "%s" % (field_value),
-                                            MUID)
-                        arcpy.AddMessage(sql_expression)
-                        arcpy.AddMessage(
-                                    "Changed %s field %s from %s to %s" % (MUID, field, old_field_value, field_value))
-                        try:
-                            update_cursor.execute(sql_expression)
-                        except Exception as e:
+                # arcpy.AddMessage("BOB")
+                # arcpy.AddMessage(references[0].muid)
+                for MUID in [row[0] for row in arcpy.da.SearchCursor(arcpy.Describe(target_feature_layer).catalogPath, ["MUID"], target_where_clause)]:
+                    if match_by.lower() == "FROMNODE-TONODE".lower():
+                        if MUID in target_network.links:
+                            muid_field_i = [i for i, field in enumerate(fields) if field.lower() == "muid"][0]
+                            # arcpy.AddMessage(row[muid_field_i])
+                            # arcpy.AddMessage(MUID in target_network.links)
+                            # arcpy.AddMessage(reference.muid in reference_network.links)
+                            # arcpy.AddMessage((reference_network.links[reference.muid].fromnode, reference_network.links[reference.muid].tonode))
+                            # arcpy.AddMessage((reference_network.links[reference.muid].fromnode,
+                            #                   reference_network.links[reference.muid].tonode))
+                            match = [reference for reference in references if reference_network.links[reference.muid].fromnode.lower() == target_network.links[MUID].fromnode.lower() and reference_network.links[reference.muid].tonode.lower() == target_network.links[MUID].tonode.lower()
+                                     if reference.muid in reference_network.links and MUID in target_network.links]
+                            # arcpy.AddMessage(match)
+                        else:
+                            continue
+                        # match = [reference for reference in references if getattr(reference, "muid") == match_MUID][0]
+                    else:
+                        arcpy.AddMessage(MUID)
+                        match = [reference for reference in references if getattr(reference, "muid") == MUID][0]
+                    if match:
+                        for field in copy_field:
+                            field_value = getattr(match[0], field.lower())
+                            # arcpy.AddMessage(type(field_value) is str or type(field_value) is unicode)
+
+                            old_field_value = update_cursor.execute("SELECT %s FROM %s WHERE MUID = '%s'" % (field, layer_name, MUID)).fetchone()[0]
+                            sql_expression = "UPDATE %s SET %s = %s WHERE MUID = '%s'" % (layer_name, field,
+                                                "'%s'" % (field_value) if type(field_value) is str or type(field_value) is unicode else "%s" % (field_value),
+                                                MUID)
                             arcpy.AddMessage(sql_expression)
-                            raise(e)
+                            arcpy.AddMessage(
+                                        "Changed %s field %s from %s to %s" % (MUID, field, old_field_value, field_value))
+                            try:
+                                update_cursor.execute(sql_expression)
+                            except Exception as e:
+                                arcpy.AddMessage(sql_expression)
+                                raise(e)
         else:
             edit = arcpy.da.Editor(MU_database)
             edit.startEditing(False, True)
@@ -1348,7 +1367,16 @@ class CopyDiameter(object):
             with arcpy.da.UpdateCursor(arcpy.Describe(target_feature_layer).catalogPath, fields, where_clause = target_where_clause) as cursor:
                 for row in cursor:
                     # arcpy.AddMessage((fields, row))
-                    match = [reference for reference in references if getattr(reference, match_by.lower()) == row[match_by_field_i]]
+                    if match_by.lower() == "FROMNODE-TONODE".lower():
+                        muid_field_i = [i for field, i in enumerate(fields) if field.lower() == "muid"]
+                        match_MUID = [link.muid for link in reference_links if link.fromnode.lower() == target_network.links[row[muid_field_i]].fromnode and link.tonode.lower() == target_network.links[row[muid_field_i]].tonode]
+                        arcpy.AddMessage("FEATURE NOT SUPPORTED YET")
+                        return
+                        # match = [reference for reference in references if reference_network.links[
+
+                    else:
+                        match = [reference for reference in references if getattr(reference, match_by.lower()) == row[match_by_field_i]]
+
                     # arcpy.AddMessage((getattr(reference, match_by.lower()), row[match_by_field_i]))
                     # arcpy.AddMessage([getattr(reference, match_by.lower()) for reference in references])
                     if match:
@@ -1438,7 +1466,8 @@ class InterpolateInvertLevels(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)][0]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)
+                    and lyr.visible][0]
             if links:
                 parameters[0].value = links
         return
@@ -1611,7 +1640,8 @@ class GetMinimumSlope(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)][0]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)
+                    and lyr.visible][0]
             if links:
                 parameters[0].value = links
         return
@@ -1968,7 +1998,8 @@ class CalculateSlopeOfPipe(object):
         if not parameters[0].value:
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)]
+                    and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)
+                     and lyr.visible]
             if links:
                 parameters[0].value = ";".join(links)
         return
@@ -2044,7 +2075,8 @@ class ResetUpLevelDwlevel(object):
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if
                      lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                     and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]][0]
+                     and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)]
+                     and lyr.visible][0]
             if links:
                 parameters[0].value = links
         return
@@ -2135,7 +2167,8 @@ class SetDischargeRegulation(object):
             mxd = arcpy.mapping.MapDocument("CURRENT")
             links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if
                      lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
-                     and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)][0]
+                     and "muid" in [field.name.lower() for field in arcpy.ListFields(lyr)] and ("sqlite" in arcpy.Describe(lyr).catalogPath or "mdb" in arcpy.Describe(lyr).catalogPath)
+                     and lyr.visible][0]
             if links:
                 parameters[0].value = links
         return
