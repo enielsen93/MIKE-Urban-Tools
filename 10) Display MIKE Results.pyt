@@ -684,8 +684,8 @@ class DisplayFloodReturnPeriodFun(object):
         # basinLayer = arcpy.mapping.AddLayer(df, basinLayer)
         # basinLayer = arcpy.mapping.ListLayers(mxd, basinLayer, df)[0]
         # basinLayer.replaceDataSource(os.path.dirname(exportBasins), "SHAPEFILE_WORKSPACE", os.path.basename(exportBasins).split(".")[0])
-        arcpy.RefreshTOC()
-        arcpy.RefreshActiveView()
+        #arcpy.RefreshTOC()
+        #arcpy.RefreshActiveView()
         return
 
 class DisplayWeirStatistics(object):
@@ -809,7 +809,7 @@ class DisplayWeirStatistics(object):
         weirLayer.replaceDataSource(os.path.dirname(msm_weir[0]), "FILEGDB_WORKSPACE", os.path.basename(msm_weir[0]).split(".")[0])
         
         weirLayer.name = os.path.splitext(os.path.basename(htmlFile))[0] + u" Weir Discharge"
-        arcpy.RefreshTOC()
+        #arcpy.RefreshTOC()
         
         return
         
@@ -1407,7 +1407,7 @@ class DisplayMIKE1DResults(object):
             parameterType="Optional",
             multiValue=True,
             direction="Input")
-        display_type.filter.list = ["Flood volume", "Max Elevation / Headloss", "Link Depth Difference"]
+        display_type.filter.list = ["Flood volume", "Flood Depth", "Max Elevation / Headloss", "Link Depth Difference"]
         display_type.value = "Flood Volume"
 
         parameters = [folder, node_featureclass, reach_featureclass, display_type]
@@ -1567,6 +1567,13 @@ class DisplayMIKE1DResults(object):
                                      workspace_type="SHAPEFILE_WORKSPACE",
                                      new_name=os.path.basename(nodes_featureclass).replace(".shp", ""))
                     layer.showLabels = True
+                if "Flood Depth".lower() in display_type.lower():
+                    layer = addLayer(
+                        os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE1D_results_nodes_depthdiff.lyr",
+                        nodes_featureclass.replace(".shp", ""), group=None,
+                        workspace_type="SHAPEFILE_WORKSPACE",
+                        new_name=os.path.basename(nodes_featureclass).replace(".shp", ""))
+                    layer.showLabels = False
                 if "headloss" in display_type.lower():
                     layer = addLayer(
                         os.path.dirname(os.path.realpath(__file__)) + "\Data\MIKE1D_results_nodes.lyr",
