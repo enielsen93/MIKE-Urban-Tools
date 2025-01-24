@@ -370,7 +370,7 @@ class Dandas2MULinks(object):
             tree = ET.fromstring(txt)
             
             links = tree.findall("Ledning")
-            msm_Link = getAvailableFilename(arcpy.env.scratchGDB + "\MOUSE_Links")
+            msm_Link = getAvailableFilename(arcpy.env.scratchGDB + "\msm_Link")
             arcpy.CopyFeatures_management(os.path.dirname(os.path.realpath(__file__)) + "\Data\Templates.mdb\msm_Link", msm_Link)
             if coordinate_system:
                 arcpy.DefineProjection_management(msm_Link, coordinate_system) 
@@ -859,7 +859,11 @@ class CopyMikeUrbanFeatures(object):
         msm_Links = parameters[2].values
         ms_Catchments = parameters[3].values
 
-        MU_database = parameters[0].valueAsText
+        if (msm_Nodes and ".sqlite" in arcpy.Describe(msm_Nodes[0]).catalogPath) or (msm_Links and ".sqlite" in arcpy.Describe(msm_Links[0]).catalogPath) or (ms_Catchments and ".sqlite" in arcpy.Describe(ms_Catchments[0]).catalogPath):
+            source_type = 'MUPlusDB'
+        else:
+            source_type = 'Geodatabase'
+
         is_sqlite = True if ".sqlite" in MU_database else False
         arcpy.env.overwriteOutput = True
 
@@ -896,7 +900,6 @@ class CopyMikeUrbanFeatures(object):
         if pythonaddins.MessageBox("You are copying %d manholes, %d pipes, and %d catchments. Continue?" % (nodes_count, link_count, catchment_count),
                                    "Confirm copy?", 1) == "OK":
             if msm_Nodes:
-
                 for i, msm_Node in enumerate(msm_Nodes):
                     reference_MU_database = os.path.dirname(arcpy.Describe(msm_Node).catalogPath)
                     nodes_in_database = [row[0] for row in arcpy.da.SearchCursor(MU_database + "\msm_Node", ["MUID"])]
@@ -937,6 +940,11 @@ class CopyMikeUrbanFeatures(object):
                         xml_txt[msm_Node_where_clause_lineno] = re.sub('value *= *"[^"]+"', "value=\"MUID IN ('%s')\"" % "', '".join(MUIDs),
                                                                        xml_txt[msm_Node_where_clause_lineno])
 
+                        # Change source type if MIKE+
+                        source_type_lineno = [i for i, line in enumerate(xml_txt) if 'sourceTypeParameter' in line][0]
+
+                        xml_txt[source_type_lineno] = xml_txt[source_type_lineno].replace("sourceTypeParameter",
+                                                                                                source_type)
                         # arcpy.AddMessage(sql_expression)
                     else:
                         arcpy.Append_management(selected, MU_database + "\msm_Node", schema_type = "NO_TEST")
@@ -1006,16 +1014,16 @@ class CopyMikeUrbanFeatures(object):
                         selected = arcpy.Select_analysis(ms_Catchment, "in_memory\ms_Catchment_%d" % (i))
 
                         ms_CatchmentMUIDs = [row[0] for row in arcpy.da.SearchCursor(selected,"MUID")]
-                        duplicateMUIDs = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"ms_Catchment"),"MUID",where_clause = "MUID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
-                        duplicateHModA = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"msm_HModA"),"CatchID",where_clause = "CatchID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
+                        duplicateMUIDs = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"msm_Catchment"),"MUID",where_clause = "MUID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
+                        # duplicateHModA = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"msm_HModA"),"CatchID",where_clause = "CatchID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
                         duplicateCatchCon = [row[0] for row in arcpy.da.SearchCursor(os.path.join(MU_database,"msm_CatchCon"),"CatchID",where_clause = "CatchID IN ('%s')" % ("', '".join(ms_CatchmentMUIDs)))]
 
                         errorMessage = ""
                         if duplicateMUIDs:
                             errorMessage += "Catchments with MUID ('%s') already exist in Catchment Layer in Mike Urban Database" % ("(', '".join(duplicateMUIDs))
-                        if duplicateHModA:
-                            errorMessage = errorMessage + "\n" if errorMessage else ""
-                            errorMessage += "Catchments with MUID ('%s') already exist in Model Records (msm_HModA) in Mike Urban Database" % ("(', '".join(duplicateHModA))
+                        # if duplicateHModA:
+                        #     errorMessage = errorMessage + "\n" if errorMessage else ""
+                        #     errorMessage += "Catchments with MUID ('%s') already exist in Model Records (msm_HModA) in Mike Urban Database" % ("(', '".join(duplicateHModA))
                         if duplicateCatchCon:
                             errorMessage = errorMessage + "\n" if errorMessage else ""
                             errorMessage += "Catchments with MUID ('%s') already exist in Catchment Connections (msm_CatchCon) in Mike Urban Database" % ("(', '".join(duplicateCatchCon))
