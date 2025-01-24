@@ -331,6 +331,7 @@ class DisplayMikeUrban(object):
                         label_class.expression = label_class.expression.replace("return labelstr",
                                                                                 'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
 
+        # empty_group_layer.visible = False
         if "Manholes" in features_to_display:
             printStepAndTime("Adding nodes to map")
             arcpy.SetProgressor("default", "Adding nodes to map")
@@ -1123,11 +1124,6 @@ class DisplayMikeUrban(object):
                     arcpy.AddWarning(e)
             arcpy.env.workspace = old_workspace
 
-        # printStepAndTime("Refreshing Map")
-        # arcpy.SetProgressor("default","Refreshing map")
-        # arcpy.RefreshTOC()
-        # arcpy.RefreshActiveView()
-        arcpy.RefreshTOC()
         return
 
 
@@ -1226,8 +1222,8 @@ class DimensionAnalysis(object):
         updatelayer.replaceDataSource(unicode(addLayer.workspacePath), 'ACCESS_WORKSPACE',
                                       unicode(addLayer.datasetName))
 
-        arcpy.RefreshTOC()
-        arcpy.RefreshActiveView()
+        # arcpy.RefreshTOC()
+        # arcpy.RefreshActiveView()
         return
 
 
@@ -1278,8 +1274,8 @@ class DisplayPipeElevation(object):
             arcpy.AddMessage(layer.datasetName)
             layer.replaceDataSource(unicode(MU_database), 'ACCESS_WORKSPACE', unicode(layer.datasetName))
 
-        arcpy.RefreshTOC()
-        arcpy.RefreshActiveView()
+        # arcpy.RefreshTOC()
+        # arcpy.RefreshActiveView()
         return
 
 
