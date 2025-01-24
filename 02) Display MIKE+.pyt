@@ -1009,7 +1009,7 @@ class DisplaySqliteStep1(object):
         copy2clip("; ".join(clipboard_txt))
 
         arcpy.AddMessage("Feature paths copied to Clipboard. Open <Add Data> and paste from Clipboard then click <Add>. For all subsequent dialog boxes tick muid and click OK. Then Drag & Drop Layers into Group %s." % empty_group_layer.name)
-        arcpy.RefreshTOC()
+        # arcpy.RefreshTOC()
         return
 
 class DisplaySqliteStep2(object):
@@ -1058,9 +1058,10 @@ class DisplaySqliteStep2(object):
         if not parameters[0].Value:
             mxd = arcpyMapDocument("CURRENT")
             df = mxd.listMaps()[0] if arcgis_pro else arcpymapping.ListDataFrames(mxd)[0]
-            layers = df.listLayers(group_layer)[0] if arcgis_pro else arcpymapping.ListLayers(mxd, group_layer, df)[0]
+            layers = df.listLayers('*') if arcgis_pro else arcpymapping.ListLayers(mxd, '*', df)
+            print(layers)
             # try:
-            parameters[0].Value = [layer for layer in layers if layer.isGroupLayer]
+            parameters[0].Value = [layer for layer in layers if layer.isGroupLayer][0].name
             # except Exception as e:
             #     pass
 
@@ -1128,5 +1129,5 @@ class DisplaySqliteStep2(object):
                     layer_template = os.path.join(templates_folder, "msm_Catchment.lyr")
                     apply_layer_settings(layer, layer_template)
 
-            arcpy.RefreshTOC()
+            # arcpy.RefreshTOC()
 
