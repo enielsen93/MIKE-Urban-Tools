@@ -44,7 +44,15 @@ class SetDefinitionQuery(object):
             parameterType="Optional",
             direction="Input")
 
-        parameters = [layer, append, remove_selection]
+        specific_definition_query = arcpy.Parameter(
+            displayName="Specific Definition Query",
+            name="specific_definition_query",
+            datatype="GPString",
+            parameterType="Optional",
+            category="Additional Settings",
+            direction="Input")
+
+        parameters = [layer, append, remove_selection, specific_definition_query]
         return parameters
 
     def isLicensed(self):
@@ -68,23 +76,31 @@ class SetDefinitionQuery(object):
         layers = parameters[0].Values
         append = parameters[1].Value
         remove_selection = parameters[2].Value
+        specific_definition_query = parameters[3].ValueAsText
 
         for layer in layers:
-            oid_fieldname = arcpy.Describe(layer).OIDFieldName
-            # arcpy.AddMessage([row for row in arcpy.da.SearchCursor(layer, ["muid"], where_clause = "objectid IN (%s)" % (", ".join([str(l) for l in layer.getSelectionSet()])))])
-            # arcpy.AddMessage("objectid IN (%s)" % (", ".join([str(l) for l in layer.getSelectionSet()])))
-            if "muid" in [field.name.lower() for field in arcpy.ListFields(layer)] and "CatchConLink" not in layer.datasetName:
-                arcpy.AddMessage((layer.getSelectionSet()))
-                new_definition_query = "muid %sIN ('%s')" % ("NOT " if remove_selection else "", "', '".join([row[0] for row in arcpy.da.SearchCursor(layer, ["muid"], where_clause = "%s IN (%s)" % (oid_fieldname, ", ".join([str(l) for l in layer.getSelectionSet()])))]))
+            if specific_definition_query: # specific definition query
+                old_definition_query = layer.definitionQuery
+                if old_definition_query and append:
+                    old_definition_query = layer.definitionQuery
+                    layer.definitionQuery = old_definition_query + " AND " + specific_definition_query
+                else:
+                    layer.definitionQuery = specific_definition_query
             else:
-                new_definition_query = "%s %sIN (%s)" % (oid_fieldname, "NOT " if remove_selection else "", ", ".join([str(g) for g in layer.getSelectionSet()]))
+                oid_fieldname = arcpy.Describe(layer).OIDFieldName
+                # arcpy.AddMessage([row for row in arcpy.da.SearchCursor(layer, ["muid"], where_clause = "objectid IN (%s)" % (", ".join([str(l) for l in layer.getSelectionSet()])))])
+                # arcpy.AddMessage("objectid IN (%s)" % (", ".join([str(l) for l in layer.getSelectionSet()])))
+                if "muid" in [field.name.lower() for field in arcpy.ListFields(layer)] and "CatchConLink" not in layer.datasetName:
+                    arcpy.AddMessage((layer.getSelectionSet()))
+                    new_definition_query = "muid %sIN ('%s')" % ("NOT " if remove_selection else "", "', '".join([row[0] for row in arcpy.da.SearchCursor(layer, ["muid"], where_clause = "%s IN (%s)" % (oid_fieldname, ", ".join([str(l) for l in layer.getSelectionSet()])))]))
+                else:
+                    new_definition_query = "%s %sIN (%s)" % (oid_fieldname, "NOT " if remove_selection else "", ", ".join([str(g) for g in layer.getSelectionSet()]))
 
 
-            old_definition_query = layer.definitionQuery
-            if old_definition_query and append:
-                layer.definitionQuery = old_definition_query + " AND " + new_definition_query
-            else:
-                layer.definitionQuery = new_definition_query
-
+                old_definition_query = layer.definitionQuery
+                if old_definition_query and append:
+                    layer.definitionQuery = old_definition_query + " AND " + new_definition_query
+                else:
+                    layer.definitionQuery = new_definition_query
 
         return
