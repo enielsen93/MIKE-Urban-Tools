@@ -119,6 +119,8 @@ class ConnectCatchment(object):
 
                     import sqlite3
                     conn = sqlite3.connect(mike_urban_database.replace("!delete!",""))
+                    # conn.enable_load_extension(True)
+                    # conn.execute('SELECT load_extension("mod_spatialite")')
                     cursor = conn.cursor()
                     if catchments_existing:
                         update_query = r"UPDATE msm_CatchCon SET nodeid = '%s' WHERE catchid IN ('%s')" % (node, "', '".join(catchments_existing))
@@ -126,9 +128,12 @@ class ConnectCatchment(object):
                         cursor.execute(update_query)
                     catchments_not_existing = list(set(catchments_selected) - set(catchments_existing))
                     for catchment in catchments_not_existing:
-                        insert_query = r"INSERT INTO msm_CatchCon (catchid, nodeid) VALUES ('%s', '%s')" % (node, catchment)
-                        print(insert_query)
-                        cursor.execute(insert_query)
+                        try:
+                            insert_query = r"INSERT INTO msm_CatchCon (catchid, nodeid) VALUES ('%s', '%s')" % (node, catchment)
+                            print(insert_query)
+                            cursor.execute(insert_query)
+                        except Exception as e:
+                            pythonaddins.MessageBox(e.message + "\nCannot insert catchment connections in sqlite", "Error", 0)
                     conn.commit()
                     # for catchment in catchment_selected:
                         # insert_query = r"INSERT INTO msm_CatchCon (catchid, nodeid) VALUES (%s, %s)" % (catchment, node)
