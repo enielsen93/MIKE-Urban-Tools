@@ -48,7 +48,7 @@ class Toolbox(object):
         self.alias  = "Catchments"
 
         # List of tool classes associated with this toolbox
-        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, CheckCatchments, FAS2Deloplande, TransferCatchments, DuplicateCatchments, GenerateCatchmentConnections, SetImperviousness, CatchmentProcessingScalgo, CatchmentSlopeAnalysis]
+        self.tools = [CatchmentProcessing, CatchmentProcessingAlt, CheckCatchments, FAS2Deloplande, TransferCatchments, DuplicateCatchments, GenerateCatchmentConnections, SetImperviousness, CatchmentProcessingScalgo, CatchmentSlopeAnalysis, CatchmentConnectionDescription]
 
 class CatchmentProcessing(object):
     def __init__(self):
@@ -220,26 +220,41 @@ class CatchmentProcessing(object):
                         arcpy.AddMessage("%s: %f" %(row[0],row[1]))
             catchmentsWithoutModelParameters = np.ones(len(MUIDs),dtype=bool)
 
-            if "OplandData_GDB" in arcpy.Describe(catchments).file:
-                catchmentcursor = arcpy.da.UpdateCursor(catchments, ["MUID","BEF_GRAD"])
-            else:
-                catchmentcursor = arcpy.da.UpdateCursor(os.path.join(os.path.dirname(arcpy.Describe(catchments).path),"msm_HModA"), ["CatchID","ImpArea"])
-            for row in catchmentcursor:
-                j = [k for k,a in enumerate(MUIDs) if a==row[0]]
-                if len(j)==1:
-                    oldValue = row[1]
-                    catchmentsWithoutModelParameters[j] = False
-                    if type(ImpAreas[j[0]])==float:
-                        row[1] = ImpAreas[j[0]]
-                    else:
-                        row[1] = 0
-                    if abs(oldValue-row[1])>1:
-                        arcpy.AddMessage("Changed catchment %s from %1.0f to %1.0f" % (row[0],oldValue,row[1]))
+            if ".sqlite" in arcpy.Describe(catchments).catalogPath:
+                import sqlite3
+                with sqlite3.connect((os.path.join(os.path.dirname(arcpy.Describe(catchments).catalogPath))).replace("!delete!","")) as connection:
+                    update_cursor = connection.cursor()
+                    for muid, imparea in zip(MUIDs,ImpAreas):
+                        arcpy.AddMessage(imparea)
                         try:
-                            catchmentcursor.updateRow(row)
+                            sql_execute = "UPDATE msm_Catchment SET ModelAImpArea = %1.2f WHERE MUID = '%s'" % (imparea/1e2, muid)
+                            arcpy.AddMessage(sql_execute)
+                            update_cursor.execute(
+                                sql_execute)
                         except Exception as e:
-                            arcpy.AddError("Can't change %s from %d to %d" % (row[0],oldValue,row[1]))
-                            raise(e)
+                            arcpy.AddError("Can't change %s to %d" % (muid, imparea))
+                            raise (e)
+            else:
+                if "OplandData_GDB" in arcpy.Describe(catchments).file:
+                    catchmentcursor = arcpy.da.UpdateCursor(catchments, ["MUID","BEF_GRAD"])
+                else:
+                    catchmentcursor = arcpy.da.UpdateCursor(os.path.join(os.path.dirname(arcpy.Describe(catchments).path),"msm_HModA"), ["CatchID","ImpArea"])
+                for row in catchmentcursor:
+                    j = [k for k,a in enumerate(MUIDs) if a==row[0]]
+                    if len(j)==1:
+                        oldValue = row[1]
+                        catchmentsWithoutModelParameters[j] = False
+                        if type(ImpAreas[j[0]])==float:
+                            row[1] = ImpAreas[j[0]]
+                        else:
+                            row[1] = 0
+                        if abs(oldValue-row[1])>1:
+                            arcpy.AddMessage("Changed catchment %s from %1.0f to %1.0f" % (row[0],oldValue,row[1]))
+                            try:
+                                catchmentcursor.updateRow(row)
+                            except Exception as e:
+                                arcpy.AddError("Can't change %s from %d to %d" % (row[0],oldValue,row[1]))
+                                raise(e)
 
             del catchmentcursor
             if True in catchmentsWithoutModelParameters:
@@ -579,6 +594,7 @@ class CatchmentProcessingScalgo(object):
             with arcpy.da.UpdateCursor(raster_polygon, ["gridcode"], where_clause = "gridcode NOT IN (%s)" % (", ".join([str(gridcode) for gridcode in gridcodes_impervious]))) as cursor:
                 for row in cursor:
                     cursor.deleteRow()
+            arcpy.RepairGeometry_management(raster_polygon)
 
             arcpy.AddMessage((raster_polygon, arcpy.Describe(ms_Catchment).catalogPath))
 
@@ -621,7 +637,7 @@ class CatchmentProcessingScalgo(object):
                             arcpy.AddMessage("UPDATE msm_Catchment SET modelaimparea = %1.2f WHERE MUID = '%s'" % (catchments[muid].imperviousness/100.0, muid))
                             update_cursor.execute(
                                                 "UPDATE msm_Catchment SET modelaimparea = %1.2f WHERE MUID = '%s'" % (catchments[muid].imperviousness/100.0, muid))
-                            arcpy.AddMessage("Changed catchment %s from %d to %d" % (muid, catchments[muid].old_imperviousness*1e4, catchments[muid].imperviousness))
+                            arcpy.AddMessage("Changed catchment %s from %d to %d" % (muid, catchments[muid].old_imperviousness*1e2, catchments[muid].imperviousness))
                     connection.commit()
                     connection.close()
                 except Exception as e:
@@ -1258,18 +1274,13 @@ class GetImperviousness(object):
         arcpy.JoinField_management(in_data=ms_CatchmentImpLayer, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_HModA", join_field="CatchID", fields="ImpArea")
         arcpy.JoinField_management(in_data=ms_CatchmentImpLayer, in_field="MUID", join_table=parameters[0].ValueAsText + r"\msm_CatchCon", join_field="CatchID", fields="NodeID")
         addLayer = arcpy.mapping.Layer(ms_CatchmentImpLayer)
-        arcpy.mapping.AddLayer(df, addLayer)
-        updatelayer = arcpy.mapping.ListLayers(mxd, ms_CatchmentImpLayer, df)[0]
-        sourcelayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchments W Imp Area.lyr")
-        arcpy.mapping.UpdateLayer(df,updatelayer,sourcelayer,False)
-        updatelayer.replaceDataSource(str(addLayer.workspacePath), 'FILEGDB_WORKSPACE', str(addLayer.datasetName))
         if not includeWasteWater:
             updatelayer.definitionQuery = 'NetTypeNo IS NULL OR NetTypeNo IN (2,3)'
         else: 
             updatelayer.definitionQuery = ''
         #arcpy.ApplySymbologyFromLayer_management (addLayer, "Template.lyr")
-        arcpy.RefreshTOC()
-        arcpy.RefreshActiveView()
+        #arcpy.RefreshTOC()
+        #arcpy.RefreshActiveView()
       
         
         return
@@ -1327,8 +1338,8 @@ class GetImperviousnessFlora(object):
         updatelayer.replaceDataSource(str(addLayer.workspacePath), 'ACCESS_WORKSPACE', str(addLayer.datasetName))
         if not includeWasteWater:
             updatelayer.definitionQuery = 'NetTypeNo = 3'
-        arcpy.RefreshTOC()
-        arcpy.RefreshActiveView()
+        #arcpy.RefreshTOC()
+        #arcpy.RefreshActiveView()
       
         
         return
@@ -1392,8 +1403,8 @@ class GetImperviousness(object):
         else: 
             updatelayer.definitionQuery = ''
         #arcpy.ApplySymbologyFromLayer_management (addLayer, "Template.lyr")
-        arcpy.RefreshTOC()
-        arcpy.RefreshActiveView()
+        #arcpy.RefreshTOC()
+        #arcpy.RefreshActiveView()
       
         
         return
@@ -1912,12 +1923,16 @@ class CatchmentSlopeAnalysis(object):
         msm_Node = os.path.join(MU_database, "msm_Node")
         msm_Catchment = catchment_layer
 
+
         catchments_output = r"in_memory\catchments_export"
         clipped_raster = "in_memory\DTM_clipped"
+        # clipped_raster = "in_memory\DTM"
         clipped_raster_resampled = "in_memory\DTM_c"
         raster_points = "in_memory\DTM_clipped_resampled_points"
-        catchment_loop = "in_memory\Catchment_loop"
+        # raster_points = "C:\Papirkurv\DTM_clipped_resampled_points.shp"
+        # catchment_loop = "in_memory\Catchment_loop"
 
+        arcpy.management.CopyFeatures(msm_Catchment, catchments_output)
         arcgis_pro = False
 
         def addLayer(layer_source, source, group=None, workspace_type="ACCESS_WORKSPACE", new_name=None,
@@ -2074,6 +2089,8 @@ class CatchmentSlopeAnalysis(object):
         catchments = [graph.catchments_dict[muid] for muid in catchments_MUID]
         arcpy.Select_analysis(arcpy.Describe(catchment_layer).catalogPath,
                               catchments_output, where_clause="MUID IN ('%s')" % "', '".join([catchment.MUID for catchment in catchments]))
+
+        arcpy.RepairGeometry_management(catchments_output)
         arcpy.AddField_management(catchments_output, 'NodeID', 'TEXT')
 
         with arcpy.da.UpdateCursor(catchments_output, ["MUID", "NodeID"]) as cursor:
@@ -2125,7 +2142,6 @@ class CatchmentSlopeAnalysis(object):
 
                         # Create a point geometry
                         point = arcpy.Point(x, y)
-
                         point_geom = arcpy.PointGeometry(point, raster.spatialReference)
 
                         # Insert the point and value into the feature class
@@ -2153,6 +2169,8 @@ class CatchmentSlopeAnalysis(object):
                     if row[1] == catchment.MUID:
                         catchment.OID = row[0]
 
+        # arcpy.AddSpatialIndex_management(raster_points)
+
         arcpy.MakeFeatureLayer_management(raster_points, "points_layer")
 
         arcpy.SetProgressor("step", "Converting Raster to Points", 0, int(raster_array.size), 1)
@@ -2166,6 +2184,9 @@ class CatchmentSlopeAnalysis(object):
                 arcpy.management.AddField(debug_output_path ,field, "FLOAT", field_precision = 8, field_scale = 4)
             debug_cursor = arcpy.da.InsertCursor(debug_output_path, ["SHAPE@"] + debug_fields)
 
+
+        arcpy.MakeFeatureLayer_management(catchments_output, "Catchment Layer")
+
         with arcpy.da.SearchCursor(catchments_output, ["MUID", "NodeID", "SHAPE@"]) as catchment_cursor:
             arcpy.SetProgressor("step", "Analyzing Catchments", 0, int(len([row for row in catchment_cursor])), 1)
             catchment_cursor.reset()
@@ -2175,13 +2196,15 @@ class CatchmentSlopeAnalysis(object):
                 if not node_id:
                     arcpy.AddMessage("No Node_ID for catchment %s" % (catchment_row[0]))
                     continue
-                arcpy.Select_analysis(arcpy.Describe(msm_Catchment).catalogPath, catchment_loop,
-                                      where_clause="MUID = '%s'" % catchment_row[0])
+                # arcpy.Select_analysis(arcpy.Describe(msm_Catchment).catalogPath, catchment_loop,
+                #                       where_clause="MUID = '%s'" % catchment_row[0])
+
+                arcpy.management.SelectLayerByAttribute("Catchment Layer", "NEW_SELECTION", where_clause="MUID = '%s'" % catchment_row[0])
 
                 arcpy.SelectLayerByLocation_management(
                     in_layer="points_layer",  # Layer to select from
-                    overlap_type="WITHIN",  # Spatial relationship
-                    select_features=catchment_loop  # The polygon features
+                    overlap_type="INTERSECT",  # Spatial relationship
+                    select_features="Catchment Layer"  # The polygon features
                 )
 
                 links = [link for link in graph.network.links.values() if
@@ -2241,6 +2264,81 @@ class CatchmentSlopeAnalysis(object):
 
         addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\Catchment_slope.lyr",
                  output_raster_path, workspace_type="FILEGDB_WORKSPACE")
+
+
+        return
+
+class CatchmentConnectionDescription(object):
+    def __init__(self):
+        self.label = "c) Assign NetTypeNo to Catchment Connections"
+        self.description = "c) Assign NetTypeNo to Catchment Connections"
+        self.canRunInBackground = True
+
+    def getParameterInfo(self):
+        # Define parameter definitions
+
+        # Input Features parameter
+        catchment_layer = arcpy.Parameter(
+            displayName="Catchments Layer:",
+            name="ms_Catchment",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+        catchment_layer.filter.list = ["Polygon"]
+
+        assign_type = arcpy.Parameter(
+            displayName="Assign using the following method:",
+            name="assign_type",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
+        assign_type.filter.list = ["NetTypeNo of Catchment", "NetTypeNo of NodeID of Catchment", "Parameter Set of Catchment"]
+
+        parameters = [catchment_layer, assign_type]
+
+        return parameters
+
+    def isLicensed(self):  # optional
+        return True
+
+    def updateParameters(self, parameters):  # optional
+        return
+
+    def updateMessages(self, parameters):  # optional
+
+        return
+
+    def execute(self, parameters, messages):
+        catchment_layer = parameters[0].ValueAsText
+        assign_type = parameters[1].ValueAsText
+        MU_database = os.path.dirname(arcpy.Describe(catchment_layer).catalogPath).replace("\mu_Geometry", "")
+        is_sqlite = True if ".sqlite" in MU_database else False
+        if not is_sqlite:
+            raise(Exception("Database Type is not supported"))
+        msm_Node = os.path.join(MU_database, "msm_Node")
+        msm_CatchCon = os.path.join(MU_database, "msm_CatchCon") if is_sqlite else os.path.join(MU_database, "msm_CatchConLink")
+
+        if assign_type.lower() == "NetTypeNo of Catchment".lower():
+            raise(Exception("Method not currently supported"))
+            catchments_nettypeno = {row[0]:row[1] for row in arcpy.da.SearchCursor(catchment_layer, ["MUID", "NETTYPENO"])}
+        elif assign_type.lower() == "NetTypeNo of NodeID of Catchment".lower():
+            raise (Exception("Method not currently supported"))
+        elif assign_type.lower() == "Parameter Set of Catchment".lower():
+
+            arcpy.AddMessage([row for row in
+                                    arcpy.da.SearchCursor(catchment_layer, ["MUID", "ModelAParAID"])])
+            catchments_HParAID = {row[0]: row[1] for row in
+                                    arcpy.da.SearchCursor(catchment_layer, ["MUID", "ModelAParAID"])}
+            import sqlite3
+            with sqlite3.connect(MU_database.replace("!delete!","")) as connection:
+                update_cursor = connection.cursor()
+                for muid, description in catchments_HParAID.iteritems():
+                    sql_execute = "UPDATE msm_CatchCon SET Description = '%s' WHERE CatchID = '%s'" % (
+                            description, muid)
+                    update_cursor.execute(
+                        sql_execute)
+        else:
+            raise(Exception("Method not found"))
 
 
         return
