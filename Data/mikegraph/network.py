@@ -3,6 +3,7 @@ Network module for mikegraph
 """
 
 import os
+import warnings
 import sys
 import arcpy.da
 import numpy as np
@@ -206,19 +207,24 @@ class PipeNetwork:
 
     def findClosestNode(self, point, search_radius=0.1):
         muid = None
-        distance, index_closest = self.kdtree.query([point.X, point.Y], distance_upper_bound=search_radius)
+        try:
+            distance, index_closest = self.kdtree.query([point.X, point.Y], distance_upper_bound=search_radius)
+            if distance < search_radius:
+                muid = self.points_muid[index_closest]
+        except Exception as e:
+            warnings.warn(f"kdtree query failed: %s" % RuntimeWarning)
 
-        if distance < search_radius:
-            muid = self.points_muid[index_closest]
         return muid
 
-    def fixConnections(self, search_radius = 1):
+    def fixConnections(self, search_radius = 1, update_geometry = False):
+
         links_missing_fromnode = [link.MUID for link in self.links.values() if not link.fromnode]
         links_missing_tonode = [link.MUID for link in self.links.values() if not link.tonode]
+
         if "fromnodeid" in [field.name.lower() for field in arcpy.ListFields(self.msm_Link)]:
-            links_missing_fromnode += [row[0] for row in arcpy.da.SearchCursor(self.msm_Link, ["MUID"], where_clause = "fromnodeid IS NULL")]
+            links_missing_fromnode += [row[0] for row in arcpy.da.SearchCursor(self.msm_Link, ["MUID"], where_clause = "fromnodeid IS NULL OR fromnodeid = ''")]
             links_missing_tonode += [row[0] for row in
-                                     arcpy.da.SearchCursor(self.msm_Link, ["MUID"], where_clause="tonodeid IS NULL")]
+                                     arcpy.da.SearchCursor(self.msm_Link, ["MUID"], where_clause = "tonodeid IS NULL OR tonodeid = ''")]
         elif "fromnode" in [field.name.lower() for field in arcpy.ListFields(self.msm_Link)]:
             links_missing_fromnode += [row[0] for row in arcpy.da.SearchCursor(self.msm_Link, ["MUID"], where_clause = "fromnode = ''")]
             links_missing_tonode += [row[0] for row in
@@ -261,7 +267,7 @@ class PipeNetwork:
                     warnings.warn("Could not find FromNode for Link %s with search radius of %d m" % (link, search_radius))
                 else:
                     coords[0] = tuple(self.points_xy[
-                        self.points_muid.index(fromnode)])
+                        list(self.points_muid.values()).index(fromnode)])
 
                     updated_line = LineString(coords)
                     updated_wkt = dumps(updated_line)
@@ -270,12 +276,14 @@ class PipeNetwork:
                     # print(row)
                     # print("GeomFromText('%s')" % (updated_wkt))
                     # cursor.execute("SELECT GeomFromText('%s')" % (updated_wkt))
-                    print("UPDATE msm_Link SET geometry = GeomFromText('%s',-1) WHERE muid = '%s'" % (updated_wkt, link))
-                    cursor.execute("UPDATE msm_Link SET geometry = GeomFromText('%s',-1) WHERE muid = '%s'" % (updated_wkt, link))
+                    if update_geometry:
+                        print("UPDATE msm_Link SET geometry = GeomFromText('%s',-1) WHERE muid = '%s'" % (updated_wkt, link))
+                        cursor.execute("UPDATE msm_Link SET geometry = GeomFromText('%s',-1) WHERE muid = '%s'" % (updated_wkt, link))
                     if "fromnodeid" in [field.name for field in arcpy.ListFields(self.msm_Link)]:
                         cursor.execute(
                             "UPDATE msm_Link SET fromnodeid = '%s' WHERE muid = '%s'" % (fromnode, link))
 
+            self.muid_to_index = {v: k for k, v in self.points_muid.items()}
             for link in links_missing_tonode:
                 cursor.execute("SELECT AsText(geometry) FROM msm_Link WHERE muid = '%s'" % (link))
                 row = cursor.fetchone()
@@ -288,8 +296,8 @@ class PipeNetwork:
                     import warnings
                     warnings.warn("Could not find ToNode for Link %s with search radius of %d m" % (link, search_radius))
                 else:
-                    coords[-1] = tuple(self.points_xy[
-                        self.points_muid.index(tonode)])
+                    coords[0] = tuple(self.points_xy[self.muid_to_index[fromnode]])
+
                     updated_line = LineString(coords)
                     updated_wkt = dumps(updated_line)
 
@@ -297,8 +305,9 @@ class PipeNetwork:
                     # print(row)
                     # print("GeomFromText('%s')" % (updated_wkt))
                     # cursor.execute("SELECT GeomFromText('%s')" % (updated_wkt))
-                    print("UPDATE msm_Link SET geometry = GeomFromText('%s',-1) WHERE muid = '%s'" % (updated_wkt, link))
-                    cursor.execute("UPDATE msm_Link SET geometry = GeomFromText('%s',-1) WHERE muid = '%s'" % (updated_wkt, link))
+                    if update_geometry:
+                        print("UPDATE msm_Link SET geometry = GeomFromText('%s',-1) WHERE muid = '%s'" % (updated_wkt, link))
+                        cursor.execute("UPDATE msm_Link SET geometry = GeomFromText('%s',-1) WHERE muid = '%s'" % (updated_wkt, link))
                     if "fromnodeid" in [field.name for field in arcpy.ListFields(self.msm_Link)]:
                         cursor.execute(
                             "UPDATE msm_Link SET tonodeid = '%s' WHERE muid = '%s'" % (tonode, link))
@@ -337,4 +346,5 @@ class PipeNetwork:
 
 
 if __name__ == "__main__":
-    PipeNetwork("model.mdb")
+    pipe_network = PipeNetwork(r"C:\Users\ELNN.RAMBOLL.000\OneDrive - Ramboll\Documents\Mosagergroeften\MIKE\MOS_STATUS_010\MOS_STATUS_010.sqlite")
+    pipe_network.fixConnections(where_clause = "fromnodeid LIKE ('Node_%') OR tonodeid LIKE ('Node_%')")

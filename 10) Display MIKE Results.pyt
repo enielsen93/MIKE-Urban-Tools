@@ -16,6 +16,7 @@ import traceback
 import scipy
 import datetime
 import math
+import pandas as pd
 
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 
@@ -359,7 +360,8 @@ def readRes1D(res1d_file, MU_model = None, gdb_path = None, filter_to_extent = N
                 "%d-%m",  # Assume current year
                 "%d/%m",
                 "%d.%m",
-                "%Y-%m-%d"
+                "%Y-%m-%d",
+                "%Y"
             ]
 
             for fmt in formats:
@@ -438,8 +440,8 @@ def readRes1D(res1d_file, MU_model = None, gdb_path = None, filter_to_extent = N
     arcpy.AddMessage("Creating Nodes and Reaches")
     # output_folder = r"C:\path\to\output"  # Replace with your path
     # gdb_name = os.path.basename(res1d_file).replace(".res1d","_results%s" % extension) + ".gdb"
-    nodes_new_filename = "%s_Nodes" % os.path.basename(res1d_file).replace(".res1d","").replace("Base","").replace("Result_file","")
-    links_new_filename = "%s_Reaches" % os.path.basename(res1d_file).replace(".res1d","").replace("Base","").replace("Result_file","")
+    nodes_new_filename = "%s_Nodes" % os.path.basename(res1d_file).replace(".res1d","").replace(".PRF","").replace("Base","").replace("Result_file","")
+    links_new_filename = "%s_Reaches" % os.path.basename(res1d_file).replace(".res1d","").replace(".PRF","").replace("Base","").replace("Result_file","")
 
     # gdb_path = arcpy.env.ScratchGDB
     nodes_output_filepath = os.path.join(gdb_path, nodes_new_filename)
@@ -459,7 +461,25 @@ def readRes1D(res1d_file, MU_model = None, gdb_path = None, filter_to_extent = N
                     if field not in existing_fields:
                         arcpy.management.AddField(nodes_output_filepath, field, "FLOAT")
             else:
-                nodes_output_filepath = arcpy.CreateFeatureclass_management(gdb_path, nodes_new_filename, "POINT")[0]
+                try:
+                    nodes_output_filepath = arcpy.CreateFeatureclass_management(
+                        gdb_path,
+                        nodes_new_filename,
+                        "POINT"
+                    )[0]
+
+                except Exception:
+                    full_path = os.path.join(gdb_path, nodes_new_filename)
+
+                    arcpy.AddError(
+                        f"Failed creating feature class:\n"
+                        f"gdb_path: {gdb_path}\n"
+                        f"nodes_new_filename: {nodes_new_filename}\n"
+                        f"full path: {full_path}\n\n"
+                        f"{traceback.format_exc()}"
+                    )
+
+                    raise
                 arcpy.management.AddField(nodes_output_filepath, "MUID", "TEXT")
                 arcpy.management.AddField(nodes_output_filepath, "NetTypeNo", "SHORT")
 
@@ -540,7 +560,16 @@ def readRes1D(res1d_file, MU_model = None, gdb_path = None, filter_to_extent = N
                                 queries.append(QueryDataReach(quantity, muid, 0))
                                 query_labels.append(quantity)
 
-                    query_result = res1d.read(queries)
+                    try:
+                        query_result = res1d.read(queries)
+
+                    except Exception:
+                        arcpy.AddWarning(
+                            f"Failed to read results for reach {muid}\n\n"
+                            f"{traceback.format_exc()}"
+                        )
+
+                        continue
                     query_result.columns = query_labels
                     # reach_discharge = query_result.iloc[:,0]
                     if "Discharge" in reach_quantities:
@@ -639,7 +668,16 @@ def readRes1D(res1d_file, MU_model = None, gdb_path = None, filter_to_extent = N
                     arcpy.AddMessage(e)
 
                 queries = [QueryDataNode("WaterLevel", muid)]
-                query_result = res1d.read(queries)
+                try:
+                    query_result = res1d.read(queries)
+
+                except Exception:
+                    arcpy.AddWarning(
+                        f"Failed to read results for node {muid}\n\n"
+                        f"{traceback.format_exc()}"
+                    )
+
+                    continue
                 node.max_level = np.max(query_result.iloc[:,0])
                 node.end_depth = query_result.iloc[-1, 0] - node.invert_level
                 if "WaterVolumeAboveGround" in res1d_quantities:
@@ -700,17 +738,10 @@ def readRes1D(res1d_file, MU_model = None, gdb_path = None, filter_to_extent = N
                                   node.max_inlet_velocity or 0, node.flow_area, node.flow_area_diameter, node.end_depth or 0,
                                   surcharge or 0, surcharge_balance or 0, max_surcharge or 0, node.ground_level or 0])
 
-    if MU_model and len([catchment for catchment in catchments.values() if not catchment.nodeid])>0:
-        arcpy.AddMessage("%d catchments not connected. ('%s')" % (len([catchment for catchment in catchments.values() if not catchment.nodeid_exists]), "', '".join([catchment.muid for catchment in catchments.values() if not catchment.nodeid])))
-
-    if MU_model and len([catchment for catchment in catchments.values() if not catchment.nodeid_exists])>0:
-        arcpy.AddMessage("%d catchments connected to missing node. ('%s')" % (len([catchment for catchment in catchments.values() if not catchment.nodeid_exists]),
-                                                                   "', '".join([catchment.muid for catchment in catchments.values() if not catchment.nodeid_exists])))
 
     now = datetime.datetime.now()
     arcpy.AddMessage("Code run at %s - simulation run at %s" % (now.strftime("%H:%M"), datetime.datetime.fromtimestamp(os.path.getmtime(res1d_file)).strftime("%H:%M")))
-    arcpy.AddMessage((nodes_output_filepath, links_output_filepath))
-    return nodes_output_filepath, links_output_filepath
+    return nodes_output_filepath, links_output_filepath, catchments
 
 def m11extrapath():
     m11extraPath = r"C:\Program Files (x86)\DHI\2016\bin\m11extra.exe"
@@ -2621,7 +2652,7 @@ class ReadMIKE1DResults(object):
             multiValue=True,
             parameterType="Required",
             direction="Input")
-        res1d_filepath.filter.list = ["res1d"]
+        res1d_filepath.filter.list = ["res1d", "prf"]
 
         mike_database = arcpy.Parameter(
             displayName="MIKE+ database",
@@ -2754,7 +2785,7 @@ class ReadMIKE1DResults(object):
             extent = aprx.activeView.camera.getExtent()
 
         for res1d_filepath in res1d_filepaths:
-            nodes_featureclass, reaches_featureclass = readRes1D(res1d_filepath, mike_database, gdb_path = arcpy.env.scratchGDB, filter_to_extent = [extent.lowerLeft.X-50, extent.lowerLeft.Y-50, extent.upperRight.X+50, extent.upperRight.Y+50] if read_only_extent else None, date_filter = None)
+            nodes_featureclass, reaches_featureclass, catchments = readRes1D(res1d_filepath, mike_database, gdb_path = arcpy.env.scratchGDB, filter_to_extent = [extent.lowerLeft.X-50, extent.lowerLeft.Y-50, extent.upperRight.X+50, extent.upperRight.Y+50] if read_only_extent else None, date_filter = None)
             arcpy.AddMessage(date_filter is None)
             nodes_featureclass = arcpy.Describe(nodes_featureclass).catalogPath
             reaches_featureclass = arcpy.Describe(reaches_featureclass).catalogPath
@@ -2935,22 +2966,19 @@ class ReadMIKE1DResults(object):
                         layer.showLabels = False
                 if not arcgis_pro:
                     arcpy.RefreshTOC()
-            # def addLayer(layer_source, source):
-            #     layer = arcpy.mapping.Layer(layer_source)
-            #     layer = arcpy.mapping.AddLayer(df, weirLayer, 'TOP')
-            #     layer = arcpy.mapping.ListLayers(mxd, weirLayer, df)[0]
-            #     layer.replaceDataSource(os.path.dirname(msm_weir[0]), "FILEGDB_WORKSPACE",
-            #                                 os.path.basename(msm_weir[0]).split(".")[0])
-            #
-            #     weirLayer.name = os.path.splitext(os.path.basename(htmlFile))[0] + u" Weir Discharge"
-            #
-            # weirLayer = arcpy.mapping.Layer(os.path.dirname(os.path.realpath(__file__)) + "\Data\msm_Weir.lyr")
-            # weirLayer = arcpy.mapping.AddLayer(df, weirLayer, 'TOP')
-            # weirLayer = arcpy.mapping.ListLayers(mxd, weirLayer, df)[0]
-            # weirLayer.replaceDataSource(os.path.dirname(msm_weir[0]), "FILEGDB_WORKSPACE",
-            #                             os.path.basename(msm_weir[0]).split(".")[0])
-            #
-            # weirLayer.name = os.path.splitext(os.path.basename(htmlFile))[0] + u" Weir Discharge"
+
+
+        if catchments:
+            import tkinter as tk
+            from tkinter import messagebox
+
+            unconnected = [catchment for catchment in catchments.values() if not catchment.nodeid]
+
+            if unconnected:
+                message = "The following catchments are not connected:\n\n" + \
+                          "\n".join(catchment.muid for catchment in unconnected)
+                arcpy.AddWarning(message)
+
         return
 
 
@@ -2971,12 +2999,22 @@ class PlotRes1D(object):
             direction="Input")
         manhole_layer.filter.list = ["Point"]
 
-        pipe_layer = arcpy.Parameter(
-            displayName="Pipe feature layer",
-            name="pipe_layer",
+        pipe_layers = arcpy.Parameter(
+            displayName="Pipe feature layers",
+            name="pipe_layers",
+            datatype="GPFeatureLayer",
+            parameterType="Optional",
+            multiValue=True,
+            direction="Input")
+
+        catchment_layer = arcpy.Parameter(
+            displayName="Catchment feature layers",
+            name="catchment_layer",
             datatype="GPFeatureLayer",
             parameterType="Optional",
             direction="Input")
+
+        catchment_layer.filter.list = ["Polygon"]
 
         result_files = arcpy.Parameter(
             displayName="RES1D Network Result Files or DFS0 Rain Series",
@@ -2995,7 +3033,7 @@ class PlotRes1D(object):
             direction="Output"
         )
         stop_updating.enabled = False  # Hides it from the UI
-        
+
         date_filter = arcpy.Parameter(
             displayName="Filter results to these dates (StartDate - EndDate)",
             name="date_filter",
@@ -3033,74 +3071,183 @@ class PlotRes1D(object):
             direction="Input"
         )
 
+        display_accumulated = arcpy.Parameter(
+            displayName="Display Accumulated Discharge in the legend",
+            name="display_accumulated",
+            datatype="GPBoolean",
+            parameterType="Optional",
+            direction="Input"
+        )
+        display_accumulated.value = True
+        display_accumulated.category = "Additional Settings"
 
-        parameters = [manhole_layer, pipe_layer, result_files, stop_updating, date_filter, step_every, font_size]
+        node_quantity_type = arcpy.Parameter(
+            displayName="Node Quantity Type",
+            name="node_quantity_type",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input"
+        )
+
+        node_quantity_type.filter.type = "ValueList"
+        node_quantity_type.filter.list = ["WaterLevel", "WaterVolume", "WaterFlowRateAboveGround", "WaterVolumeAboveGround"]
+        node_quantity_type.value = "WaterLevel"
+        node_quantity_type.category = "Additional Settings"
+
+        link_quantity_type = arcpy.Parameter(
+            displayName="Reach Quantity Type",
+            name="reach_quantity_type",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input"
+        )
+
+        link_quantity_type.filter.type = "ValueList"
+        link_quantity_type.filter.list = ["Discharge", "FlowVelocity"]
+        link_quantity_type.value = "Discharge"
+        link_quantity_type.category = "Additional Settings"
+
+        catchment_quantity_type = arcpy.Parameter(
+            displayName="Catchment Quantity Type",
+            name="catchment_quantity_type",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input",
+            multiValue=True
+        )
+
+        catchment_quantity_type.filter.type = "ValueList"
+        catchment_quantity_type.filter.list = ["TotalRunOff", "NetRainfall", "InitialLossStorage"]
+        catchment_quantity_type.value = ["TotalRunOff", "NetRainfall"]
+        catchment_quantity_type.category = "Additional Settings"
+
+        aggregate_hourly = arcpy.Parameter(
+            displayName="Aggregate rainfall to hourly",
+            name="aggregate_hourly",
+            datatype="GPBoolean",
+            parameterType="Required",
+            category = "Additional Settings",
+            direction="Input"
+        )
+        aggregate_hourly.value = True
+
+        parameters = [manhole_layer, pipe_layers, catchment_layer, result_files, stop_updating, date_filter, step_every, font_size, display_accumulated, node_quantity_type, link_quantity_type, aggregate_hourly, catchment_quantity_type]
         return parameters
 
     def isLicensed(self):
         return True
 
     def updateParameters(self, parameters):
-        if parameters[2].Values:
-            parameters[2].Value = [str(value).replace('"','') for value in parameters[2].Values]
+        (
+            manhole_layer,
+            pipe_layers,
+            catchment_layer,
+            result_files,
+            stop_updating,
+            date_filter,
+            step_every,
+            font_size,
+            display_accumulated,
+            node_quantity_type,
+            link_quantity_type,
+            aggregate_hourly,
+            catchment_quantity_type,
+        ) = parameters
 
-        if not parameters[3].Value:
-            parameters[3].Value = True
+        if result_files.Values:
+            result_files.Value = [str(value).replace('"', '') for value in result_files.Values]
+
+        if not stop_updating.Value:
+            stop_updating.Value = True
+
             if arcgis_pro:
-                # Reference the active map in the current project
                 aprx = arcpymapping.ArcGISProject("CURRENT")
                 map_view = aprx.activeMap
 
-                # List layers with selected features
-                layers = None
+                point_layer = None
                 for layer in map_view.listLayers():
                     try:
                         if layer.getSelectionSet() and arcpy.Describe(layer).shapeType == "Point":
-                            layers = layer.longName
+                            point_layer = layer.longName
                             break
                     except:
                         pass
             else:
                 mxd = arcpy.mapping.MapDocument("CURRENT")
-                df = arcpy.mapping.ListDataFrames(mxd)[0]
-                layers = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if
-                          lyr.getSelectionSet() if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Point'][0]
+                point_layer = [
+                    lyr.longName
+                    for lyr in arcpy.mapping.ListLayers(mxd)
+                    if lyr.getSelectionSet()
+                       and arcpy.Describe(lyr).shapeType == "Point"
+                ][0]
 
-            if layers and not parameters[0].ValueAsText and not parameters[0].altered:
-                parameters[0].value = layers
+            if point_layer and not manhole_layer.ValueAsText and not manhole_layer.altered:
+                manhole_layer.value = point_layer
 
             if arcgis_pro:
-                # Reference the active map in the current project
-                aprx = arcpymapping.ArcGISProject("CURRENT")
-                map_view = aprx.activeMap
+                polyline_layers = []
 
-                # List layers with selected features
-                layers = None
                 for layer in map_view.listLayers():
                     try:
                         if layer.getSelectionSet() and arcpy.Describe(layer).shapeType == "Polyline":
-                            layers = layer.longName
-                            break
+                            polyline_layers.append(layer.longName)
                     except:
                         pass
             else:
                 mxd = arcpy.mapping.MapDocument("CURRENT")
-                df = arcpy.mapping.ListDataFrames(mxd)[0]
-                layers = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if
-                          lyr.getSelectionSet() if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'][0]
+                polyline_layers = [
+                    lyr.longName
+                    for lyr in arcpy.mapping.ListLayers(mxd)
+                    if lyr.getSelectionSet()
+                       and arcpy.Describe(lyr).shapeType == "Polyline"
+                ]
 
-            if layers and not parameters[1].ValueAsText:
-                parameters[1].value = layers
-            for parameter in [parameters[0], parameters[1]]:
+            if polyline_layers and not pipe_layers.ValueAsText:
+                pipe_layers.value = "; ".join(polyline_layers)
+
+            for parameter in [manhole_layer, pipe_layers]:
                 if parameter.ValueAsText:
-                    if not parameters[2].value and ".gdb" in parameter.value.dataSource:
-                        metadata_filepath = os.path.join(os.path.dirname(parameter.value.dataSource), "metadata")
-                        # parameters[1].Value = [metadata_filepath]
-                        if arcpy.Exists(metadata_filepath):
-                            res1d_filepath = [row[0] for row in arcpy.da.SearchCursor(metadata_filepath, ["res1d_path"])][0]
-                            if arcpy.Exists(res1d_filepath):
-                                parameters[2].Value = [res1d_filepath]
+                    if not result_files.value and ".gdb" in parameter.ValueAsText:
+                        metadata_filepath = os.path.join(
+                            os.path.dirname(parameter.value.dataSource),
+                            "metadata",
+                        )
 
+                        if arcpy.Exists(metadata_filepath):
+                            res1d_filepath = next(
+                                arcpy.da.SearchCursor(metadata_filepath, ["res1d_path"])
+                            )[0]
+
+                            if arcpy.Exists(res1d_filepath):
+                                result_files.Value = [res1d_filepath]
+
+        dfs0_selected = (
+                result_files.values
+                and any(
+            str(value).lower().endswith(".dfs0")
+            for value in result_files.values
+        )
+        )
+
+        # Only enable hourly aggregation for dfs0 input
+        aggregate_hourly.enabled = dfs0_selected
+
+        # User enters a space to trigger automatic result-file selection
+        if (
+                result_files.ValueAsText
+                and result_files.ValueAsText.split(";")[0].lower() == "s"
+        ):
+            layer_folder = get_first_layer_folder(
+                [manhole_layer, pipe_layers, catchment_layer]
+            )
+
+            if layer_folder:
+                res1d_files = find_res1d_files(layer_folder)
+                if res1d_files:
+                    selected_files = select_res1d_files(res1d_files)
+
+                    if selected_files:
+                        result_files.Value = selected_files
         return
 
     def updateMessages(self, parameters):  # optional
@@ -3108,58 +3255,34 @@ class PlotRes1D(object):
         return
 
     def execute(self, parameters, messages):
+        # ------------------------------------------------------------------
+        # Parameters
+        # ------------------------------------------------------------------
         manhole_layer = parameters[0].ValueAsText
-        pipe_layer = parameters[1].ValueAsText
-        # dfs0_file = parameters[3].ValueAsText
-        date_filter = parameters[4].ValueAsText
-        step_every = parameters[5].Value
-        font_size = parameters[6].Value
+        pipe_layers = parameters[1].Values
+        catchment_layer = parameters[2].ValueAsText
+        result_files = [f.replace("'", "") for f in parameters[3].ValueAsText.split(";")] if parameters[
+            3].ValueAsText else None
+        # dfs0_file           = parameters[3].ValueAsText
+        date_filter = parameters[5].ValueAsText
+        step_every = parameters[6].Value
+        font_size = parameters[7].Value
+        display_accumulated = parameters[8].Value
+        node_quantity_type = parameters[9].ValueAsText
+        link_quantity_type = parameters[10].ValueAsText
+        aggregate_hourly = parameters[11].Value
+        catchment_quantity_types = parameters[12].valueAsText.split(";")
 
-        if date_filter:
-            # import dateparser
-
-            def convertDate(date_str):
-                date_str = date_str.strip()
-                print(date_str)
-
-                # Special case: only year
-                if date_str.isdigit() and len(date_str) == 4:
-                    return datetime.datetime(int(date_str), 1, 1)
-
-                formats = [
-                    "%d-%m-%Y",
-                    "%d/%m/%Y",
-                    "%d.%m.%Y",
-                    "%d-%m-%y",
-                    "%d/%m/%y",
-                    "%d.%m.%y",
-                    "%d-%m",  # Assume current year
-                    "%d/%m",
-                    "%d.%m",
-                    "%Y-%m-%d",
-                ]
-
-                for fmt in formats:
-                    try:
-                        parsed = datetime.datetime.strptime(date_str, fmt)
-                        # If no year was provided (default is 1900), use current year
-                        if parsed.year == 1900:
-                            parsed = parsed.replace(year=datetime.now().year)
-                        return parsed
-                    except ValueError:
-                        continue
-
-                raise ValueError(f"Failed to interpret date: {date_str}")
-
-            time_filter = convertDate(date_filter.split(" - ")[0]), convertDate(date_filter.split(" - ")[1])
-
-            arcpy.AddMessage(
-                f"Filtering to Start: {time_filter[0].strftime('%Y-%m-%d %H:%M:%S')}, End: {time_filter[1].strftime('%Y-%m-%d %H:%M:%S')}")
-        else:
-            time_filter = None
-
-        arcpy.AddMessage( parameters[2].ValueAsText.split(";") )
-        result_files = [f.replace("'", "") for f in parameters[2].ValueAsText.split(";")] if parameters[2].ValueAsText else None
+        # ------------------------------------------------------------------
+        # Imports (consolidated)
+        # ------------------------------------------------------------------
+        import matplotlib
+        matplotlib.use("TkAgg")
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as dates
+        import pandas as pd
+        import tkinter as tk
+        from tkinter.simpledialog import askstring
 
         libs = import_or_install(["mikeio1d"])
         mikeio1d = libs["mikeio1d"]
@@ -3168,185 +3291,687 @@ class PlotRes1D(object):
         QueryDataNode = res1d.QueryDataNode
         QueryDataReach = res1d.QueryDataReach
         QueryDataStructure = res1d.QueryDataStructure
+        QueryDataCatchment = res1d.QueryDataCatchment
 
+        # mikeio only needed if a .dfs0 file is provided
+        mikeio = None
+        if result_files and any(".dfs0" in f for f in result_files):
+            mikeio = import_or_install(["mikeio"])["mikeio"]
+
+        # ------------------------------------------------------------------
+        # Helper functions (hoisted out of loops)
+        # ------------------------------------------------------------------
+        def convertDate(date_str):
+            date_str = date_str.strip()
+            print(date_str)
+            # Special case: only year
+            if date_str.isdigit() and len(date_str) == 4:
+                return datetime.datetime(int(date_str), 1, 1)
+            formats = [
+                "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y",
+                "%d-%m-%y", "%d/%m/%y", "%d.%m.%y",
+                "%d-%m", "%d/%m", "%d.%m",  # assume current year
+                "%Y-%m-%d",
+            ]
+            for fmt in formats:
+                try:
+                    parsed = datetime.datetime.strptime(date_str, fmt)
+                    if parsed.year == 1900:
+                        parsed = parsed.replace(year=datetime.now().year)
+                    return parsed
+                except ValueError:
+                    continue
+            raise ValueError(f"Failed to interpret date: {date_str}")
+
+        def insert_gaps(series, gap_threshold: float):
+            """
+            From a pandas Series with a DatetimeIndex, return x and y arrays where
+            NaNs are inserted after large time gaps.
+            """
+            idx = series.index
+            values = series.values
+            idx_seconds = idx.view(np.int64) / 1e9
+            diffs = np.diff(idx_seconds)
+            gap_locs = np.where(diffs > gap_threshold)[0]
+            x_out, y_out = [], []
+            for i in range(len(series)):
+                x_out.append(idx[i])
+                y_out.append(values[i])
+                if i in gap_locs:
+                    x_out.append(np.datetime64('NaT'))
+                    y_out.append(np.nan)
+            return np.array(x_out), np.array(y_out)
+
+        def y_formatter(x, pos):
+            # Max 3 significant digits, no scientific notation, no trailing zeros
+            s = f"{x:.3f}".rstrip('0').rstrip('.')
+            if s == '-0':
+                s = '0'
+            return s
+
+        # ------------------------------------------------------------------
+        # Time filter
+        # ------------------------------------------------------------------
+        if date_filter:
+            time_filter = convertDate(date_filter.split(" - ")[0]), convertDate(date_filter.split(" - ")[1])
+            arcpy.AddMessage(
+                f"Filtering to Start: {time_filter[0].strftime('%Y-%m-%d %H:%M:%S')}, "
+                f"End: {time_filter[1].strftime('%Y-%m-%d %H:%M:%S')}")
+        else:
+            time_filter = None
+
+        # ------------------------------------------------------------------
+        # Collect selected MUIDs
+        # ------------------------------------------------------------------
         manholes_selected = []
-        pipes_selected = []
         if manhole_layer:
             manholes_selected = [row[0] for row in arcpy.da.SearchCursor(manhole_layer, ["MUID"])]
 
-        if pipe_layer:
-            pipes_selected = [row[0] for row in arcpy.da.SearchCursor(pipe_layer, ["MUID"])]
+        pipes_selected = []
+        if pipe_layers:
+            seen = set()  # avoid duplicates
+            for pipe_layer in pipe_layers:
+                if not pipe_layer:
+                    continue
+                fields = set([f.name.lower() for f in arcpy.ListFields(pipe_layer)])
+                is_weir = "crestlevel" in fields
+                is_orifice = "maxgatelevel" in fields
+                with arcpy.da.SearchCursor(pipe_layer, ["MUID"]) as cursor:
+                    for row in cursor:
+                        muid = row[0]
+                        if is_weir:
+                            muid = "Weir:{}".format(muid)
+                        elif is_orifice:
+                            muid = "Orifice:{}".format(muid)
+                        if muid not in seen:
+                            seen.add(muid)
+                            pipes_selected.append(muid)
 
-        import matplotlib
-        matplotlib.use("TkAgg")
-        import matplotlib.pyplot as plt
-        # Parameters
-        subplots_count = 2 if manholes_selected and pipes_selected else 1
-        fig_width_cm = 15.7  # Total figure width in centimeters
-        fig_width_in = fig_width_cm / 2.54  # Convert to inches
-        aspect_ratio = subplots_count  # Adjust for desired height (e.g., 0.6 for landscape-like)
+        catchments_selected = []
+        if catchment_layer:
+            catchments_selected = [row[0] for row in arcpy.da.SearchCursor(catchment_layer, ["MUID"])]
 
-        # Calculate figure height based on aspect ratio and number of rows (1 row here)
-        fig_height_in = fig_width_in * aspect_ratio
-
-        # Create subplots
-        fig, axs = plt.subplots(subplots_count, 1, figsize=(fig_width_in, fig_height_in), dpi=300, sharex = True)
-
-        # If only one subplot, make axs iterable
-        if subplots_count == 1:
-            axs = [axs]
-
-        manhole_queries = {muid: QueryDataNode("WaterLevel", muid,0) for muid in manholes_selected}
-        pipe_queries = {muid: QueryDataReach("Discharge", muid,0) for muid in pipes_selected}
-        queries = {**manhole_queries, **pipe_queries}
-
-        arcpy.SetProgressor("default", "Reading res1d")
-
-        cmap = plt.cm.get_cmap('tab10' if arcgis_pro else "Set1")
-        linestyles = ['-', '--', '-.', ':',
-                      (0, (1, 1)),
-                      (0, (5, 5)),
-                      (0, (3, 5, 1, 5)),
-                      (0, (3, 1, 1, 1))]
-
+        # ------------------------------------------------------------------
+        # Figure setup
+        # ------------------------------------------------------------------
+        plt.close("all")
         plt.rcParams.update({'font.size': float(font_size)})
         plt.rcParams['font.family'] = 'Verdana'
         plt.rcParams['svg.fonttype'] = 'none'
-
         arcpy.AddMessage(font_size)
-        import matplotlib.dates as dates
 
+        # ------------------------------------------------------------------
+        # Decide subplot layout: manholes (top) -> pipes -> catchments (bottom)
+        # ------------------------------------------------------------------
+        row_of = {}
+        next_row = 0
+        if manholes_selected:
+            row_of["manholes"] = next_row;
+            next_row += 1
+        if pipes_selected:
+            row_of["pipes"] = next_row;
+            next_row += 1
+        if catchments_selected:
+            row_of["catchments"] = next_row;
+            next_row += 1
+        subplots_count = max(next_row, 1)
+
+        fig_width_cm = 15.7
+        fig_width_in = fig_width_cm / 2.54
+        aspect_ratio = subplots_count
+        fig_height_in = fig_width_in * aspect_ratio
+        fig, axs = plt.subplots(subplots_count, 1,
+                                figsize=(fig_width_in, fig_height_in),
+                                dpi=300, sharex=True)
+        if subplots_count == 1:
+            axs = [axs]
+        fig = axs[0].figure
+
+        cmap = plt.get_cmap('tab10' if arcgis_pro else "Set1")
+        linestyles = ['-', '--', '-.', ':',
+                      (0, (1, 1)), (0, (5, 5)),
+                      (0, (3, 5, 1, 5)), (0, (3, 1, 1, 1))]
+
+        # ------------------------------------------------------------------
+        # Axis labels (set once, not per file)
+        # ------------------------------------------------------------------
+        # ------------------------------------------------------------------
+        # Axis labels
+        # ------------------------------------------------------------------
+        if "manholes" in row_of:
+            if node_quantity_type.lower() == "watervolume":
+                axs[row_of["manholes"]].set_ylabel(u"Volumen [m³]")
+            else:
+                axs[row_of["manholes"]].set_ylabel(u"Stuvningsniveau [m]")
+
+        if "pipes" in row_of:
+            if link_quantity_type.lower() == "discharge":
+                axs[row_of["pipes"]].set_ylabel(u"Vandføring [L/s]")
+            elif link_quantity_type.lower() == "flowvelocity":
+                axs[row_of["pipes"]].set_ylabel(u"Vandhastighed [m/s]")
+
+        if "catchments" in row_of:
+            catchment_ax = axs[row_of["catchments"]]
+
+            if "TotalRunOff" in catchment_quantity_types:
+                catchment_ax.set_ylabel(u"Afstrømning [L/s]")
+
+            if "NetRainfall" in catchment_quantity_types:
+                catchment_ax_nr = catchment_ax.twinx()
+                catchment_ax_nr.set_ylabel(u"Nettonedbør [mm/h]")
+
+        # ------------------------------------------------------------------
+        # Build queries
+        # ------------------------------------------------------------------
+        manhole_queries = {muid: QueryDataNode(node_quantity_type, muid, 0) for muid in manholes_selected}
+        pipe_queries = {muid: QueryDataReach(link_quantity_type, muid, 0) for muid in pipes_selected}
+        network_queries = {**manhole_queries, **pipe_queries}
+        catchment_queries_TR = {}
+
+        catchment_queries_NR = {}
+        if "NetRainfall" in catchment_quantity_types:
+            catchment_queries_NR = {muid + "_NR": QueryDataCatchment("NetRainfall", muid, 0) for muid in catchments_selected}
+        if "TotalRunOff" in catchment_quantity_types:
+            catchment_queries_TR = {muid + "_TR": QueryDataCatchment("TotalRunOff", muid, 0) for muid in
+                                    catchments_selected}
+        if catchment_quantity_types[0] not in ["NetRainfall", "TotalRunOff"]:
+            runoff_queries = {muid + "": QueryDataCatchment(catchment_quantity_types[0], muid, 0) for muid in
+                                    catchments_selected}
+        else:
+            runoff_queries = {**catchment_queries_TR, **catchment_queries_NR}
+
+        arcpy.SetProgressor("default", "Reading res1d")
+        plotted_lines = []
+
+        # ------------------------------------------------------------------
+        # Helper: robust read that falls back to per-query reads on failure
+        # ------------------------------------------------------------------
+        def _safe_read(res_obj, query_dict):
+            try:
+                return res_obj.read([query_dict[k] for k in query_dict])
+            except Exception as e:
+                arcpy.AddWarning(e)
+                dfs = []
+                for k in query_dict:
+                    try:
+                        dfs.append(res_obj.read(query_dict[k]))
+                    except Exception:
+                        pass
+                return pd.concat(dfs, axis=1) if dfs else pd.DataFrame()
+
+        def _make_label(col, result_file, multi_file):
+            parts = col.split(":")
+            name = parts[2] if len(parts) > 3 else parts[1]
+            if multi_file:
+                tag = (os.path.basename(result_file)
+                       .replace("Base", "")
+                       .replace(".res1d", "")
+                       .replace("Default_Network_HD", ""))
+                return "%s (%s)" % (name, tag)
+            return name
+
+        # ------------------------------------------------------------------
+        # Read result files & plot
+        # ------------------------------------------------------------------
         for result_file_i, result_file in enumerate(result_files):
+            linestyle = linestyles[result_file_i % len(linestyles)]
+            multi_file = len(result_files) > 1
+
             if ".res1d" in result_file:
-                res1d = Res1D(result_file, nodes = manholes_selected, reaches = pipes_selected, time = time_filter, step_every = step_every if step_every > 1 else None, quantities = ["WaterLevel", "Discharge"], derived_quantities = [])
-                try:
-                    result_df = res1d.read([queries[key] for key in queries])
-                except Exception as e:
-                    import pandas as pd
-                    arcpy.AddWarning(e)
-                    dfs = []
-                    for query in queries:
-                        try:
-                            dfs.append(res1d.read(queries[query]))
-                        except:
-                            pass
-                    result_df = pd.concat(dfs, axis=1)
 
-                columns = result_df.columns
-                # arcpy.AddMessage(queries)
-                col_i_WL = 0
-                col_i_D = 0
+                # --------------------------------------------------------------
+                # Probe file
+                # --------------------------------------------------------------
+                res_probe = res1d.Res1D(
+                    result_file,
+                    nodes=["none"],
+                    reaches=["none"],
+                    step_every=100000000,
+                    quantities=[],
+                    derived_quantities=[]
+                )
 
-                discharge_row = 1 if manholes_selected else 0
-                axs[0].set_ylabel("Stuvningsniveau [m]")
-                if pipes_selected:
-                    axs[discharge_row].set_ylabel(u"Vandføring [L/s]")
+                is_runoff = "NetRainfall" in res_probe.quantities
 
-                arcpy.SetProgressor("step", "Processing queries...", 0, len(columns), 1)
+                # IMPORTANT: release the probe before opening the file again
+                del res_probe
+                import gc
+                gc.collect()
 
-                linestyle = linestyles[result_file_i % len(linestyles)]
+                # --------------------------------------------------------------
+                # RUNOFF
+                # --------------------------------------------------------------
+                if is_runoff:
+                    if not catchments_selected:
+                        continue
 
-                def insert_gaps(series, gap_threshold: float):
-                    """
-                    From a pandas Series with a DatetimeIndex, return x and y arrays where
-                    NaNs are inserted after large time gaps.
+                    res = Res1D(
+                        result_file,
+                        catchments=catchments_selected,
+                        time=time_filter,
+                        step_every=step_every if step_every > 1 else None,
+                        derived_quantities=[]
+                    )
 
-                    Parameters:
-                        series (pd.Series): Time series with DatetimeIndex.
-                        gap_threshold_seconds (float): Max allowed gap in seconds.
+                    result_df = _safe_read(res, runoff_queries)
 
-                    Returns:
-                        x (np.ndarray): Index values with NaNs inserted (as datetime64).
-                        y (np.ndarray): Series values with NaNs inserted.
-                    """
-                    idx = series.index
-                    values = series.values
+                    # We no longer need the Res1D object
+                    del res
+                    gc.collect()
 
-                    # Convert datetime to seconds since epoch for diffing
-                    idx_seconds = idx.view(np.int64) / 1e9
-                    diffs = np.diff(idx_seconds)
-                    gap_locs = np.where(diffs > gap_threshold)[0]
+                    if result_df.empty:
+                        continue
 
-                    x_out = []
-                    y_out = []
+                    # ... rest of your runoff code ...
 
-                    for i in range(len(series)):
-                        x_out.append(idx[i])
-                        y_out.append(values[i])
-                        if i in gap_locs:
-                            x_out.append(np.datetime64('NaT'))
-                            y_out.append(np.nan)
+                # --------------------------------------------------------------
+                # NETWORK
+                # --------------------------------------------------------------
+                else:
+                    if not network_queries:
+                        continue
 
-                    return np.array(x_out), np.array(y_out)
+                    res_net = Res1D(
+                        result_file,
+                        nodes=manholes_selected,
+                        reaches=pipes_selected,
+                        time=time_filter,
+                        step_every=step_every if step_every > 1 else None,
+                        quantities=[node_quantity_type, link_quantity_type],
+                        derived_quantities=[]
+                    )
 
-                i = 0
-                for col in columns:
-                    arcpy.SetProgressorLabel(f"Plotting result {i}/{len(columns)}")
-                    arcpy.SetProgressorPosition(i)
-                    i += 1
+                    result_df = _safe_read(res_net, network_queries)
 
-                    if len(result_files) > 1:
-                        label = "%s (%s)" % (col.split(":")[1], os.path.basename(result_file).replace("Base", "").replace(".res1d","").replace("Default_Network_HD",""))
-                    else:
-                        label = "%s" % (col.split(":")[1])
+                    # We no longer need the Res1D object
+                    del res_net
+                    gc.collect()
 
-                    x, y = insert_gaps(result_df[col],
-                                       gap_threshold=30 * 60)  # for datetime index, 30 min gap
-                    arcpy.AddMessage(col)
-                    if "waterlevel" in col.split(":")[0].lower():
-                        axs[0].plot(x, y,  label = label, color = cmap(col_i_WL % 10), linestyle = linestyle, linewidth=0.8)
-                        col_i_WL += 1
+                    if result_df.empty:
+                        continue
 
-                    if "discharge" in col.split(":")[0].lower():
-                        axs[discharge_row].plot(x, y*1e3, label = label, color=cmap(col_i_D % 10), linestyle = linestyle, linewidth=0.8)
-                        col_i_D += 1
-                        arcpy.AddMessage(col_i_D)
+                    col_i_WL = 0
+                    col_i_D = 0
+                    arcpy.SetProgressor("step", "Processing network queries...",
+                                        0, len(result_df.columns), 1)
+                    for i, col in enumerate(result_df.columns):
+                        arcpy.SetProgressorLabel(f"Plotting result {i}/{len(result_df.columns)}")
+                        arcpy.SetProgressorPosition(i)
+                        label = _make_label(col, result_file, multi_file)
+                        x, y = insert_gaps(result_df[col], gap_threshold=30 * 60)
+                        qtype = col.split(":")[0].lower()
 
+                        # Manhole (water level)
+                        if manholes_selected and node_quantity_type.lower() in qtype:
+                            row = row_of["manholes"]
+                            line, = axs[row].plot(x, y, label=label,
+                                                  color=cmap(col_i_WL % 10),
+                                                  linestyle=linestyle, linewidth=0.8, picker=5)
+                            line.my_label = label
+                            line.my_column = col
+                            line.my_result_file = os.path.basename(result_file)
+                            line.my_data = result_df[col].copy()
+                            plotted_lines.append(line)
+                            col_i_WL += 1
+
+                        # Pipe (discharge or velocity)
+                        if pipes_selected and link_quantity_type.lower() in qtype:
+                            row = row_of["pipes"]
+                            if display_accumulated and link_quantity_type.lower() == "discharge":
+                                mask = (~pd.isna(x)) & (~pd.isna(y))
+                                volume = np.trapezoid(
+                                    y[mask],
+                                    (pd.to_datetime(x[mask]) - pd.to_datetime(x[mask])[0]).total_seconds()
+                                )
+                                label += " (%1.1f m³)" % volume
+                            y_plot = y * 1e3 if link_quantity_type.lower() == "discharge" else y
+                            line, = axs[row].plot(x, y_plot, label=label,
+                                                  color=cmap(col_i_D % 10),
+                                                  linestyle=linestyle, linewidth=0.8, picker=5)
+                            line.my_label = label
+                            line.my_column = col
+                            line.my_result_file = os.path.basename(result_file)
+                            line.my_data = result_df[col].copy()
+                            plotted_lines.append(line)
+                            col_i_D += 1
+
+            # ------------------------------------------------------------------
+            # DFS0 (rainfall overlay on every subplot)
+            # ------------------------------------------------------------------
             elif ".dfs0" in result_file:
                 for ax in axs:
-                    libs = import_or_install(["mikeio"])
-                    mikeio = libs["mikeio"]
                     xlim = ax.get_xlim()
                     dfs0 = mikeio.read(result_file).to_dataframe()
+                    if aggregate_hourly:
+                        dfs0 = dfs0.resample("h").sum() / 1e3 * 60
                     ax2 = ax.twinx()
-                    ax2.step(dfs0.index, dfs0.values, 'k', linewidth = 0.5, label = u"Nedbør")
-                    ax2.set_ylabel(r"Regnintensitet [µm/s]")
+                    ax2.step(dfs0.index, dfs0.values, 'k', linewidth=0.5, label=u"Nedbør")
+                    if aggregate_hourly:
+                        ax2.set_ylabel(u"Nedbør [mm]")
+                    else:
+                        ax2.set_ylabel(r"Regnintensitet [µm/s]")
                     ax.set_xlim(xlim)
 
         arcpy.SetProgressor("default", "Showing Plot")
 
-
+        # ------------------------------------------------------------------
+        # Axis formatting + legends
+        # ------------------------------------------------------------------
+        total_queries = len(network_queries) + len(runoff_queries)
         for subplot_i in range(subplots_count):
-            if len(queries)<9:
-                axs[subplot_i].legend()
+            leg = axs[subplot_i].legend()
+            if total_queries > 6:
+                leg.set_visible(False)
             locator = dates.AutoDateLocator(interval_multiples=True)
             axs[subplot_i].xaxis.set_major_locator(locator)
-
-
-
-            def y_formatter(x, pos):
-                # Format float with max 3 significant digits, no scientific notation
-                # Use format specifier '.3f' but strip trailing zeros smartly
-                s = f"{x:.3f}".rstrip('0').rstrip('.')
-                # For very small numbers close to zero, just show 0
-                if s == '-0':
-                    s = '0'
-                return s
-
             axs[subplot_i].yaxis.set_major_formatter(FuncFormatter(y_formatter))
-            axs[subplot_i].yaxis.set_major_locator(MaxNLocator(nbins=6))  # max 6 ticks on y-axis
-
+            axs[subplot_i].yaxis.set_major_locator(MaxNLocator(nbins=6))
             for label in axs[subplot_i].get_xticklabels():
                 label.set_rotation(45)
                 label.set_horizontalalignment('right')
-
             axs[subplot_i].grid(which='major', linestyle='--', alpha=0.7)
 
-        # axs[1].legend()
         plt.tight_layout()
         fig.autofmt_xdate()
+
+        # ------------------------------------------------------------------
+        # Interactive plot functionality
+        # ------------------------------------------------------------------
+        selected_line = [None]
+        active_ax = [None]
+
+        # Collect all legends and make their texts pickable
+        legends = []
+        for ax in axs:
+            legend = ax.get_legend()
+            if legend is not None:
+                legends.append(legend)
+                for text in legend.get_texts():
+                    text.set_picker(True)
+
+        annot = axs[0].annotate("", xy=(0, 0), xytext=(10, 10), textcoords="offset points",
+                                bbox=dict(boxstyle="round", fc="white"),
+                                arrowprops=dict(arrowstyle="->"))
+        annot.set_visible(False)
+
+        vertical_lines = []
+
+        def update_vertical_line(x):
+            """Move/create a vertical dashed black line at x across all subplots."""
+            global vertical_lines
+
+            # Remove existing vertical lines
+            for line in vertical_lines:
+                line.remove()
+
+            vertical_lines = []
+
+            # Add a line to every subplot
+            for ax in fig.axes:
+                line = ax.axvline(
+                    x=x,
+                    color="black",
+                    linestyle="--",
+                    linewidth=0.8,
+                )
+                vertical_lines.append(line)
+
+            fig.canvas.draw_idle()
+
+        def add_horizontal_line():
+            """Add a horizontal dashed black line to the active subplot."""
+            ax = active_ax[0]
+
+            if ax is None:
+                arcpy.AddWarning("Move the mouse over a plot before pressing d.")
+                return
+
+            root = tk.Tk()
+            root.withdraw()
+
+            value = askstring(
+                "Add horizontal line",
+                "Y-value:",
+            )
+
+            if value is None:
+                root.destroy()
+                return
+
+            try:
+                value = float(value)
+            except ValueError:
+                root.destroy()
+                arcpy.AddWarning("Please enter a numeric value.")
+                return
+
+            # Ask whether to annotate the line
+            annotation = askstring(
+                "Annotate horizontal line",
+                "Annotation (leave blank for none):",
+            )
+
+            root.destroy()
+
+            # Add the line
+            ax.axhline(
+                y=value,
+                color="black",
+                linestyle="--",
+                linewidth=0.8,
+                alpha=0.5,
+            )
+
+            # Add annotation if provided
+            if annotation:
+                x_min, x_max = ax.get_xlim()
+                x = x_min + (x_max - x_min) / 3
+
+                ax.text(
+                    x,
+                    value,
+                    annotation,
+                    ha="left",
+                    va="bottom",
+                    fontsize=font_size,
+                    color="black",
+                )
+
+            fig.canvas.draw_idle()
+            arcpy.AddMessage("Added horizontal line at y = %g." % value)
+
+        def on_mouse_move(event):
+            """Remember which subplot the mouse is currently over."""
+            if event.inaxes is not None:
+                active_ax[0] = event.inaxes
+
+        def clear_highlight():
+            """Remove line highlighting and annotation."""
+            selected_line[0] = None
+            annot.set_visible(False)
+            for line in plotted_lines:
+                line.set_alpha(1.0)
+                line.set_linewidth(0.8)
+            fig.canvas.draw_idle()
+
+        def copy_active_plot():
+            """Copy data belonging to the currently highlighted line."""
+            line = selected_line[0]
+            if line is None:
+                arcpy.AddWarning("Highlight a plot line before pressing c.")
+                return
+            if not hasattr(line, "my_data"):
+                arcpy.AddWarning("The highlighted plot has no data attached.")
+                return
+            series = line.my_data.copy()
+            column_name = line.my_label
+            if isinstance(series.index, pd.DatetimeIndex):
+                series.index = series.index.floor("s")
+            df_clipboard = series.to_frame(name=column_name)
+            try:
+                df_clipboard.to_clipboard(excel=True, index=True)
+                arcpy.AddMessage("Copied plot '%s' to clipboard." % column_name)
+            except Exception as e:
+                arcpy.AddWarning("Could not copy data to clipboard: %s" % e)
+
+        def on_pick(event):
+            # Clicked a legend label
+            if isinstance(event.artist, matplotlib.text.Text):
+                text = event.artist
+                root = tk.Tk();
+                root.withdraw()
+                new_label = askstring("Rename legend label", "New label:",
+                                      initialvalue=text.get_text())
+                root.destroy()
+                if new_label:
+                    text.set_text(new_label)
+                    fig.canvas.draw_idle()
+                return
+
+            # Clicked a plotted line
+            picked = event.artist
+            if not hasattr(picked, "my_label"):
+                return
+            selected_line[0] = picked
+            
+            if len(event.ind) > 0:
+                point_i = event.ind[0]
+                x = picked.get_xdata()[point_i]
+                y = picked.get_ydata()[point_i]
+
+                # Update annotation on the clicked plot
+                annot.xy = (x, y)
+                annot.set_text(f"{picked.my_label}\ny = {y:.2f}")
+                annot.set_visible(True)
+
+                # -------------------------------------------------
+                # VERTICAL LINE ACROSS ALL SUBPLOTS
+                # -------------------------------------------------
+
+                # Remove previous vertical reference lines
+                for ax in fig.axes:
+                    for existing_line in ax.lines:
+                        if getattr(existing_line, "_is_vertical_reference", False):
+                            existing_line.remove()
+
+                # Add new vertical line to every subplot
+                for ax in fig.axes:
+                    vline = ax.axvline(
+                        x=x,
+                        color="black",
+                        linestyle="--",
+                        linewidth=0.8,
+                        zorder=0,
+                        alpha = 0.5,
+                    )
+
+                    # Mark it so we can find/remove it next time
+                    vline._is_vertical_reference = True
+
+            for line in plotted_lines:
+                line.set_alpha(0.15)
+                line.set_linewidth(0.8)
+            picked.set_alpha(1.0)
+            picked.set_linewidth(2.5)
+            fig.canvas.draw_idle()
+
+        def keypress(event):
+            key = event.key if event.key else ""
+
+            # T = Change figure size
+            if key.lower() == "t":
+                root = tk.Tk();
+                root.withdraw()
+                current_w = fig.get_figwidth() * 2.54
+                current_h = fig.get_figheight() * 2.54
+                size = askstring("Change figure size", "Enter width x height (cm):",
+                                 initialvalue=f"{current_w:.1f} x {current_h:.1f}")
+                root.destroy()
+                if size:
+                    try:
+                        w_cm, h_cm = map(float, size.split("x"))
+                        fig.set_size_inches(w_cm / 2.54, h_cm / 2.54, forward=True)
+                        fig.canvas.draw_idle()
+                    except ValueError:
+                        arcpy.AddWarning("Format should be width x height in cm, e.g. 15.7 x 10")
+
+            # E = Toggle ALL legends
+            elif key == "e":
+                new_visible = not legends[0].get_visible()
+
+                for legend in legends:
+                    legend.set_visible(new_visible)
+
+                    if new_visible:
+                        # Remove max values when showing the legend normally
+                        for text in legend.get_texts():
+                            label = text.get_text()
+                            if " (" in label:
+                                text.set_text(label.rsplit(" (", 1)[0])
+
+                fig.canvas.draw_idle()
+                arcpy.AddMessage(
+                    "Legends %s." % ("shown" if new_visible else "hidden")
+                )
+
+            elif key == "E":
+                ax = axs[subplot_i]
+    
+                legend = ax.get_legend()
+    
+                if legend:
+    
+                    for text, line in zip(legend.get_texts(), ax.get_lines()):
+    
+                        y = line.get_ydata()
+    
+                        if len(y):
+                            max_value = max(y)
+    
+                            text.set_text("%s (%.2f)" % (text.get_text(), max_value))
+    
+                    legend.set_visible(True)
+    
+                    fig.canvas.draw_idle()
+
+            # D = Add horizontal dashed line
+            elif key.lower() == "d":
+                add_horizontal_line()
+
+            # ESC = Clear highlighted line
+            elif key.lower() == "escape":
+                clear_highlight()
+
+            # C = Copy active plot data
+            elif key.lower() == "c":
+                copy_active_plot()
+
+        # ------------------------------------------------------------------
+        # Events
+        # ------------------------------------------------------------------
+        fig.canvas.mpl_connect("motion_notify_event", on_mouse_move)
+        fig.canvas.mpl_connect("key_press_event", keypress)
+        fig.canvas.mpl_connect("pick_event", on_pick)
+
+        # ------------------------------------------------------------------
+        # Shortcut information
+        # ------------------------------------------------------------------
+        arcpy.AddMessage("")
+        arcpy.AddMessage("=" * 60)
+        arcpy.AddMessage("INTERACTIVE PLOT SHORTCUTS")
+        arcpy.AddMessage("=" * 60)
+        arcpy.AddMessage("Click line  - Highlight line / show value")
+        arcpy.AddMessage("ESC         - Clear highlighted line")
+        arcpy.AddMessage("E           - Show/hide ALL legends")
+        arcpy.AddMessage("E           - Show/hide ALL legends and Display Max Value")
+        arcpy.AddMessage("C           - Copy data from active plot")
+        arcpy.AddMessage("T           - Change figure size")
+        arcpy.AddMessage("D           - Insert Horizontal Line")
+        arcpy.AddMessage("Click label - Rename legend label")
+        arcpy.AddMessage("=" * 60)
+        arcpy.AddMessage("")
+
         plt.show()
-        # time.sleep(10)
 
 
 class PlotRes1DLTS(object):
@@ -3364,7 +3989,7 @@ class PlotRes1DLTS(object):
             datatype="GPFeatureLayer",
             parameterType="Optional",
             direction="Input")
-        manhole_layer.filter.list = ["Point"]
+        manhole_layer.filtfaer.list = ["Point"]
 
         pipe_layer = arcpy.Parameter(
             displayName="Pipe feature layer",
@@ -3500,6 +4125,7 @@ class PlotRes1DLTS(object):
         QueryDataReach = res1d.QueryDataReach
         QueryDataStructure = res1d.QueryDataStructure
 
+
         manholes_selected = []
         pipes_selected = []
         if manhole_layer:
@@ -3608,7 +4234,7 @@ class PlotRes1DLTS(object):
         arcpy.SetProgressor("default", "Showing Plot")
 
         for subplot_i in range(subplots_count):
-            if len(queries) < 9:
+            if len(queries) < 6:
                 axs[subplot_i].legend()
             locator = dates.AutoDateLocator(interval_multiples=True)
             axs[subplot_i].xaxis.set_major_locator(locator)
@@ -3636,3 +4262,126 @@ class PlotRes1DLTS(object):
         fig.autofmt_xdate()
         plt.show()
         # time.sleep(10)
+
+import os
+import tkinter as tk
+from tkinter import ttk
+
+
+def find_res1d_files(folder):
+    """Find all .res1d files recursively below folder."""
+    res1d_files = []
+    for root, _, files in os.walk(folder):
+        for filename in files:
+            if filename.lower().endswith(".res1d"):
+                res1d_files.append(os.path.join(root, filename))
+
+    return sorted(res1d_files)
+
+
+def select_res1d_files(files):
+    """Show a Tkinter multi-select dialog and return selected files."""
+    if not files:
+        return []
+
+    root = tk.Tk()
+    root.title("Select Result Files")
+    root.geometry("600x500")
+
+    frame = ttk.Frame(root, padding=10)
+    frame.pack(fill="both", expand=True)
+
+    ttk.Label(
+        frame,
+        text="Select one or more .res1d files:"
+    ).pack(anchor="w", pady=(0, 5))
+
+    listbox = tk.Listbox(
+        frame,
+        selectmode=tk.EXTENDED,
+        width=80,
+    )
+    listbox.pack(side="left", fill="both", expand=True)
+
+    scrollbar = ttk.Scrollbar(
+        frame,
+        orient="vertical",
+        command=listbox.yview,
+    )
+    scrollbar.pack(side="right", fill="y")
+
+    listbox.configure(yscrollcommand=scrollbar.set)
+
+    # Keep full paths, but only display filenames
+    filenames = [os.path.basename(filepath) for filepath in files]
+
+    for filename in filenames:
+        listbox.insert(tk.END, filename)
+
+    selected_files = []
+
+    def accept():
+        selected_files.extend(
+            files[i]
+            for i in listbox.curselection()
+        )
+        root.destroy()
+
+    def cancel():
+        root.destroy()
+
+    button_frame = ttk.Frame(frame)
+    button_frame.pack(fill="x", pady=(10, 0))
+
+    ttk.Button(
+        button_frame,
+        text="OK",
+        command=accept,
+    ).pack(side="right", padx=(5, 0))
+
+    ttk.Button(
+        button_frame,
+        text="Cancel",
+        command=cancel,
+    ).pack(side="right")
+
+    root.mainloop()
+
+    return selected_files
+
+def get_first_layer_folder(layer_parameters):
+    """Return the folder containing the first populated layer."""
+
+    for parameter in layer_parameters:
+        if not parameter.ValueAsText:
+            continue
+
+        try:
+            data_source = arcpy.Describe(parameter.ValueAsText).catalogPath
+        except Exception:
+            try:
+                data_source = parameter.value.dataSource
+            except Exception:
+                continue
+
+        if not data_source:
+            continue
+
+        data_source = os.path.normpath(data_source)
+
+        # File geodatabase or SQLite database:
+        # C:\...\Model.gdb\Manholes
+        # C:\...\Model.sqlite\msm_Link
+        lower = data_source.lower()
+
+        for extension in (".gdb", ".sqlite"):
+            index = lower.find(extension)
+
+            if index != -1:
+                database_path = data_source[:index + len(extension)]
+                return os.path.dirname(database_path)
+
+        # Shapefile / other file-based layer:
+        return os.path.dirname(data_source)
+
+    return None

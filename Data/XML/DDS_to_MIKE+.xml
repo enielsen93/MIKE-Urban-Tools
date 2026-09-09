@@ -705,7 +705,7 @@
                 </item>
               </TableNodeProperties>
             </TablePropertyValue>
-            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="FricNo" value="FricNo" tableNodeType="AssignmentItem">
+            <TablePropertyValue xsi:type="TablePropertyValueForUISerialization" property="FricNo" value="1" tableNodeType="AssignmentItem">
               <ChildAssginItems />
               <TableNodeProperties>
                 <item>
@@ -714,6 +714,14 @@
                   </key>
                   <value>
                     <anyType xsi:type="xsd:int">-1</anyType>
+                  </value>
+                </item>
+                <item>
+                  <key>
+                    <string>IsExpression</string>
+                  </key>
+                  <value>
+                    <anyType xsi:type="xsd:boolean">true</anyType>
                   </value>
                 </item>
               </TableNodeProperties>

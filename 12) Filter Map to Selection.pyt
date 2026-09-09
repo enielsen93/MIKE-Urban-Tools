@@ -2,6 +2,7 @@ import os
 import numpy as np
 import re
 import arcpy
+import tkinter
 
 if "mapping" in dir(arcpy):
     arcgis_pro = False
@@ -19,7 +20,7 @@ class Toolbox(object):
         self.alias = "Set Definition Query to Selection"
         self.canRunInBackground = True
         # List of tool classes associated with this toolbox
-        self.tools = [SetDefinitionQuery]
+        self.tools = [SetDefinitionQuery, SummarizeSelection, CopyInExpression]
 
 
 class SetDefinitionQuery(object):
@@ -154,9 +155,7 @@ class SetDefinitionQuery(object):
                     setLabelQuery(layer, specific_definition_query, append = append)
                 else:
                     oid_fieldname = arcpy.Describe(layer).OIDFieldName
-
-                    if "muid" in [field.name.lower() for field in arcpy.ListFields(layer)] and (
-                            hasattr(layer, "datasetName") and "CatchConLink" not in layer.datasetName):
+                    if "muid" in [field.name.lower() for field in arcpy.ListFields(layer)] and "CatchConLink" not in getattr(layer, "datasetName", ""):
                         new_definition_query = "muid %sIN ('%s')" % ("NOT " if remove_selection else "", "', '".join(
                             [row[0] for row in arcpy.da.SearchCursor(layer, ["muid"], where_clause="%s IN (%s)" % (
                             oid_fieldname, ", ".join([str(l) for l in layer.getSelectionSet()])))]))
@@ -186,8 +185,7 @@ class SetDefinitionQuery(object):
                     oid_fieldname = arcpy.Describe(layer).OIDFieldName
                     # arcpy.AddMessage([row for row in arcpy.da.SearchCursor(layer, ["muid"], where_clause = "objectid IN (%s)" % (", ".join([str(l) for l in layer.getSelectionSet()])))])
                     # arcpy.AddMessage("objectid IN (%s)" % (", ".join([str(l) for l in layer.getSelectionSet()])))
-                    if "muid" in [field.name.lower() for field in arcpy.ListFields(layer)] and (hasattr(layer, "datasetName") and "CatchConLink" not in layer.datasetName):
-                        arcpy.AddMessage((layer.getSelectionSet()))
+                    if "muid" in [field.name.lower() for field in arcpy.ListFields(layer)] and "CatchConLink" not in getattr(layer, "datasetName", ""):
                         new_definition_query = "muid %sIN ('%s')" % ("NOT " if remove_selection else "", "', '".join([row[0] for row in arcpy.da.SearchCursor(layer, ["muid"], where_clause = "%s IN (%s)" % (oid_fieldname, ", ".join([str(l) for l in layer.getSelectionSet()])))]))
                     else:
                         new_definition_query = "%s %sIN (%s)" % (oid_fieldname, "NOT " if remove_selection else "", ", ".join([str(g) for g in layer.getSelectionSet()]))
@@ -207,3 +205,267 @@ class SetDefinitionQuery(object):
                             layer.definitionQuery = new_definition_query
 
         return
+
+class SummarizeSelection(object):
+    def __init__(self):
+        self.label = "Summarize Selected Features"
+        self.description = (
+            "Summarizes the selected features in a chosen layer. "
+            "Calculates total length for polylines or total area for polygons."
+        )
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+
+        layer = arcpy.Parameter(
+            displayName="Layer",
+            name="layer",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input"
+        )
+
+        return [layer]
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):
+        pass
+
+    def updateMessages(self, parameters):
+        pass
+
+    def execute(self, parameters, messages):
+        layer = parameters[0].valueAsText
+
+        if not layer:
+            raise arcpy.ExecuteError("No layer selected.")
+
+        desc = arcpy.Describe(layer)
+
+        # Check selection
+        selected_count = int(arcpy.management.GetCount(layer)[0])
+
+        if selected_count == 0:
+            raise arcpy.ExecuteError(
+                "The selected layer has no selected features."
+            )
+
+        messages.addMessage(
+            "Layer: {}".format(desc.name)
+        )
+        messages.addMessage(
+            "Selected features: {}".format(selected_count)
+        )
+
+        # ---------------------------------------------------------
+        # GEOMETRY
+        # ---------------------------------------------------------
+
+        if desc.shapeType == "Polyline":
+
+            total_length = 0.0
+
+            with arcpy.da.SearchCursor(
+                    layer,
+                    ["SHAPE@LENGTH"]
+            ) as cursor:
+
+                for row in cursor:
+                    if row[0] is not None:
+                        total_length += row[0]
+
+            messages.addMessage(
+                "Total length: {:.2f} m".format(total_length)
+            )
+
+        elif desc.shapeType == "Polygon":
+
+            total_area = 0.0
+
+            with arcpy.da.SearchCursor(
+                    layer,
+                    ["SHAPE@AREA"]
+            ) as cursor:
+
+                for row in cursor:
+                    if row[0] is not None:
+                        total_area += row[0]
+
+            messages.addMessage(
+                "Total area: {:.2f} m²".format(total_area)
+            )
+
+        elif desc.shapeType == "Point":
+            # No geometry total for points
+            pass
+
+        else:
+
+            raise arcpy.ExecuteError(
+                "Layer geometry type '{}' is not supported. "
+                "Only points, polylines and polygons are supported.".format(
+                    desc.shapeType
+                )
+            )
+
+        # ---------------------------------------------------------
+        # SUM NUMERIC FIELDS
+        # ---------------------------------------------------------
+
+        numeric_types = [
+            "SmallInteger",
+            "Integer",
+            "Single",
+            "Double"
+        ]
+
+        numeric_fields = []
+
+        for field in arcpy.ListFields(layer):
+
+            if field.type in numeric_types:
+                numeric_fields.append(field.name)
+
+        if numeric_fields:
+
+            messages.addMessage("")
+            messages.addMessage("Numeric field totals:")
+
+            field_totals = {}
+
+            for field in numeric_fields:
+                field_totals[field] = 0.0
+
+            with arcpy.da.SearchCursor(
+                    layer,
+                    numeric_fields
+            ) as cursor:
+
+                for row in cursor:
+
+                    for i, value in enumerate(row):
+
+                        if value is not None:
+                            field_totals[numeric_fields[i]] += value
+
+            for field in numeric_fields:
+                messages.addMessage(
+                    "{}: {:.4g}".format(
+                        field,
+                        field_totals[field]
+                    )
+                )
+
+        else:
+
+            messages.addMessage(
+                "No numeric fields found."
+            )
+
+class CopyInExpression(object):
+    def __init__(self):
+        self.label = "Copy MUID IN Expression"
+        self.description = (
+            "Copies a SQL IN expression based on the selected features."
+        )
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        param0 = arcpy.Parameter(
+            displayName="Input Layer",
+            name="input_layer",
+            datatype="GPTableView",
+            parameterType="Required",
+            direction="Input"
+        )
+
+        return [param0]
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):
+        # Autofill with the first layer that has a selection
+        if not parameters[0].altered:
+            try:
+                aprx = arcpy.mp.ArcGISProject("CURRENT")
+                maps = aprx.listMaps()
+
+                for m in maps:
+                    for lyr in m.listLayers():
+                        if not lyr.isFeatureLayer:
+                            continue
+
+                        try:
+                            count = int(
+                                arcpy.GetCount_management(lyr).getOutput(0)
+                            )
+
+                            # GetCount respects the current selection
+                            if count > 0:
+                                parameters[0].value = lyr
+                                return
+
+                        except Exception:
+                            pass
+
+            except Exception:
+                pass
+
+    def updateMessages(self, parameters):
+        pass
+
+    def execute(self, parameters, messages):
+
+        layer = parameters[0].valueAsText
+
+        if not layer:
+            raise arcpy.ExecuteError("No input layer selected.")
+
+        desc = arcpy.Describe(layer)
+
+        # Find MUID, otherwise use OBJECTID
+        field_names = [f.name.upper() for f in arcpy.ListFields(layer)]
+
+        if "MUID" in field_names:
+            field = "MUID"
+        else:
+            # Find the actual ObjectID field name
+            oid_field = desc.OIDFieldName
+
+            if not oid_field:
+                raise arcpy.ExecuteError(
+                    "Could not find either MUID or OBJECTID field."
+                )
+
+            field = oid_field
+
+        values = []
+
+        with arcpy.da.SearchCursor(layer, [field]) as cursor:
+            for row in cursor:
+                value = row[0]
+
+                if value is None:
+                    continue
+
+                # Escape single quotes for SQL
+                value = str(value).replace("'", "''")
+
+                values.append("'" + value + "'")
+
+        if not values:
+            raise arcpy.ExecuteError(
+                "The input layer has no selected features."
+            )
+
+        expression = field + " IN (" + ",".join(values) + ")"
+        import subprocess
+        def copy_to_clipboard(txt):
+            cmd = 'echo ' + txt.strip() + '|clip'
+            return subprocess.check_call(cmd, shell=True)
+
+        copy_to_clipboard(expression)
+        arcpy.AddMessage(expression)

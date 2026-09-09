@@ -187,7 +187,7 @@ class CompareMikeModels(object):
             parameterType="Optional",
             multiValue=True,
             direction="Input")
-        ignore_fields.filter.list = ["OBJECTID", "SHAPE", "Slope", "UpLevel_C", "DwLevel_C", "Length_C", "UpLevel", "DwLevel", "Diameter", "NetTypeNo", "GroundLevel", "InvertLevel", "CriticalLevel", "Area", "Description", "AssetName", "Fricno", "routingtypeno", "routingdelay", "routingshape", "description", "geometry"]
+        ignore_fields.filter.list = ["OBJECTID", "SHAPE", "Slope", "UpLevel_C", "DwLevel_C", "Length_C", "UpLevel", "DwLevel", "Diameter", "NetTypeNo", "GroundLevel", "InvertLevel", "CriticalLevel", "Area", "Description", "AssetName", "Fricno", "routingtypeno", "routingdelay", "routingshape", "description", "geometry", "element_s"]
         ignore_fields.value = ["OBJECTID", "Slope", "UpLevel_C", "DwLevel_C", "Length_C", "CriticalLevel", "Area", "routingtypeno", "routingdelay", "routingshape"]
         #ignore_fields.value = ["msm_Catchment", "msm_Node", "msm_Link", "msm_Weir", "msm_Orifice"]
 
@@ -410,7 +410,10 @@ class CompareMikeModels(object):
 
                     # Special handling for area
                     if col == "SHAPE@AREA":
-                        equal = abs(abs(v1) - abs(v2)) <= 1
+                        if v1 is None or v2 is None:
+                            equal = False
+                        else:
+                            equal = abs(abs(v1) - abs(v2)) <= 1
                     else:
                         equal = (v1 == v2)
 
@@ -421,38 +424,85 @@ class CompareMikeModels(object):
                         v1_txt = "" if v1 is None else str(v1)
                         v2_txt = "" if v2 is None else str(v2)
                         col_name = abbr.get(col, col)
+                        arcpy.AddMessage(col_name)
                         desc_lines.append(
-                            f"{col_name}: {v1_txt} → {v2_txt}"
+                            "{}: {} -> {}".format(col_name, v1_txt, v2_txt)
                         )
 
                 if changed:
                     MUIDs_field_changed[MUID] = ", ".join(changed)
-                    MUIDs_summary[MUID] = "\n".join(desc_lines)
 
+                    if MUID in MUIDs_summary:
+                        MUIDs_summary[MUID] += "\n" + "\n".join(desc_lines)
+                    else:
+                        MUIDs_summary[MUID] = "\n".join(desc_lines)
 
             if "catchment" in feature.lower():
-                msm_CatchCon_1 = {}
-                msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_CatchCon"))
-                                       if not ignore_field(field.name) and not field.name == "MUID"]
-                catchID_field_i = [i for i, field in enumerate(msm_CatchCon_fields) if field.lower() == "catchid"][0]
-                with arcpy.da.SearchCursor(os.path.join(database1, "msm_CatchCon"), msm_CatchCon_fields) as cursor:
-                    for row in cursor:
-                        msm_CatchCon_1[row[catchID_field_i]] = row
 
+                def load_catchcon(database):
+                    fields = [
+                        field.name for field in arcpy.ListFields(os.path.join(database, "msm_CatchCon"))
+                        if not ignore_field(field.name)
+                           and field.name != "MUID"
+                           and field.type != "Geometry"
+                    ]
 
-                msm_CatchCon_2 = {}
-                msm_CatchCon_fields = [field.name for field in arcpy.ListFields(os.path.join(database2, "msm_CatchCon")) if not ignore_field(field.name) and not field.name == "MUID"]
-                catchID_field_i = [i for i, field in enumerate(msm_CatchCon_fields) if field.lower() == "catchid"][0]
-                with arcpy.da.SearchCursor(os.path.join(database2, "msm_CatchCon"), msm_CatchCon_fields) as cursor:
-                    for row in cursor:
-                        msm_CatchCon_2[row[catchID_field_i]] = row
+                    catchid_i = next(i for i, f in enumerate(fields) if f.lower() == "catchid")
+
+                    data = {}
+                    with arcpy.da.SearchCursor(os.path.join(database, "msm_CatchCon"), fields) as cursor:
+                        for row in cursor:
+                            data[row[catchid_i]] = row
+
+                    return data, fields
+
+                msm_CatchCon_1, msm_CatchCon_fields = load_catchcon(database1)
+                msm_CatchCon_2, _ = load_catchcon(database2)
 
                 for MUID in MUIDs_to_check:
-                    if MUID in msm_CatchCon_1 and MUID in msm_CatchCon_2:
-                        idx = compare_rows(msm_CatchCon_1[MUID], msm_CatchCon_2[MUID])
-                        if idx:
-                            MUIDs_field_changed[MUID] = [msm_CatchCon_fields[i] for i in idx]
 
+                    if MUID in msm_CatchCon_1 and MUID in msm_CatchCon_2:
+
+                        idx = compare_rows(
+                            msm_CatchCon_1[MUID],
+                            msm_CatchCon_2[MUID]
+                        )
+
+                        if idx:
+
+                            changed_fields = [
+                                msm_CatchCon_fields[i] for i in idx
+                            ]
+
+                            # append instead of overwrite
+                            if MUID in MUIDs_field_changed:
+                                MUIDs_field_changed[MUID] += ", " + ", ".join(changed_fields)
+                            else:
+                                MUIDs_field_changed[MUID] = ", ".join(changed_fields)
+
+                            # add summary
+                            if MUID not in MUIDs_summary:
+                                MUIDs_summary[MUID] = ""
+
+                            for i in idx:
+                                v1 = msm_CatchCon_1[MUID][i]
+                                v2 = msm_CatchCon_2[MUID][i]
+
+                                v1_txt = "" if v1 is None else str(v1)
+                                v2_txt = "" if v2 is None else str(v2)
+
+                                MUIDs_summary[MUID] += (
+                                    "\n{}: {} -> {}".format(
+                                        msm_CatchCon_fields[i], v1_txt, v2_txt
+                                    )
+                                )
+
+                                arcpy.AddMessage(
+                                    "{} _ {}: {} -> {}".format(
+                                        MUID, msm_CatchCon_fields[i], v1_txt, v2_txt
+                                    )
+                                )
+            arcpy.AddMessage(MUIDs_summary)
             if feature == "msm_Catchment" and ".mdb" in feature_path_1:
                 msm_HModA_1 = {}
                 msm_HModA_fields = [field.name for field in arcpy.ListFields(os.path.join(database1, "msm_HModA")) if not ignore_field(field.name)]
@@ -494,9 +544,14 @@ class CompareMikeModels(object):
                 MUID_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == "muid"][0]
                 with arcpy.da.InsertCursor(result_layer, ["MUID", "SHAPE@", "fields_changed", "summary"]) as cursor:
                     for MUID in MUIDs_field_changed.keys():
-                        row = (features_1[MUID][MUID_field_i], features_1[MUID][geometry_field_i],
-                               ", ".join(MUIDs_field_changed[MUID]), MUIDs_summary[MUID])
-                        cursor.insertRow(row)
+                        try:
+                            row = (features_1[MUID][MUID_field_i], features_1[MUID][geometry_field_i],
+                               MUIDs_field_changed[MUID], MUIDs_summary[MUID])
+                            cursor.insertRow(row)
+                        except Exception as e:
+                            arcpy.AddWarning(
+                                "Failed to create row for MUID {}".format(MUID)
+                            )
             else:
                 MUID_field_i = [field_i for field_i, field in enumerate(fields) if field.lower() == "muid"][0]
                 with arcpy.da.InsertCursor(result_layer, ["MUID", "fields_changed", "summary"]) as cursor:
@@ -666,6 +721,9 @@ class CompareMikeModelsLabels(object):
         return True
 
     def updateParameters(self, parameters):
+        for parameter in parameters:
+            if parameter.ValueAsText and '"' in parameter.ValueAsText:
+                parameter.Value = parameter.ValueAsText.replace('"','')
         return
 
     def updateMessages(self, parameters):  # optional
@@ -743,35 +801,52 @@ class CompareMikeModelsLabels(object):
             geometry_type="POLYLINE",
             spatial_reference=spatial_ref
         )
+        arcpy.AddField_management(links_output_filepath, "MUID", "TEXT", field_length=100)
         arcpy.AddField_management(links_output_filepath, "Change", "TEXT", field_length=30)
         arcpy.AddField_management(links_output_filepath, "NetTypeNo", "SHORT")
 
         def renameMaterial(materialid):
-            if "plastic" in materialid.lower():
+            if "plast" in materialid.lower():
                 return "pl"
-            elif "concrete" in materialid.lower():
+            elif "concrete" in materialid.lower() or "beton" in materialid.lower():
                 return "bt"
 
         # Compare and write differences
         with arcpy.da.SearchCursor(db2_fc, [id_field, diam_field, "materialID", "nettypeno"]) as cursor2, \
-                arcpy.da.InsertCursor(links_output_filepath, ["SHAPE@", "Change", "NetTypeNo"]) as insert:
+                arcpy.da.InsertCursor(
+                    links_output_filepath,
+                    ["SHAPE@", "MUID", "Change", "NetTypeNo"]
+                ) as insert:
 
             for row in cursor2:
                 link_id, diam2, material2, nettypeno2 = row
+
+
                 if link_id in links_db1:
                     geom1, diam1, material1, nettypeno1 = links_db1[link_id]
+
                     if diam1 != diam2 or material1 != material2:
                         if arcgis_pro:
-                            text = u"ø{}{}→ø{}{}".format(int(diam1 * 1000), renameMaterial(material1), int(diam2 * 1000), renameMaterial(material2))
+                            text = u"ø{}{}→ø{}{}".format(
+                                int((diam1 or 0) * 1000),
+                                renameMaterial(material1),
+                                int(diam2 * 1000),
+                                renameMaterial(material2)
+                            )
                         else:
-                            text = u"oe{}{}->oe{}{}".format(int(diam1 * 1000), renameMaterial(material1),
-                                                         int(diam2 * 1000), renameMaterial(material2))
-                        insert.insertRow((geom1, text, nettypeno1))
+                            text = u"oe{}{}->oe{}{}".format(
+                                int(diam1 * 1000),
+                                renameMaterial(material1),
+                                int(diam2 * 1000),
+                                renameMaterial(material2)
+                            )
+
+                        insert.insertRow((geom1, link_id, text, nettypeno1))
 
         # arcpy.AddMessage("✅ Done. Output saved to: %s" % links_output_filepath)
         # arcpy.AddMessage(links_output_filepath)
         addLayer(os.path.dirname(os.path.realpath(__file__)) + r"\Data\CompareMIKEModels_Links.lyr",
-                links_output_filepath, group=empty_group_layer, workspace_type="FILEGDB" if arcgis_pro else "FILEGDB_WORKSPACE")
+                 links_output_filepath, group=empty_group_layer, workspace_type="FILEGDB" if arcgis_pro else "FILEGDB_WORKSPACE")
 
         # --- Compare msm_Node invert levels ---
         node_fc_name = "msm_Node"

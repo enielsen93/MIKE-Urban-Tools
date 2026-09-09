@@ -213,7 +213,7 @@ class Dandas2MULinks(object):
             multiValue=True,
             direction="Input")
         afloebkodeparameter.filter.type = "ValueList"
-        afloebkodeparameter.filter.list = ["Waste Water", "Storm Drain", "Combined Sewer", "Drainage"]
+        afloebkodeparameter.filter.list = ["Waste Water", "Storm Drain", "Combined Sewer", "Other"]
 
         afloebkategori = arcpy.Parameter(
             displayName="Include also the following:",
@@ -552,13 +552,10 @@ class Dandas2MULinks(object):
                 # if statuskode == 8:
                 #     msm_Node_Table["Description"] = u"Sløjfet"
 
-                msm_Node_Table["GroundLevel"] = float(
-                    node.find("DaekselItems").find("Daeksel").find("Daekselkote").text) if node.find(
-                    "DaekselItems") is not None and node.find("DaekselItems").find("Daeksel") is not None and \
-                                                                                                   node.find(
-                                                                                                       "DaekselItems").find(
-                                                                                                       "Daeksel").find(
-                                                                                                       "Daekselkote").text is not None else None
+                daekselkote = xml_get(node, "DaekselItems/Daeksel/Daekselkote", cast=float)
+
+                msm_Node_Table["GroundLevel"] = daekselkote
+
                 if msm_Node_Table["GroundLevel"] is None:
                     msm_Node_Table["GroundLevel"] = float(nodes[nodei].find("Terraenkote").text) if nodes[nodei].find(
                         "Terraenkote") is not None else None
@@ -581,14 +578,16 @@ class Dandas2MULinks(object):
                 nettype_no = msm_Node_Table.get("NetTypeNo")
 
                 is_valid_nettype = (
-                        nettype_no is not None and
-                        nettype_no in range(1, 5) and
+                        "Other" in afloebkodeparameter or
                         afloebkode[nettype_no - 1] in afloebkodeparameter
                 )
 
                 skip = False
+                arcpy.AddMessage((afloebkode[nettype_no - 1], afloebkodeparameter))
+                if not is_valid_nettype:
+                    skip = True
 
-                if is_valid_nettype:
+                if not skip:
                     is_stik_like = (
                             kategori_afloeb == 4 or
                             broend_kode == 16 or
@@ -799,8 +798,19 @@ class Dandas2MULinks(object):
 
                         if link_delledning.find("TvaersnitKode") is not None:
                             k = int(link_delledning.find("TvaersnitKode").text)
-                            crosssection_catalogue = {0: 1, 1: 1, 5: 2, 6: 2, 8: 2, 9: 2, 10: 2, 50: 2, 99: 2, 3: 3,
-                                                      4: 3, 7: 4, 2: 5}
+                            crosssection_catalogue = {0: 1, 
+                            1: 1, 
+                            5: 2, 
+                            6: 2, 
+                            8: 2, 
+                            9: 2, 
+                            10: 2, 
+                            50: 2, 
+                            99: 2, 
+                            3: 3,
+                            4: 3, 
+                            7: 5, 
+                            2: 4}
                             linkDictionary["TypeNo"] = crosssection_catalogue[k] if k in crosssection_catalogue else 1
 
                         if link_delledning.find("DiameterIndv") is not None:

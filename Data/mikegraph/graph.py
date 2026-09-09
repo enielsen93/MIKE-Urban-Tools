@@ -227,40 +227,46 @@ class MikeNetwork:
 
         if not self.ignore_regulations:
             ms_TabD_dict = {}
-            with arcpy.da.SearchCursor(self._ms_TabD, ["TabID", "value2"],
-                                       where_clause="active = 1" if self._is_mike_plus else "") as cursor:
-                for row in cursor:
-                    if row[0] not in ms_TabD_dict or row[1] > ms_TabD_dict[row[0]]:
-                        ms_TabD_dict[row[0]] = row[1]
+            try:
+                with arcpy.da.SearchCursor(self._ms_TabD, ["TabID", "value2"],
+                                           where_clause="active = 1" if self._is_mike_plus else "") as cursor:
+                    for row in cursor:
+                        if row[0] not in ms_TabD_dict or row[1] > ms_TabD_dict[row[0]]:
+                            ms_TabD_dict[row[0]] = row[1]
+            except Exception as e:
+                pass
 
             if self._is_mike_plus:
-                with arcpy.da.SearchCursor(self._msm_Link, ["MUID", "FunctionID"],
-                                           where_clause="regulationtypeno = 1 AND FunctionID IS NOT NULL and FlowRegNo = 1") as cursor:
-                    for row in cursor:
-                        if row[1] in ms_TabD_dict:
-                            node = self.network.links[row[0]].tonode
-                            self.maxInflow[node] = self.maxInflow[node] + ms_TabD_dict[
-                                row[1]] if node in self.maxInflow else ms_TabD_dict[row[1]]
-                            try:
+                try:
+                    with arcpy.da.SearchCursor(self._msm_Link, ["MUID", "FunctionID"],
+                                               where_clause="regulationtypeno = 1 AND FunctionID IS NOT NULL and FlowRegNo = 1") as cursor:
+                        for row in cursor:
+                            if row[1] in ms_TabD_dict:
+                                node = self.network.links[row[0]].tonode
+                                self.maxInflow[node] = self.maxInflow[node] + ms_TabD_dict[
+                                    row[1]] if node in self.maxInflow else ms_TabD_dict[row[1]]
                                 self.graph.remove_edge(self.network.links[row[0]].fromnode,
                                                        self.network.links[row[0]].tonode)
-                            except Exception as e:
-                                pass
+                except Exception as e:
+                    pass
 
             else:
-                with arcpy.da.SearchCursor(self._msm_PasReg, ["LinkID", "FunctionID"],
-                                           where_clause="TypeNo = 1") as cursor:
-                    for row in cursor:
-                        if row[1] in ms_TabD_dict and hasattr(self.network, "links"):
-                            node = self.network.links[row[0]].tonode
-                            self.maxInflow[node] = self.maxInflow[node] + ms_TabD_dict[
-                                row[1]] if node in self.maxInflow else ms_TabD_dict[row[1]]
-                            try:
-                                self.graph.remove_edge(self.network.links[row[0]].fromnode,
-                                                       self.network.links[row[0]].tonode)
-                            except Exception as e:
-                                warnings.warn("Could not remove link %s-%s" % (self.network.links[row[0]].fromnode,
-                                                                               self.network.links[row[0]].tonode))
+                try:
+                    with arcpy.da.SearchCursor(self._msm_PasReg, ["LinkID", "FunctionID"],
+                                               where_clause="TypeNo = 1") as cursor:
+                        for row in cursor:
+                            if row[1] in ms_TabD_dict and hasattr(self.network, "links"):
+                                node = self.network.links[row[0]].tonode
+                                self.maxInflow[node] = self.maxInflow[node] + ms_TabD_dict[
+                                    row[1]] if node in self.maxInflow else ms_TabD_dict[row[1]]
+                                try:
+                                    self.graph.remove_edge(self.network.links[row[0]].fromnode,
+                                                           self.network.links[row[0]].tonode)
+                                except Exception as e:
+                                    warnings.warn("Could not remove link %s-%s" % (self.network.links[row[0]].fromnode,
+                                                                                   self.network.links[row[0]].tonode))
+                except Exception as e:
+                    pass
 
         if self.remove_edges:
             outlets = []

@@ -1182,14 +1182,20 @@ class upgradeDimensions(object):
             if not parameters[0].value:
                 aprx = arcpymapping.ArcGISProject("CURRENT")
                 map_view = aprx.activeMap
+
                 for layer in map_view.listLayers():
                     try:
-                        if layer.getSelectionSet() and arcpy.Describe(layer).shapeType == "Polyline":
+                        if (
+                                layer.getSelectionSet()
+                                and arcpy.Describe(layer).shapeType == "Polyline"
+                                and "maxq" not in {field.name.lower() for field in arcpy.ListFields(arcpy.Describe(layer).catalogPath)}
+                        ):
                             parameters[0].value = layer.longName
                             break
                     except:
                         pass
         else:
+
             if not parameters[0].value:
                 mxd = arcpy.mapping.MapDocument("CURRENT")
                 links = [lyr.longName for lyr in arcpy.mapping.ListLayers(mxd) if lyr.getSelectionSet() and arcpy.Describe(lyr).shapeType == 'Polyline'
@@ -1308,12 +1314,17 @@ class downgradeDimensions(object):
             if not parameters[0].value:
                 aprx = arcpymapping.ArcGISProject("CURRENT")
                 map_view = aprx.activeMap
+
                 for layer in map_view.listLayers():
                     try:
-                        if layer.getSelectionSet() and arcpy.Describe(layer).shapeType == "Polyline":
+                        if (
+                                layer.getSelectionSet()
+                                and arcpy.Describe(layer).shapeType == "Polyline"
+                                and "maxq" not in {field.name.lower() for field in arcpy.ListFields(arcpy.Describe(layer).catalogPath)}
+                        ):
                             parameters[0].value = layer.longName
                             break
-                    except:
+                    except Exception as e:
                         pass
         else:
             if not parameters[0].value:
@@ -1544,6 +1555,7 @@ class CopyDiameter(object):
         field_for_where_clause = "objectid" if not is_sqlite else "muid"
         arcpy.AddMessage("Confirm Query - Might be hidden behind window!")
         count = int(arcpy.GetCount_management(target_feature_layer).getOutput(0))
+
         if arcgis_pro:
             userquery = confirm_assignment("Change for %d features (selected in target layer)?" % (count),
                                            "Confirm Assignment", 4)
@@ -2927,7 +2939,7 @@ class DrawLongitudinalProfiles(object):
             multiValue=True,
             parameterType="Optional",
             direction="Input")
-        result_files.filter.list = ["res1d"]
+        result_files.filter.list = ["res1d", "prf"]
 
         # # new_names (auto-filled)
         # new_names = arcpy.Parameter(
@@ -3067,8 +3079,26 @@ class DrawLongitudinalProfiles(object):
             if p.datatype.lower() == "workspace" and p.valueAsText:
                 p.value = p.valueAsText.replace('"', '')
 
+        pipe_layer = parameters[0]
+
         if parameters[1].Values:
             parameters[1].Value = [str(value).replace('"', '') for value in parameters[1].Values]
+
+        result_files = parameters[1]
+        if (
+                result_files.ValueAsText
+                and result_files.ValueAsText.split(";")[0].lower() == "s"
+        ):
+
+            layer_folder = self.get_first_layer_folder(pipe_layer)
+
+            if layer_folder:
+                res1d_files = self.find_res1d_files(layer_folder)
+                if res1d_files:
+                    selected_files = self.select_res1d_files(res1d_files)
+
+                    if selected_files:
+                        result_files.Value = selected_files
 
         draw_map = parameters[2]
         pdf_output = parameters[3]
@@ -3287,6 +3317,38 @@ class DrawLongitudinalProfiles(object):
                 if False: # Deprecated - draw map without ArcGIS Pro
                     self.shapely_geom = wkb.loads(bytes(geometry.WKB))
 
+        # Helper Function to close res1d
+        from contextlib import contextmanager
+        import gc
+        
+
+        @contextmanager
+        def managed_res1d(*args, **kwargs):
+            res1d = None
+            try:
+                res1d = Res1D(*args, **kwargs)
+                yield res1d
+            finally:
+                if res1d is not None:
+                    try:
+                        res1d.reader.Dispose()
+                    except Exception:
+                        pass
+
+                    try:
+                        res1d.data.Dispose()
+                    except Exception:
+                        pass
+
+                    try:
+                        del res1d
+                    except Exception:
+                        pass
+
+                gc.collect()
+                # System.GC.Collect()
+                # System.GC.WaitForPendingFinalizers()
+
         # -----------------------
         # 1) Read Links
         # -----------------------
@@ -3374,21 +3436,22 @@ class DrawLongitudinalProfiles(object):
                             links[muid] = link
         else: # Read link data from res1d file
             result_file = result_files[0]
-            res1d = Res1D(result_file)
-            for reach in res1d.reaches.values():
-                name = reach.name.replace("Weir:","").replace("Orifice:","")
-                if name in links_selected:
-                    link = Link(
-                        muid = name,
-                        fromnodeid = reach.start_node,
-                        tonodeid = reach.end_node,
-                        length = reach.length,
-                        diameter = reach.height,
-                        uplevel = reach.gridpoints[0].bottom_level,
-                        dwlevel = reach.gridpoints[-1].bottom_level,
-                        geometry = arcpy.Polyline(arcpy.Array([arcpy.Point(gridpoint.xcoord, gridpoint.ycoord) for gridpoint in reach.gridpoints]))
-                    )
-                    links[reach.name] = link
+
+            with managed_res1d(result_file) as res1d:
+                for reach in res1d.reaches.values():
+                    name = reach.name.replace("Weir:","").replace("Orifice:","")
+                    if name in links_selected:
+                        link = Link(
+                            muid = name,
+                            fromnodeid = reach.start_node,
+                            tonodeid = reach.end_node,
+                            length = reach.length,
+                            diameter = reach.height,
+                            uplevel = reach.gridpoints[0].bottom_level,
+                            dwlevel = reach.gridpoints[-1].bottom_level,
+                            geometry = arcpy.Polyline(arcpy.Array([arcpy.Point(gridpoint.xcoord, gridpoint.ycoord) for gridpoint in reach.gridpoints]))
+                        )
+                        links[reach.name] = link
 
 
         # -----------------------
@@ -3426,16 +3489,17 @@ class DrawLongitudinalProfiles(object):
                     nodes[muid] = node
         else:  # Read link data from res1d file
             result_file = result_files[0]
-            res1d = Res1D(result_file)
-            for node in res1d.nodes.values():
-                if node.id in node_ids:
-                    manhole = Node(
-                        muid=node.id,
-                        invertlevel = node.bottom_level,
-                        groundlevel = node.ground_level,
-                        geometry = arcpy.PointGeometry(arcpy.Point(node.xcoord, node.ycoord))
-                    )
-                    nodes[node.id] = manhole
+            arcpy.AddMessage("BOB")
+            with managed_res1d(result_file) as res1d:
+                for node in res1d.nodes.values():
+                    if node.id in node_ids:
+                        manhole = Node(
+                            muid=node.id,
+                            invertlevel = node.bottom_level,
+                            groundlevel = node.ground_level,
+                            geometry = arcpy.PointGeometry(arcpy.Point(node.xcoord, node.ycoord))
+                        )
+                        nodes[node.id] = manhole
 
         # set uplevel and dwlevle to invert level of manhole is isinf (res1d)
         for link in links.values():
@@ -3453,58 +3517,157 @@ class DrawLongitudinalProfiles(object):
 
         for comparison_database in comparison_databases:
             arcpy.AddMessage(comparison_database)
+
             comparison_databases_data[comparison_database] = ComparisonDatabase()
-            node_layer = os.path.join(comparison_database, "msm_Node")
-            pipe_layer = os.path.join(comparison_database, "msm_Link")
-            all_link_fields = [f.name.lower() for f in arcpy.ListFields(pipe_layer)]
+
+            # ------------------------------------------------------------------
+            # Find node layer
+            # ------------------------------------------------------------------
+            node_layer = None
+
+            msm_node = os.path.join(comparison_database, "msm_Node")
+            if arcpy.Exists(msm_node):
+                node_layer = msm_node
+            else:
+                arcpy.AddWarning(
+                    "msm_Node does not exist in {}. Using nodes from the main database."
+                    .format(comparison_database)
+                )
+
+                # Copy the nodes from the main database
+                comparison_databases_data[comparison_database].nodes.update(nodes)
+
+            # ------------------------------------------------------------------
+            # Find link layer
+            # ------------------------------------------------------------------
+            pipe_layer = None
+
+            msm_link = os.path.join(comparison_database, "msm_Link")
+            pipe_dimensions = os.path.join(comparison_database, "Pipe_Dimensions")
+
+            if arcpy.Exists(msm_link):
+                pipe_layer = msm_link
+            elif arcpy.Exists(pipe_dimensions):
+                pipe_layer = pipe_dimensions
+            else:
+                arcpy.AddWarning(
+                    "Neither msm_Link nor Pipe_Dimensions exists in {}."
+                    .format(comparison_database)
+                )
+                continue
+
+            # ------------------------------------------------------------------
+            # Determine node fields in link table
+            # ------------------------------------------------------------------
+            all_link_fields = [
+                f.name.lower()
+                for f in arcpy.ListFields(pipe_layer)
+            ]
+
             if "fromnodeid" in all_link_fields:
                 fromnode_field = "fromnodeid"
                 tonode_field = "tonodeid"
+
             elif "fromnode" in all_link_fields:
                 fromnode_field = "fromnode"
                 tonode_field = "tonode"
-            else:  # Fallback! Will find fromnode and tonode based on geometry instead.
+
+            else:
+                # Fallback: determine nodes from geometry using mikegraph
                 fromnode_field = "muid"
                 tonode_field = "muid"
 
-            # Fields to retrieve, including the SHAPE token
+            # ------------------------------------------------------------------
+            # Determine fields available in link table
+            # ------------------------------------------------------------------
             link_fields = [
                 "muid",
                 fromnode_field,
                 tonode_field,
                 "length" if "length" in all_link_fields else "SHAPE@LENGTH",
                 "diameter",
-                "UpLevel",
-                "DwLevel",
+                "UpLevel" if "uplevel" in all_link_fields else "muid",
+                "DwLevel" if "dwlevel" in all_link_fields else "muid",
                 "SHAPE@",
             ]
 
+            # ------------------------------------------------------------------
+            # Read links
+            # ------------------------------------------------------------------
             with arcpy.da.SearchCursor(pipe_layer, link_fields) as cursor:
-                if fromnode_field == "muid":  # fallback, generate fromnode and tonode based on geometry
+
+                if fromnode_field == "muid":
                     import mikegraph
-                    mike_urban_database = os.path.dirname(arcpy.Describe(pipe_layer).catalogPath).replace(
-                        "\mu_Geometry", "")
-                    pipe_layer_network = mikegraph.PipeNetwork(mike_urban_database)
+
+                    mike_urban_database = os.path.dirname(
+                        arcpy.Describe(pipe_layer).catalogPath
+                    ).replace("\mu_Geometry", "")
+                    if node_layer is not None:
+                        pipe_layer_network = mikegraph.PipeNetwork(
+                            mike_urban_database
+                        )
+                    else:
+                        # Fallback if node_layer is None. Use network from source db
+                        try:
+                            pipe_layer_network
+                        except NameError:
+                            import mikegraph
+
+                            mike_urban_database = os.path.dirname(
+                                arcpy.Describe(pipe_layers[0]).catalogPath
+                            ).replace("\\mu_Geometry", "")
+
+                            pipe_layer_network = mikegraph.PipeNetwork(
+                                mike_urban_database)
+
                 for muid, frm, to, length, diam, up, dw, shape in cursor:
-                    if fromnode_field == "muid":  # fallback, generate fromnode and tonode based on geometry
+                    if fromnode_field == "muid":
                         link = pipe_layer_network.links[muid]
-                        frm, to = link.fromnode, link.tonode
+                        frm = link.fromnode
+                        to = link.tonode
+
                     link = Link(
                         muid=muid,
                         fromnodeid=frm,
                         tonodeid=to,
                         length=length,
                         diameter=diam,
-                        uplevel=up,
-                        dwlevel=dw,
+                        uplevel=up if isinstance(up, (int, float)) else None,
+                        dwlevel=up if isinstance(dw, (int, float)) else None,
                         geometry=shape,
                     )
-                    link.length = link.length if link.length else shape.length
-                    comparison_databases_data[comparison_database].links[muid] = link
-            with arcpy.da.SearchCursor(node_layer, ["MUID", "invertlevel"]) as cursor:
-                for muid, invertlevel in cursor:
-                    comparison_databases_data[comparison_database].nodes[muid] = Node(muid, invertlevel, None, None)
 
+                    link.length = (
+                        link.length
+                        if link.length
+                        else shape.length
+                    )
+
+                    comparison_databases_data[
+                        comparison_database
+                    ].links[muid] = link
+
+            # ------------------------------------------------------------------
+            # Read nodes if msm_Node exists
+            # ------------------------------------------------------------------
+            if node_layer is not None:
+                with arcpy.da.SearchCursor(
+                        node_layer,
+                        ["MUID", "invertlevel"]
+                ) as cursor:
+
+                    for muid, invertlevel in cursor:
+                        comparison_databases_data[
+                            comparison_database
+                        ].nodes[muid] = Node(
+                            muid,
+                            invertlevel,
+                            None,
+                            None
+                        )
+            else:
+                comparison_databases_data[comparison_database].nodes = nodes
+                arcpy.AddMessage("Did not find msm_Node in Comparison Database. Using msm_Node from Pipe Feature Layer")
 
         # Log results
         arcpy.AddMessage("Loaded {} links and {} nodes".format(len(links), len(nodes)))
@@ -3533,38 +3696,56 @@ class DrawLongitudinalProfiles(object):
             for f in result_files:
                 name = os.path.basename(os.path.splitext(f)[0]).replace("Base","").replace("Result_file","").replace("Default_Network_HD","")
                 scenario = Scenario(name, f)
-                res1d_reaches = Res1D(f, time=[0, 0], nodes=[""], reaches=links_selected, catchments=[""], quantities=[],
-                                      derived_quantities=[]).network.reaches
+                res1d_temp = None
 
-                links_fixed = links_selected.copy()
-                fix_links = True # Fix Links if muid is missing from Result File
-                if fix_links:
-                    for link_i, muid in enumerate(links_selected):
-                        if muid not in res1d_reaches:
+                with(managed_res1d(
+                    f,
+                    time=[0, 0],
+                    nodes=[""],
+                    reaches=links_selected,
+                    catchments=[""],
+                    quantities=[],
+                    derived_quantities=[]
+                ) as res1d_temp):
+                    res1d_reaches = res1d_temp.network.reaches
+
+                    links_fixed = links_selected.copy()
+
+                    fix_links = True
+                    if fix_links:
+                        for link_i, muid in enumerate(links_selected):
+                            if muid not in res1d_reaches:
+                                try:
+                                    new_link = [
+                                        reach for reach in res1d_reaches.values()
+                                        if links[muid].fromnodeid == reach.start_node
+                                           and links[muid].tonodeid == reach.end_node
+                                    ]
+
+                                    if new_link:
+                                        links_fixed[link_i] = new_link[0].name
+
+                                except Exception:
+                                    pass
+
+                arcpy.AddMessage("BOB")
+                with managed_res1d(f, reaches = links_fixed) as res1d:
+                    for pipe_i, pipe in enumerate(links_fixed):
+                        if pipe in res1d.reaches:
                             try:
-                                new_link = [reach for reach in res1d_reaches.values() if links[muid].fromnodeid == reach.start_node and links[muid] .tonodeid == reach.end_node]
-                                if new_link:
-                                    links_fixed[link_i] = new_link[0].name
+                                queries = [QueryDataReach("WaterLevel", pipe, 0),
+                                           QueryDataReach("WaterLevel", pipe, res1d.reaches[pipe].length)]
+
+                                query_result = res1d.read(queries).max()
+                                pipe_result = Pipe(links_selected[pipe_i], res1d.reaches[pipe].start_node, res1d.reaches[pipe].end_node)
+
+                                pipe_result.water_level_start = query_result.iloc[0]
+                                pipe_result.water_level_end = query_result.iloc[1]
+                                scenario.data.append(pipe_result)
                             except Exception as e:
                                 pass
+                    scenarios.append(scenario)
 
-
-                res1d = Res1D(f, reaches = links_fixed)
-                for pipe_i, pipe in enumerate(links_fixed):
-                    if pipe in res1d.reaches:
-                        try:
-                            queries = [QueryDataReach("WaterLevel", pipe, 0),
-                                       QueryDataReach("WaterLevel", pipe, res1d.reaches[pipe].length)]
-
-                            query_result = res1d.read(queries).max()
-                            pipe_result = Pipe(links_selected[pipe_i], res1d.reaches[pipe].start_node, res1d.reaches[pipe].end_node)
-
-                            pipe_result.water_level_start = query_result.iloc[0]
-                            pipe_result.water_level_end = query_result.iloc[1]
-                            scenario.data.append(pipe_result)
-                        except Exception as e:
-                            pass
-                scenarios.append(scenario)
 
         arcpy.AddMessage(tlog.log("Graphing"))
         # -----------------------
@@ -3798,7 +3979,10 @@ class DrawLongitudinalProfiles(object):
                     legend = ax_plot.legend(fontsize=font_size or 'small', loc='lower left', bbox_to_anchor=(0, 0.05), borderaxespad=0)
                 else:
                     legend = ax_plot.legend(fontsize=font_size or 'small', loc='lower left', bbox_to_anchor=(0, 0.05), borderaxespad=0)
-            # if False:
+
+                for text in legend.get_texts():
+                    text.set_picker(True)
+                    # if False:
             #     # Create square inset map: e.g., 0.22 x 0.22 in figure coords
             #     inset_size = 0.55
             #     map_ax = fig.add_axes([0.6, 0.15, inset_size, inset_size])  # x0, y0, width, height
@@ -3906,6 +4090,64 @@ class DrawLongitudinalProfiles(object):
                 plt.close(fig)
 
         if not output_pdf:
+            import tkinter as tk
+            from tkinter.simpledialog import askstring
+
+            def keypress(event):
+                if event.key.lower() == "t":
+                    root = tk.Tk()
+                    root.withdraw()
+
+                    current_w = fig.get_figwidth() * 2.54
+                    current_h = fig.get_figheight() * 2.54
+
+                    size = askstring(
+                        "Change figure size",
+                        "Enter width x height (cm):",
+                        initialvalue=f"{current_w:.1f} x {current_h:.1f}"
+                    )
+
+                    root.destroy()
+
+                    if size:
+                        try:
+                            w_cm, h_cm = map(float, size.split("x"))
+
+                            fig.set_size_inches(w_cm / 2.54, h_cm / 2.54, forward=True)
+                            fig.canvas.draw_idle()
+
+                        except ValueError:
+                            arcpy.AddMessage("Format should be width x height in cm e.g. 15.7 x 10")
+                if event.key.lower() == "e":
+                    arcpy.AddMessage("Pressed e")
+                    legend.set_visible(not legend.get_visible())
+                    event.canvas.draw_idle()
+
+            def on_pick(event):
+                if isinstance(event.artist, matplotlib.text.Text):
+                    text = event.artist
+
+                    root = tk.Tk()
+                    root.withdraw()
+
+                    new_label = askstring(
+                        "Rename legend label",
+                        "New label:",
+                        initialvalue=text.get_text()
+                    )
+
+                    root.destroy()
+
+                    if new_label:
+                        text.set_text(new_label)
+                        fig.canvas.draw_idle()
+
+                    return
+
+
+            fig.canvas.mpl_connect("pick_event", on_pick)
+            fig.canvas.mpl_connect("key_press_event", keypress)
+
             plt.show()
         elif pdf:
             pdf.close()
@@ -3944,6 +4186,134 @@ class DrawLongitudinalProfiles(object):
 
 
         return
+
+    def find_res1d_files(self,folder):
+        """Find all .res1d files recursively below folder."""
+        res1d_files = []
+        for root, _, files in os.walk(folder):
+            for filename in files:
+                if filename.lower().endswith(".res1d"):
+                    res1d_files.append(os.path.join(root, filename))
+
+        return sorted(res1d_files)
+
+    def select_res1d_files(self, files):
+        """Show a Tkinter multi-select dialog and return selected files."""
+        if not files:
+            return []
+
+        import tkinter as tk
+        from tkinter import ttk
+        root = tk.Tk()
+        root.title("Select Result Files")
+        root.geometry("600x500")
+
+        frame = ttk.Frame(root, padding=10)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(
+            frame,
+            text="Select one or more .res1d files:"
+        ).pack(anchor="w", pady=(0, 5))
+
+        listbox = tk.Listbox(
+            frame,
+            selectmode=tk.EXTENDED,
+            width=80,
+        )
+        listbox.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(
+            frame,
+            orient="vertical",
+            command=listbox.yview,
+        )
+        scrollbar.pack(side="right", fill="y")
+
+        listbox.configure(yscrollcommand=scrollbar.set)
+
+        # Keep full paths, but only display filenames
+        filenames = [os.path.basename(filepath) for filepath in files]
+
+        for filename in filenames:
+            listbox.insert(tk.END, filename)
+
+        selected_files = []
+
+        def accept():
+            selected_files.extend(
+                files[i]
+                for i in listbox.curselection()
+            )
+            root.destroy()
+
+        def cancel():
+            root.destroy()
+
+        listbox.bind("<Double-Button-1>", lambda event: accept())
+
+        button_frame = ttk.Frame(frame)
+        button_frame.pack(fill="x", pady=(10, 0))
+
+        ttk.Button(
+            button_frame,
+            text="OK",
+            command=accept,
+        ).pack(side="right", padx=(5, 0))
+
+        ttk.Button(
+            button_frame,
+            text="Cancel",
+            command=cancel,
+        ).pack(side="right")
+
+        root.mainloop()
+
+        return selected_files
+
+    def get_first_layer_folder(self, parameter):
+        """Return the folder containing the first selected layer
+        from a multivalue GPFeatureLayer parameter.
+        """
+
+        if not parameter or not parameter.ValueAsText:
+            return None
+
+        # Multivalue GP parameters are semicolon-separated
+        layer_values = parameter.ValueAsText.split(";")
+
+        for layer_value in layer_values:
+            layer_value = layer_value.strip().strip("'\"")
+
+            if not layer_value:
+                continue
+
+            try:
+                data_source = arcpy.Describe(layer_value).catalogPath
+            except Exception:
+                try:
+                    data_source = arcpy.Describe(layer_value).dataSource
+                except Exception:
+                    continue
+
+            if not data_source:
+                continue
+
+            data_source = os.path.normpath(data_source)
+            lower = data_source.lower()
+
+            # File geodatabase / SQLite
+            for extension in (".gdb", ".sqlite"):
+                index = lower.find(extension)
+
+                if index != -1:
+                    database_path = data_source[:index + len(extension)]
+                    return os.path.dirname(database_path)
+
+            # Shapefile / other file-based layer
+            return os.path.dirname(data_source)
+
+        return None
 
 
 class DrawClash(object):

@@ -21,7 +21,7 @@ from .network import PipeNetwork
 from .utils import calculate_full_flow
 
 # Package metadata
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 __author__ = "Emil Nielsen"
 __email__ = "enielsen93@hotmail.com"
 __description__ = "Python toolkit for hydraulic network analysis with MIKE+ databases"
@@ -68,18 +68,22 @@ def _check_dependencies():
         import mikeio
     except ImportError:
         optional_missing.append("mikeio (required for DFS0 files)")
-    
+
     if missing_deps:
         raise ImportError(
-            "Missing required dependencies: {}\nInstall with: pip install {}".format(
-            ', '.join(missing_deps),
-            ' '.join(missing_deps)
-        ))
-    
+            "Missing required dependencies: {0}\n"
+            "Install with: pip install {1}".format(
+                ", ".join(missing_deps),
+                " ".join(missing_deps)
+            )
+        )
+
     if optional_missing:
         import warnings
         warnings.warn(
-            "Optional dependencies not found: " + ', '.join(optional_missing),
+            "Optional dependencies not found: {0}".format(
+                ", ".join(optional_missing)
+            ),
             ImportWarning
         )
 

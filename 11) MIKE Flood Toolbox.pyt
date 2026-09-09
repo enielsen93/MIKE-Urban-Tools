@@ -7,12 +7,59 @@ from arcpy import env
 arcpy.env.addOutputsToMap = False
 import sys
 import time
-import mikeio
+import traceback
 import bisect
 from scipy.spatial import cKDTree
 from datetime import timedelta
 from scipy.interpolate import RegularGridInterpolator
+import site
 
+user_site = site.getusersitepackages()
+if user_site not in sys.path:
+    sys.path.append(user_site)
+
+def import_or_install(pkg_names):
+    import importlib
+    import site
+    import tkinter as tk
+    from tkinter import messagebox
+    import subprocess
+    imported = {}
+
+    for pkg in pkg_names:
+        # Check user site-packages
+        user_site = site.getusersitepackages()
+        if user_site not in sys.path:
+            sys.path.append(user_site)
+        candidate = os.path.join(user_site, pkg)
+        try:
+            imported[pkg] = importlib.import_module(pkg)
+            continue
+        except ImportError:
+            pass
+
+        if os.path.isdir(candidate):
+            sys.path.insert(0, user_site)
+            try:
+                imported[pkg] = importlib.import_module(pkg)
+                continue
+            finally:
+                sys.path.pop(0)
+
+        root = tk.Tk()
+        root.withdraw()  # hide main window
+        # Not found: prompt user with tkinter
+        msg = f"The library '{pkg}' is not installed.\nInstall now using ArcGIS Pro Python?"
+        if messagebox.askokcancel("Missing Library", msg):
+            propy_path = r"C:\Progra~1\ArcGIS\Pro\bin\Python\scripts\propy.bat"
+            cmd = [propy_path, "-m", "pip", "install"] + pkg_names
+            subprocess.check_call(cmd)
+            # Try import again
+            imported[pkg] = importlib.import_module(pkg)
+        else:
+            raise ImportError(f"{pkg} not installed and user declined installation.")
+
+    return imported
 
 def statusUpdate(message,tic):
     arcpy.AddMessage("%d seconds: %s" % (time.time()-tic, message))
@@ -80,6 +127,10 @@ class InterpolateToMesh(object):
     def updateParameters(self, parameters): #optional
         if parameters[1].ValueAsText and not parameters[2].ValueAsText:
             parameters[2].value = parameters[1].ValueAsText.replace(".mesh","_interp.mesh")
+
+        for p in [parameters[0], parameters[1]]:
+            if p.valueAsText:
+                p.value = p.valueAsText.replace('"', '')
         return
 
     def updateMessages(self, parameters): #optional
@@ -95,6 +146,8 @@ class InterpolateToMesh(object):
         MeshFileOutput = parameters[2].valueAsText
 
         statusUpdate("Reading Mesh",tic)
+        libs = import_or_install(["mikeio"])
+        mikeio = libs["mikeio"]
         dfs = mikeio.dfsu.Mesh(MeshFile)
 
         statusUpdate("Reading Mesh: Getting Node Coordinates",tic)
@@ -214,9 +267,15 @@ class DFSUFloodStatisticsToRaster(object):
 
     def updateParameters(self, parameters): #optional
         if parameters[0].altered:
+            libs = import_or_install(["mikeio"])
+            mikeio = libs["mikeio"]
             dfs = mikeio.dfsu.Dfsu2DH(parameters[0].valueAsText)
             statusUpdate(dfs.items,1)
             parameters[1].filter.list = [item.name for item in dfs.items]
+
+        for p in [parameters[0], parameters[2], parameters[3]]:
+            if p.valueAsText:
+                p.value = p.valueAsText.replace('"', '')
         return
 
     def updateMessages(self, parameters): #optional
@@ -234,18 +293,23 @@ class DFSUFloodStatisticsToRaster(object):
         searchDistance = parameters[4].Value
         raster_cell_size = parameters[5].Value
 
+        arcpy.env.overwriteOutput = True
+
         clip_shapes = []
         if clip_layers:
             clip_layers_list = clip_layers.split(";")
-            statusUpdate("Reading Clip Layers")
-            for clip_layer in clip_layers:
-                clip_layer_dissolved = arcpy.Dissolve_management(clip_layer, os.path.join("in_memory", os.path.splitext(
-                    os.path.basename(clip_layer))[0]))[0]
+            statusUpdate("Reading Clip Layers", tic)
+            for clip_layer in clip_layers_list:
+                arcpy.AddMessage(clip_layer)
+                clip_layer_dissolved = arcpy.Dissolve_management(clip_layer.replace("'",""), os.path.join("in_memory", os.path.splitext(
+                    os.path.basename(clip_layer).replace(" ",""))[0]))[0]
                 with arcpy.da.SearchCursor(clip_layer_dissolved, ["SHAPE@"]) as cursor:
                     for row in cursor:
                         clip_shapes.append(row[0])
 
         statusUpdate("Reading DFSU file", tic)
+        libs = import_or_install(["mikeio"])
+        mikeio = libs["mikeio"]
         dfs = mikeio.dfsu.Dfsu2DH(DFSUFile)
 
         statusUpdate("Retrieving element coordinates from DFSU file", tic)
@@ -254,77 +318,92 @@ class DFSUFloodStatisticsToRaster(object):
         dfs_read_data = dfs_read.to_numpy()
         np.nan_to_num(dfs_read_data, copy=False)
         # arcpy.AddMessage((dfs_read_data, dfs_read_data.shape))
+        from scipy.interpolate import griddata
 
-        statusUpdate("Isolating DFSU Elements with value", tic)
+        statusUpdate("Preparing interpolation", tic)
 
-        elements_with_water = np.where(dfs_read_data[0, 0, :] > 0.003)[0] if DFSUField == "Maximum water depth" else \
-        np.where(dfs_read_data[0, 0, :] != 0)[0]
-        no_elements = False if len(elements_with_water) > 0 else True
+        coords = element_coordinates[:, :2]
+        vals = dfs_read_data[0, 0, :]
 
-        if no_elements:
-            arcpy.AddError("Error: Could not find any DFSU Elements with a value different from zero")
-        else:
-            x_limit = [np.min(element_coordinates[elements_with_water, 0]) - searchDistance,
-                       np.max(element_coordinates[elements_with_water, 0]) + searchDistance]
-            y_limit = [np.min(element_coordinates[elements_with_water, 1]) - searchDistance,
-                       np.max(element_coordinates[elements_with_water, 1]) + searchDistance]
-            # arcpy.AddMessage((x_limit, y_limit))
-            raster_xs_vector = np.arange(x_limit[0], x_limit[1], raster_cell_size)
-            raster_ys_vector = np.arange(y_limit[0], y_limit[1], raster_cell_size)
+        # raster grid
+        x_limit = [
+            np.min(coords[:, 0]) - searchDistance,
+            np.max(coords[:, 0]) + searchDistance
+        ]
 
-            raster_x, raster_y = np.meshgrid(raster_xs_vector, raster_ys_vector)
-            raster_depth = np.zeros(raster_x.shape)
-            raster_x_flat = raster_x.flatten()
-            raster_y_flat = raster_y.flatten()
-            raster_depth_flat = np.zeros(raster_x.flatten().shape + tuple([1]))
+        y_limit = [
+            np.min(coords[:, 1]) - searchDistance,
+            np.max(coords[:, 1]) + searchDistance
+        ]
 
-            statusUpdate("Retrieving Raster Elements near water", tic)
-            elements_searched = []
-            idx = set()
-            for element_i, element in enumerate(element_coordinates[elements_with_water]):
-                ix = np.where(np.abs(element[0] - raster_x_flat) < searchDistance)[0]
-                idx.update(ix[np.where(np.abs(element[1] - raster_y_flat[ix]) < searchDistance)[0]])
+        raster_xs_vector = np.arange(
+            x_limit[0],
+            x_limit[1],
+            raster_cell_size
+        )
 
-            idx_remove = []
-            statusUpdate("Removing raster elements that overlap clip_layers", tic)
-            for i in idx:
-                point = arcpy.Point(raster_x_flat[i], raster_y_flat[i])
-                for clip_shape in clip_shapes:
-                    if clip_shape.geometry.contains(point):
-                        idx_remove.append(i)
-            for i in idx_remove:
-                idx.remove(i)
+        raster_ys_vector = np.arange(
+            y_limit[0],
+            y_limit[1],
+            raster_cell_size
+        )
 
-            statusUpdate("Removing raster elements that are not contained inside DFSU-file", tic)
-            idx_array = np.array(list(idx))
-            raster_coord_in_mesh = idx_array[np.where(~dfs.geometry.contains(np.column_stack((raster_x_flat[idx_array],
-                                                                                     raster_y_flat[
-                                                                                         idx_array]))))]  # idx_list[np.where(dfs.contains(np.column_stack((raster_x_flat[idx_list],raster_y_flat[idx_list]))))]
-            for i in raster_coord_in_mesh:
-                idx.remove(i)
+        raster_x, raster_y = np.meshgrid(
+            raster_xs_vector,
+            raster_ys_vector
+        )
 
-            statusUpdate("Creating KDTree", tic)
-            elements_searchable = np.where((x_limit[0] < element_coordinates[:, 0]) &
-                                           (element_coordinates[:, 0] < x_limit[1]) &
-                                           (y_limit[0] < element_coordinates[:, 1]) &
-                                           (element_coordinates[:, 1] < y_limit[1]))[0]
-            dfsu_cKDTree = cKDTree(element_coordinates[elements_searchable, 0:2])
+        statusUpdate("Natural neighbor-ish interpolation", tic)
 
-            statusUpdate("Interpolating DFSU to Raster (nearest neighbor)", tic)
-            for i in idx:
-                element_i = dfsu_cKDTree.query([raster_x_flat[i], raster_y_flat[i]])[1]
-                raster_depth_flat[i] = dfs_read_data[0, 0, elements_searchable[element_i]]
+        raster_depth = griddata(
+            coords,
+            vals,
+            (raster_x, raster_y),
+            method="linear",
+            fill_value=0
+        )
 
-            statusUpdate("Saving Raster", tic)
-            raster_depth = raster_depth_flat.reshape(raster_depth.shape[0:2] + tuple([1]))
+        from matplotlib.path import Path
 
-            raster_depth_compressed = raster_depth
-            raster = arcpy.NumPyArrayToRaster(np.flip(raster_depth_compressed[:, :, 0], axis=0),
-                                              lower_left_corner=arcpy.Point(x_limit[0], y_limit[0]),
-                                              x_cell_size=raster_cell_size,
-                                              y_cell_size=raster_cell_size,
-                                              value_to_nodata=0)
-            raster.save(RasterFileOutput)
+        mask = np.zeros(raster_x.shape, dtype=bool)
+
+        xy = np.column_stack(
+            (
+                raster_x.ravel(),
+                raster_y.ravel()
+            )
+        )
+
+        for polygon in clip_shapes:
+
+            for part in polygon:
+                vertices = np.array([
+                    [p.X, p.Y]
+                    for p in part
+                    if p
+                ])
+
+                path = Path(vertices)
+
+                mask |= path.contains_points(xy).reshape(raster_x.shape)
+
+        raster_depth[mask] = 0
+
+        statusUpdate("Saving Raster", tic)
+
+        raster = arcpy.NumPyArrayToRaster(
+            np.flipud(raster_depth),
+            lower_left_corner=arcpy.Point(
+                x_limit[0],
+                y_limit[0]
+            ),
+            x_cell_size=raster_cell_size,
+            y_cell_size=raster_cell_size,
+            value_to_nodata=0
+        )
+
+
+        raster.save(RasterFileOutput)
         return
         
 class DFSUToRaster(object):
@@ -413,6 +492,8 @@ class DFSUToRaster(object):
 
     def updateParameters(self, parameters): #optional
         if parameters[0].altered:
+            libs = import_or_install(["mikeio"])
+            mikeio = libs["mikeio"]
             dfs = mikeio.dfsu.Dfsu2DH(parameters[0].valueAsText)
             items = [item.name for item in dfs.items]
             if "Surface elevation" in items and not 'Total water depth' in items:
@@ -634,6 +715,8 @@ class DFS2ToRaster(object):
 
     def updateParameters(self, parameters): #optional
         if parameters[0].altered:
+            libs = import_or_install(["mikeio"])
+            mikeio = libs["mikeio"]
             dfs = mikeio.dfs2.Dfs2(parameters[0].valueAsText)
             parameters[1].filter.list = [item.name for item in dfs.items]
             
@@ -1153,6 +1236,10 @@ class MeshToTIN(object):
     def updateParameters(self, parameters):  # optional
         if parameters[0].ValueAsText and not parameters[1].ValueAsText:
             parameters[1].value = parameters[0].ValueAsText.replace(".mesh","")
+
+        for p in [parameters[0], parameters[1]]:
+            if p.valueAsText:
+                p.value = p.valueAsText.replace('"', '')
         return
 
     def updateMessages(self, parameters):  # optional
@@ -1164,12 +1251,15 @@ class MeshToTIN(object):
         TIN = parameters[1].ValueAsText
         arcpy.AddMessage(TIN)
         clip_TIN = parameters[2].Value
+        libs = import_or_install(["mikeio"])
+        mikeio = libs["mikeio"]
         dfs = mikeio.dfsu.Mesh(mesh_file)
         arcpy.SetProgressorLabel("Reading Mesh File Element Coordinates")
         node_coordinates = dfs.node_coordinates
 
+        sr = dfs.geometry.projection_string
         arcpy.SetProgressorLabel("Creating Feature Class")
-        arcpy.CreateFeatureclass_management("in_memory", "nodes_Z", "POINT", has_z="Enabled")
+        arcpy.CreateFeatureclass_management("in_memory", "nodes_Z", "POINT", has_z="Enabled", spatial_reference=sr)
         # arcpy.AddField_management(os.path.join(nodesPath, nodesName), "Z", "DOUBLE")
 
         arcpy.SetProgressorLabel("Adding each element to the feature class")
@@ -1177,28 +1267,53 @@ class MeshToTIN(object):
             for node in node_coordinates:
                 cursor.insertRow([arcpy.Point(node[0], node[1], node[2])])
 
+        if arcpy.CheckExtension("3D") == "Available":
+            arcpy.CheckOutExtension("3D")
+        else:
+            raise RuntimeError("3D Analyst extension is not available")
+
         if clip_TIN:
-            arcpy.CreateFeatureclass_management("in_memory", "ClipPolygon", "POLYGON")
-            boundary_xy_table = dfs.geometry.boundary_polylines[1][0].xy
+            print("Preparing clip")
+            arcpy.CreateFeatureclass_management("in_memory", "ClipPolygon", "POLYGON", spatial_reference=sr)
+            boundary_xy_table = dfs.geometry.boundary_polylines.lines[0].xy
             polygons = arcpy.Polygon(arcpy.Array([arcpy.Point(xy[0], xy[1]) for xy in boundary_xy_table]))
             with arcpy.da.InsertCursor("in_memory\ClipPolygon", "SHAPE@") as cursor:
                 cursor.insertRow([polygons])
 
-            arcpy.CreateFeatureclass_management("in_memory", "CutPolygon", "POLYGON")
-            cut_polygons = dfs.geometry.boundary_polylines[3]
-            polygons = []
-            for cut_polygon in cut_polygons:
-                boundary_xy_table = cut_polygon.xy
-                polygons.append(arcpy.Polygon(arcpy.Array([arcpy.Point(xy[0], xy[1]) for xy in boundary_xy_table])))
-            with arcpy.da.InsertCursor("in_memory\CutPolygon", "SHAPE@") as cursor:
-                for polygon in polygons:
-                    cursor.insertRow([polygon])
 
-            arcpy.ddd.CreateTin(TIN, dfs.projection_string,
-                                r"in_memory\nodes_Z Shape.Z Mass_Points; in_memory\ClipPolygon <None> Hard_Clip")
+
+            if len(dfs.geometry.boundary_polylines.lines) > 3:
+                arcpy.CreateFeatureclass_management("in_memory", "CutPolygon", "POLYGON", spatial_reference=sr)
+                cut_polygons = dfs.geometry.boundary_polylines.lines[1:]
+                # arcpy.AddMessage(dfs.geometry.boundary_polylines.lines)
+                polygons = []
+                # arcpy.AddMessage(cut_polygons)
+                for cut_polygon in cut_polygons:
+                    boundary_xy_table = cut_polygon.xy
+                    polygons.append(arcpy.Polygon(arcpy.Array([arcpy.Point(xy[0], xy[1]) for xy in boundary_xy_table])))
+                with arcpy.da.InsertCursor("in_memory\CutPolygon", "SHAPE@") as cursor:
+                    for polygon in polygons:
+                        cursor.insertRow([polygon])
+
+                print("Creating TIN")
+                arcpy.ddd.CreateTin(TIN, dfs.geometry.projection_string,
+                                    r"in_memory\nodes_Z Shape.Z Mass_Points; in_memory\ClipPolygon <None> Hard_Clip; in_memory\CutPolygon <None> Hard_Erase")
+            else:
+                arcpy.AddMessage("Continuing without Cut polygon")
+                arcpy.AddMessage(dfs.geometry.projection_string)
+                arcpy.AddMessage(arcpy.Describe(r"in_memory\ClipPolygon").spatialReference.name)
+                arcpy.AddMessage(arcpy.Describe(r"in_memory\nodes_Z").spatialReference.name)
+
+                arcpy.ddd.CreateTin(
+                    TIN,
+                    dfs.geometry.projection_string,
+                    r"in_memory\nodes_Z Shape.Z Mass_Points; in_memory\ClipPolygon <None> Hard_Clip"
+                )
         else:
-            arcpy.ddd.CreateTin(TIN, dfs.projection_string,
-                                "%s Shape.Z Mass_Points")
+            arcpy.AddMessage(dfs.geometry.projection_string)
+
+            arcpy.ddd.CreateTin(TIN, dfs.geometry.projection_string,
+                                r"in_memory\nodes_Z Shape.Z Mass_Points")
         return
 
 if __name__ == "__main__":

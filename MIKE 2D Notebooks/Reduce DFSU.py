@@ -1,14 +1,14 @@
 import mikeio
 from datetime import datetime
 
-dfsu_filepath = r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Jyllands Alle\MIKE_REGNVAND\JYL_072\JYL_072_FM_m21fm - Result Files\JYL_072_FM_CDS_5_144_240_2080BaseDefault_2D_overland.dfsu"
+dfsu_filepath = r"C:\Users\ELNN.RAMBOLL.000\OneDrive - Ramboll\Documents\Mosagergroeften\MIKE\MOS_PLAN_016\MOS_PLAN_016_m21fm - Result Files\MOS_STATUS_016_CDS_10_107BaseDefault_2D_overland.dfsu"
 
 print("Reading %s" % dfsu_filepath)
 dfs = mikeio.dfsu.Dfsu2DH(dfsu_filepath)
 
-filter_start = datetime.strptime("%s 01:30" % dfs.time[0].strftime("%Y.%m.%d"), "%Y.%m.%d %H:%M")
+filter_start = datetime.strptime("%s 01:45" % dfs.time[0].strftime("%Y.%m.%d"), "%Y.%m.%d %H:%M")
 
-step = 2#int(60/dfs.timestep) if 60>dfs.timestep else 1
+step = 3#int(60/dfs.timestep) if 60>dfs.timestep else 1
 
 # timesteps = dfs.time[-2:]
 timesteps = dfs.time[dfs.time>filter_start]

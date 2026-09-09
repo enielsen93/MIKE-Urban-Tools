@@ -1,54 +1,12 @@
 """
 Timearea module for mikegraph
 """
-# import mikegraph
+import mikegraph
 from io import StringIO
 import pandas as pd
 import numpy as np
 import networkx as nx
 import os
-import importlib
-
-def import_or_install(pkg_names):
-    import importlib
-    import site
-    import tkinter as tk
-    from tkinter import messagebox
-    import subprocess
-    imported = {}
-    for pkg in pkg_names:
-        try:
-            imported[pkg] = importlib.import_module(pkg)
-            continue
-        except ImportError:
-            pass
-
-        # Check user site-packages
-        user_site = site.getusersitepackages()
-        candidate = os.path.join(user_site, pkg)
-        if os.path.isdir(candidate):
-            sys.path.insert(0, user_site)
-            try:
-                imported[pkg] = importlib.import_module(pkg)
-                continue
-            finally:
-                sys.path.pop(0)
-
-        # Not found: prompt user with tkinter
-        import tkinter as tk
-        root = tk.Tk()
-        root.withdraw()  # hide main window
-        msg = "The library '" + pkg + "' is not installed.\nInstall now using ArcGIS Pro Python?"
-        if messagebox.askokcancel("Missing Library", msg):
-            propy_path = r"C:\Progra~1\ArcGIS\Pro\bin\Python\scripts\propy.bat"
-            cmd = [propy_path, "-m", "pip", "install"] + pkg_names
-            subprocess.check_call(cmd)
-            # Try import again
-            imported[pkg] = importlib.import_module(pkg)
-        else:
-            raise ImportError(pkg + "not installed and user declined installation.")
-
-    return imported
 
 class TimeAreaAnalyzer:
     """
@@ -77,16 +35,7 @@ class TimeAreaAnalyzer:
        """
     def __init__(self, rain_filepath):
         if os.path.splitext(rain_filepath)[1].lower() == ".dfs0":
-            try:
-                libs = import_or_install(["mikeio"])
-                mikeio = libs["mikeio"]
-            except ImportError:
-                raise ImportError(
-                    "The 'mikeio' package is required but not installed.\n"
-                    "You can install it by running:\n"
-                    "   python -m pip install mikeio\n\n"
-                    "where python is the path to your ArcGIS python.exe"
-                )
+            import mikeio
             dfs0 = mikeio.open(rain_filepath)
             self.series = dfs0.read().to_pandas()
             self.series = self.series.resample("60s").bfill()
@@ -146,7 +95,7 @@ if __name__ == "__main__":
     # graph = mikegraph.MikeNetwork(r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Soenderhoej\MIKE\MIKE_URBAN\_ORIGINAL\Viby_detailed_200101_40\Viby_detailed_200101_40.sqlite")
     # graph.map_network()
 
-    rainseries = TimeAreaAnalyzer(r"C:\Papirkurv\Webinar presentation\02_RAIN\CDS_5 min_samlet.txt")
+    rainseries = TimeAreaAnalyzer(r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Jens Juuls Vej\MIKE_URBAN\02_RAIN\CDS_T5_5 min.DFS0")
     # rainseries.additional_discharge = {"SEMI25":0.25}
     #
     # discharge_ta = rainseries.timeareaCurve(u'D43440R', graph)

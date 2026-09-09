@@ -11,15 +11,15 @@ import os
 import numpy as np
 import mikeio
 import arcpy
+import traceback
 arcpy.env.overwriteOutput = True
 
 
 arcpy.CheckOutExtension("3D")
 
-mesh_files = [r"C:\Users\elnn\OneDrive - Ramboll\Documents\Aarhus Vand\Jyllands Alle\MIKE_REGNVAND\07_2D\JYL_072_v100_Z.mesh"]
+mesh_files = [r"C:\Users\ELNN.RAMBOLL.000\OneDrive - Ramboll\Documents\Mosagergroeften\MIKE\07_FM\Mesh\20260728 Mesh_5m2_Z.mesh"]
 
 for mesh_file in mesh_files:
-# mesh_file = r"C:\Papirkurv\MIWM\Herfolge_Flood_endelig_mesh_m_veje_haevet_grunde_interp.mesh"
     print(mesh_file)
     dfs = mikeio.dfsu.Mesh(mesh_file)
     node_coordinates = dfs.node_coordinates
@@ -38,24 +38,52 @@ for mesh_file in mesh_files:
     if clip:
         print("Preparing clip")
         arcpy.CreateFeatureclass_management("in_memory", "ClipPolygon", "POLYGON")
-        boundary_xy_table = dfs.geometry.boundary_polylines[1][0].xy
+        boundary_xy_table = dfs.geometry.boundary_polylines.lines[0].xy
         polygons = arcpy.Polygon(arcpy.Array([arcpy.Point(xy[0], xy[1]) for xy in boundary_xy_table]))
         with arcpy.da.InsertCursor("in_memory\ClipPolygon", "SHAPE@") as cursor:
             cursor.insertRow([polygons])
 
+        # try:
         arcpy.CreateFeatureclass_management("in_memory", "CutPolygon", "POLYGON")
-        cut_polygons = dfs.geometry.boundary_polylines[3]
+        cut_polygons = dfs.geometry.boundary_polylines.lines[3:]
         polygons = []
+
+        if not isinstance(cut_polygons, (list, tuple)):
+            cut_polygons = [cut_polygons]
+
         for cut_polygon in cut_polygons:
             boundary_xy_table = cut_polygon.xy
             polygons.append(arcpy.Polygon(arcpy.Array([arcpy.Point(xy[0], xy[1]) for xy in boundary_xy_table])))
+
         with arcpy.da.InsertCursor("in_memory\CutPolygon", "SHAPE@") as cursor:
             for polygon in polygons:
                 cursor.insertRow([polygon])
 
+        arcpy.management.RepairGeometry(
+            "in_memory\CutPolygon",
+            "DELETE_NULL"
+        )
+
+
+        # # Export to shapefile
+        # out_shp = r"C:\Papirkurv\CutPolygon.shp"
+        #
+        # if arcpy.Exists(out_shp):
+        #     arcpy.Delete_management(out_shp)
+        #
+        # arcpy.CopyFeatures_management(r"in_memory\CutPolygon", out_shp)
+
         print("Creating TIN")
-        arcpy.ddd.CreateTin(mesh_file.replace(".mesh","TIN"), dfs.geometry.projection_string,
-                            r"in_memory\nodes_Z Shape.Z Mass_Points; in_memory\ClipPolygon <None> Hard_Clip; in_memory\CutPolygon <None> Hard_Erase")
+        arcpy.ddd.CreateTin(mesh_file.replace(".mesh", "TIN"), dfs.geometry.projection_string,
+                r"in_memory\nodes_Z Shape.Z Mass_Points; in_memory\ClipPolygon <None> Hard_Clip; in_memory\CutPolygon <None> Hard_Erase")
+        # except Exception as e:
+        #     arcpy.AddWarning("CutPolygon creation failed:\n" + traceback.format_exc())
+        #     print("Continuing without Cut polygon")
+        #
+        #     arcpy.ddd.CreateTin(mesh_file.replace(".mesh", "TIN"), dfs.geometry.projection_string,
+        #                         r"in_memory\nodes_Z Shape.Z Mass_Points; in_memory\ClipPolygon <None> Hard_Clip")
+
+
     else:
         print("Creating TIN")
         arcpy.ddd.CreateTin(mesh_file.replace(".mesh","TIN"), dfs.geometry.projection_string,

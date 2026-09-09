@@ -293,6 +293,32 @@ class CheckMikeUrbanDatabase(object):
                 # nodesOutletShape
                 # ) + "'")
 
+        try:
+            fields = {f.name.lower(): f.name for f in arcpy.ListFields(msm_Node)}
+            d = fields.get("diameter")
+            m = fields.get("muid")
+
+            if not d or not m:
+                arcpy.AddWarning("Missing diameter or MUID field – skipping check.")
+            else:
+                bad = []
+
+                with arcpy.da.SearchCursor(msm_Node, [m, d]) as cur:
+                    for muid, diam in cur:
+                        if diam is not None and (diam > 5 or diam < 0.3):
+                            bad.append(str(muid))
+
+                count = len(bad)
+                muid_tuple_str = "(" + ", ".join(["'%s'" % x for x in bad]) + ")"
+
+                arcpy.AddMessage("Found %d features with odd diameter (<0.3 or >5)." % count)
+                arcpy.AddMessage("MUIDs: %s" % muid_tuple_str)
+
+        except Exception as e:
+            arcpy.AddWarning("Diameter check failed: %s" % str(e))
+            # continue execution silently
+            pass
+
         node_muids = [row[0] for row in arcpy.da.SearchCursor(msm_Node, "MUID")]
         duplicate_nodes = [node for node in node_muids if node_muids.count(node) > 1]
 

@@ -101,7 +101,16 @@ class GetTerrainElevation(object):
             direction="Input")
         coordinate_system.value = arcpy.SpatialReference("ETRS 1989 UTM Zone 32N").exportToString()
 
-        parameters = [point_features, terrain_layer, fields, decimals, user, passw, coordinate_system]
+        output_mode = arcpy.Parameter(
+            displayName="Create copy instead of updating input",
+            name="output_mode",
+            datatype="GPBoolean",
+            parameterType="Optional",
+            direction="Input"
+        )
+        output_mode.value = False
+
+        parameters = [point_features, terrain_layer, fields, decimals, user, passw, coordinate_system, output_mode]
 
         return parameters
 
@@ -137,6 +146,10 @@ class GetTerrainElevation(object):
         return
 
     def execute(self, parameters, messages):
+        # ---------------------------------------------------------------------------
+        # Parameters
+        # ---------------------------------------------------------------------------
+
         point_layer = parameters[0].ValueAsText
         DHM_file = parameters[1].ValueAsText
         field = parameters[2].ValueAsText
@@ -144,109 +157,287 @@ class GetTerrainElevation(object):
         user = parameters[4].ValueAsText
         passw = parameters[5].ValueAsText
         coordinate_system = arcpy.SpatialReference(text=parameters[6].Value)
-        is_sqlite_database = True if ".sqlite" in arcpy.Describe(point_layer).catalogPath else False
-
-        MU_database = os.path.dirname(arcpy.Describe(point_layer).catalogPath).replace("\mu_Geometry", "")
-
-        OID_field = arcpy.Describe(point_layer).OIDFieldName if not is_sqlite_database else "muid"
-        point_layer_OIDs = [row[0] for row in arcpy.da.SearchCursor(point_layer, OID_field)]
+        output_mode = parameters[7].Value
 
 
-        if not is_sqlite_database:
-            edit = arcpy.da.Editor(os.path.dirname(os.path.dirname(arcpy.Describe(point_layer).catalogPath)))
-            edit.startEditing(False, True)
-            edit.startOperation()
+        is_sqlite_database = ".sqlite" in arcpy.Describe(point_layer).catalogPath
+        MU_database = os.path.dirname(
+            arcpy.Describe(point_layer).catalogPath
+        ).replace("\\mu_Geometry", "")
+
+        OID_field = (
+            arcpy.Describe(point_layer).OIDFieldName
+            if not is_sqlite_database
+            else "muid"
+        )
+
+        # ---------------------------------------------------------------------------
+        # Read points
+        # ---------------------------------------------------------------------------
 
         point_layer_shapes = {}
-        points_elevation = {}
+
         with arcpy.da.SearchCursor(point_layer, [OID_field, "SHAPE@XY"]) as cursor:
-            for row in cursor:
-                point_layer_shapes[row[0]] = row[1]
+            for oid, xy in cursor:
+                point_layer_shapes[oid] = xy
+
+        # ---------------------------------------------------------------------------
+        # Terrain elevation
+        # ---------------------------------------------------------------------------
 
         def getTerrainElevation(x, y):
             if DHM_file:
-                arcpy.AddMessage(str(arcpy.GetCellValue_management(DHM_file, "%1.2f %1.2f" % (
-                    x, y), "1").getOutput(0).replace(".", ",")))
-                row[1] = str(
-                    arcpy.GetCellValue_management(DHM_file, "%1.2f %1.2f" % (x, y), "1").getOutput(0).replace(".", ","))
-            else:
-                if not coordinate_system.PCSCode == 25832:
-                    point_reprojected = arcpy.PointGeometry(
-                        arcpy.Point(x, y),
-                        coordinate_system).projectAs(arcpy.SpatialReference("ETRS 1989 UTM Zone 32N"))
-                    x, y = [point_reprojected.firstPoint.X, point_reprojected.firstPoint.Y]
-                url = (
-                        r"https://services.datafordeler.dk/DHMTerraen/DHMKoter/1.0.0/GEOREST/HentKoter?format=json&username=%s&password=%s&geop=POINT(%1.2f%s%1.2f)" %
-                        (user, passw, x, " ", y))
-                arcpy.AddMessage(url)
-                try:
-                    return json.loads(requests.get(url, verify=False).text)['HentKoterRespons']["data"][0]["kote"]
-                except Exception as e:
-                    arcpy.AddError(row[0])
-                    arcpy.AddError(url)
-                    arcpy.AddError(requests.get(url).text)
-                    arcpy.AddError(e.message)
+                value = arcpy.GetCellValue_management(
+                    DHM_file,
+                    "%1.2f %1.2f" % (x, y),
+                    "1"
+                ).getOutput(0)
 
-        arcpy.SetProgressor("step", "Answer messagebox (might be hidden behind window)", 0, len(point_layer_shapes), 1)
+                return value
+
+            if coordinate_system.PCSCode != 25832:
+                point_reprojected = arcpy.PointGeometry(
+                    arcpy.Point(x, y),
+                    coordinate_system
+                ).projectAs(
+                    arcpy.SpatialReference("ETRS 1989 UTM Zone 32N")
+                )
+
+                x = point_reprojected.firstPoint.X
+                y = point_reprojected.firstPoint.Y
+
+            url = (
+                      r"https://services.datafordeler.dk/DHMTerraen/DHMKoter/1.0.0/"
+                      r"GEOREST/HentKoter?format=json&username=%s&password=%s"
+                      r"&geop=POINT(%1.2f %1.2f)"
+                  ) % (user, passw, x, y)
+
+            try:
+                response = requests.get(url, verify=False)
+                return json.loads(response.text)["HentKoterRespons"]["data"][0]["kote"]
+
+            except Exception as e:
+                arcpy.AddError("Could not get elevation at %.2f %.2f" % (x, y))
+                arcpy.AddError(url)
+                arcpy.AddError(str(e))
+                return None
+
+        # ---------------------------------------------------------------------------
+        # Confirm
+        # ---------------------------------------------------------------------------
+
+        arcpy.SetProgressor(
+            "step",
+            "Getting terrain elevation",
+            0,
+            len(point_layer_shapes),
+            1
+        )
+
         if not arcgis_pro:
-            userquery = pythonaddins.MessageBox("Assign terrain elevation to %d points?" % (len(point_layer_shapes)),
-                                                "Confirm Assignment", 4)
+            userquery = pythonaddins.MessageBox(
+                "%s %d points?" % (
+                    "Assign terrain elevation to" if output_mode
+                    else "Create copy of",
+                    len(point_layer_shapes)
+                ),
+                "Confirm",
+                4
+            )
         else:
             import tkinter as tk
             from tkinter import messagebox
 
-            def confirm_assignment(num_points):
-                root = tk.Tk()
-                root.withdraw()  # Hide the main window
-                result = messagebox.askyesno("Confirm Assignment", "Assign terrain elevation to %d points?" % (num_points))
-                root.destroy()
-                return result
+            root = tk.Tk()
+            root.withdraw()
 
-            userquery = confirm_assignment(len(point_layer_shapes))
+            userquery = messagebox.askyesno(
+                "Confirm",
+                "%s %d points?" % (
+                    "Assign terrain elevation to" if output_mode
+                    else "Create copy of",
+                    len(point_layer_shapes)
+                )
+            )
 
-        if userquery == "Yes" or (isinstance(userquery, bool) and userquery is True):
-            arcpy.SetProgressor("step", "Getting terrain elevation of points", 0, len(point_layer_shapes), 1)
-            if is_sqlite_database and 'msm_Node'.lower() in arcpy.Describe(point_layer).catalogPath.lower():
+            root.destroy()
+
+        if not (userquery == "Yes" or userquery is True):
+            return
+
+        # ---------------------------------------------------------------------------
+        # MODE 1: Create a copy
+        # ---------------------------------------------------------------------------
+
+        if output_mode:
+
+            scratch_gdb = arcpy.env.scratchGDB
+
+            output_name = arcpy.ValidateTableName(
+                arcpy.Describe(point_layer).name + "_terrain",
+                scratch_gdb
+            )
+
+            output_fc = arcpy.management.CopyFeatures(
+                point_layer,
+                os.path.join(scratch_gdb, output_name)
+            ).getOutput(0)
+
+            # Add terrain field
+            output_field = "TerrainElev"
+
+            existing_fields = [
+                f.name.lower()
+                for f in arcpy.ListFields(output_fc)
+            ]
+
+            if output_field.lower() not in existing_fields:
+                arcpy.management.AddField(
+                    output_fc,
+                    output_field,
+                    "DOUBLE"
+                )
+
+            # Calculate elevations
+            with arcpy.da.UpdateCursor(
+                    output_fc,
+                    [OID_field, "SHAPE@XY", output_field]
+            ) as cursor:
+
+                for i, row in enumerate(cursor):
+
+                    arcpy.SetProgressorPosition(i)
+
+                    x, y = row[1]
+
+                    terrain_elevation = getTerrainElevation(x, y)
+
+                    if terrain_elevation in (None, "NoData"):
+                        arcpy.AddWarning(
+                            "NoData at %.2f %.2f" % (x, y)
+                        )
+                        continue
+
+                    terrain_elevation = round(
+                        float(terrain_elevation),
+                        decimals
+                    )
+
+                    row[2] = terrain_elevation
+                    cursor.updateRow(row)
+
+                    arcpy.AddMessage(
+                        "Set %s to %.2f" %
+                        (row[0], terrain_elevation)
+                    )
+
+            # Add the result to the current map
+            if arcgis_pro:
+                aprx = arcpy.mp.ArcGISProject("CURRENT")
+                map_view = aprx.activeMap
+
+                if map_view:
+                    map_view.addDataFromPath(output_fc)
+
+            # arcpy.SetParameterAsText(8, output_fc)
+
+            arcpy.AddMessage(
+                "Created terrain elevation copy: %s" % output_fc
+            )
+
+
+        # ---------------------------------------------------------------------------
+        # MODE 0: Update original
+        # ---------------------------------------------------------------------------
+
+        else:
+
+            if is_sqlite_database and \
+                    "msm_Node".lower() in \
+                    arcpy.Describe(point_layer).catalogPath.lower():
+
                 with sqlite3.connect(
-                        MU_database.replace("!delete!", "")) as connection:
+                        MU_database.replace("!delete!", "")
+                ) as connection:
+
                     update_cursor = connection.cursor()
-                    for muid in point_layer_shapes.keys():
-                        x, y = point_layer_shapes[muid][0], point_layer_shapes[muid][1]
-                        terrain_elevation = round(getTerrainElevation(x,y), decimals)
+
+                    for muid, (x, y) in point_layer_shapes.items():
+
+                        terrain_elevation = getTerrainElevation(x, y)
+
+                        if terrain_elevation in (None, "NoData"):
+                            arcpy.AddWarning(
+                                "NoData at %.2f %.2f" % (x, y)
+                            )
+                            continue
+
+                        terrain_elevation = round(
+                            float(terrain_elevation),
+                            decimals
+                        )
+
                         update_cursor.execute(
-                            "UPDATE msm_Node SET %s = %s WHERE MUID = '%s'" % (
-                            field, terrain_elevation, muid))
-                        arcpy.AddMessage("Set %s to %1.2f" % (muid, terrain_elevation))
+                            "UPDATE msm_Node SET %s = ? WHERE MUID = ?" %
+                            field,
+                            (terrain_elevation, muid)
+                        )
+
+                        arcpy.AddMessage(
+                            "Set %s to %.2f" %
+                            (muid, terrain_elevation)
+                        )
 
             else:
-                with arcpy.da.UpdateCursor(arcpy.Describe(point_layer).catalogPath, [OID_field, field],
-                                           where_clause="%s IN (%s)" % (OID_field, ", ".join(
-                                                   map(str, point_layer_OIDs)))) as pointcursor:  # 'SHAPE@XY'
-                    for i, row in enumerate(pointcursor):
-                        arcpy.SetProgressorPosition(i)
-                        x, y = point_layer_shapes[row[0]][0], point_layer_shapes[row[0]][1]
-                        terrain_elevation = round(getTerrainElevation(x, y), decimals)
-                        # arcpy.AddMessage(terrain_elevation)
-                        row[1] = terrain_elevation
-                        try:
-                            if terrain_elevation == "NoData":
-                                arcpy.AddWarning("Warning: Found NoData on location %s" % ("%1.2f %1.2f" % (x, y)))
-                            else:
-                                pointcursor.updateRow(row)
-                                arcpy.AddMessage("Set GroundLevel to %1.2f" % terrain_elevation)
-                        except Exception as e:
-                            arcpy.AddError("Error on row %s" % row[1])
-                            arcpy.AddError(e.message)
 
-        if not is_sqlite_database:
-            edit.stopOperation()
-            try:
-                edit.stopEditing(True)
-            except RuntimeError as e:
-                if "GDB_Release" in e.message:
-                    pass
-                else:
-                    raise (e)
+                edit = arcpy.da.Editor(
+                    os.path.dirname(
+                        os.path.dirname(
+                            arcpy.Describe(point_layer).catalogPath
+                        )
+                    )
+                )
+
+                edit.startEditing(False, True)
+                edit.startOperation()
+
+                try:
+                    with arcpy.da.UpdateCursor(
+                            arcpy.Describe(point_layer).catalogPath,
+                            [OID_field, field]
+                    ) as cursor:
+
+                        for i, row in enumerate(cursor):
+
+                            arcpy.SetProgressorPosition(i)
+
+                            if row[0] not in point_layer_shapes:
+                                continue
+
+                            x, y = point_layer_shapes[row[0]]
+
+                            terrain_elevation = getTerrainElevation(x, y)
+
+                            if terrain_elevation in (None, "NoData"):
+                                arcpy.AddWarning(
+                                    "NoData at %.2f %.2f" % (x, y)
+                                )
+                                continue
+
+                            row[1] = round(
+                                float(terrain_elevation),
+                                decimals
+                            )
+
+                            cursor.updateRow(row)
+
+                    edit.stopOperation()
+                    edit.stopEditing(True)
+
+                except Exception:
+                    edit.stopOperation()
+                    edit.stopEditing(False)
+                    raise
         return
 
 

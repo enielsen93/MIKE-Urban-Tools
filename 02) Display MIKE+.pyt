@@ -471,224 +471,443 @@ class DisplaySqliteStep1(object):
 #                         label_class.expression = label_class.expression.replace("return labelstr",
 #                                                                                 'if [GroundLevel] and [InvertLevel]: labelstr += "\\nD:%1.2f" % ( convertToFloat([GroundLevel]) - convertToFloat([InvertLevel]) )\r\n  return labelstr')
 
-
-
         class Basin:
-            def __init__(self, geometryID):
-                self.geometryID = geometryID if geometryID else ""
-                self.value1 = []
-                self.value3 = []
-                self.edges = []
+            def __init__(self, geometry_id):
+                self.geometry_id = geometry_id or ""
+                self.invert_level = None
                 self.permanent_level = None
 
-            class Edge:
-                def __init__(self, name, uplevel):
-                    self.name = name
-                    self.uplevel = uplevel
+                self.value1 = []
+                self.value3 = []
 
-            @property
-            def critical_level(self):  # overwritten if critical level in msm_Node
-                return np.max(self.elevations)
+                # None means "derive critical level from geometry".
+                self._critical_level = None
 
             @property
             def elevations(self):
-                if np.min(self.value1) < self.invert_level:
-                    return self.value1 + (self.invert_level - np.min(self.value1))
-                else:
-                    return self.value1
+                """Return basin elevations adjusted to the invert level."""
+                if not self.value1:
+                    return np.array([], dtype=float)
+
+                elevations = np.asarray(self.value1, dtype=float)
+
+                if self.invert_level is not None:
+                    minimum = np.min(elevations)
+
+                    if minimum < self.invert_level:
+                        elevations = elevations + (
+                                self.invert_level - minimum
+                        )
+
+                return elevations
 
             @property
-            def edges_sort(self):
-                if len(self.edges) > 1:
-                    idx_sort = np.argsort([edge.uplevel for edge in self.edges])
-                    return [self.edges[i] for i in idx_sort]
-                else:
-                    return [self.edges[0]]
+            def critical_level(self):
+                """
+                Return the critical level.
 
-            @property
-            def terrain_elevation(self):
-                return [elevation for elevation in self.elevations if elevation < self.critical_level] + [
-                    self.critical_level]
+                If a CriticalLevel was supplied from msm_Node, use that.
+                Otherwise use the highest geometry elevation.
+                """
+                if self._critical_level is not None:
+                    return self._critical_level
 
-            @property
-            def max_volume(self):
-                idxSort = np.argsort(self.elevations)
-                elevations = np.array(self.elevations)[idxSort]
-                surface_areas = np.array(self.value3)[idxSort]
-                elevations = [elevation for elevation in elevations if elevation < self.critical_level] + [
-                    self.critical_level]
-                surface_areas = np.interp(elevations, np.sort(self.elevations), surface_areas)
-                return np.trapz(surface_areas, elevations)
+                if len(self.elevations) == 0:
+                    return None
+
+                return float(np.max(self.elevations))
+
+            @critical_level.setter
+            def critical_level(self, value):
+                self._critical_level = value
 
             @property
             def max_area(self):
-                return np.max(self.value3)
+                """Return the maximum surface area of the basin."""
+                if not self.value3:
+                    return 0.0
+
+                return float(np.max(self.value3))
+
+            def _volume_curve(self):
+                """
+                Build the elevation-volume relationship.
+
+                Returns
+                -------
+                elevations : numpy.ndarray
+                    Elevation values.
+                volumes : numpy.ndarray
+                    Cumulative volume at each elevation.
+                """
+                elevations = self.elevations
+
+                if len(elevations) == 0:
+                    return np.array([], dtype=float), np.array([], dtype=float)
+
+                areas = np.asarray(self.value3, dtype=float)
+
+                if len(elevations) != len(areas):
+                    raise ValueError(
+                        "Number of elevations does not match number of surface areas."
+                    )
+
+                # Sort elevation/area pairs together.
+                sort_index = np.argsort(elevations)
+                sorted_elevations = elevations[sort_index]
+                sorted_areas = areas[sort_index]
+
+                critical_level = self.critical_level
+
+                if critical_level is not None:
+                    # Only include geometry below the critical level and then
+                    # explicitly add the critical level itself.
+                    mask = sorted_elevations < critical_level
+
+                    curve_elevations = np.append(
+                        sorted_elevations[mask],
+                        critical_level
+                    )
+
+                    curve_areas = np.interp(
+                        curve_elevations,
+                        sorted_elevations,
+                        sorted_areas
+                    )
+                else:
+                    curve_elevations = sorted_elevations
+                    curve_areas = sorted_areas
+
+                if len(curve_elevations) == 1:
+                    volumes = np.array([0.0])
+
+                else:
+                    # Cumulative trapezoidal integration.
+                    #
+                    # This avoids scipy.integrate.cumtrapz, which is deprecated.
+                    volumes = np.concatenate((
+                        [0.0],
+                        np.cumsum(
+                            (
+                                    curve_areas[:-1] + curve_areas[1:]
+                            ) / 2.0
+                            * np.diff(curve_elevations)
+                        )
+                    ))
+
+                return curve_elevations, volumes
+
+            @property
+            def max_volume(self):
+                """Return the total volume up to the critical level."""
+                elevations, volumes = self._volume_curve()
+
+                if len(elevations) == 0:
+                    return 0.0
+
+                return float(volumes[-1])
 
             def get_volume(self, level):
-                idxSort = np.argsort(self.elevations)
-                elevations = np.array(self.elevations)[idxSort]
-                surface_areas = np.array(self.value3)[idxSort]
-                elevations = [elevation for elevation in elevations if elevation < self.critical_level] + [
-                    self.critical_level]
-                surface_areas = np.interp(elevations, np.sort(self.elevations), surface_areas)
-                if self.permanent_level:
-                    return np.interp(level, elevations,
-                                     [0] + list(cumtrapz(surface_areas, elevations))) - np.interp(
-                        self.permanent_level, elevations,
-                        [0] + list(cumtrapz(surface_areas, elevations)))
-                else:
-                    return np.interp(level, elevations, [0] + list(cumtrapz(surface_areas, elevations)))
+                """Return basin volume at the specified water level."""
+                elevations, volumes = self._volume_curve()
+
+                if len(elevations) == 0:
+                    return 0.0
+
+                volume = float(np.interp(level, elevations, volumes))
+
+                if self.permanent_level is not None:
+                    permanent_volume = float(
+                        np.interp(
+                            self.permanent_level,
+                            elevations,
+                            volumes
+                        )
+                    )
+
+                    volume -= permanent_volume
+
+                return max(0.0, volume)
 
         if "Basins" in features_to_display:
+            arcpy.SetProgressor(
+                "default",
+                "Calculating volume of basins"
+            )
+            printStepAndTime("Calculating volume of basins")
+
+            # ------------------------------------------------------------------
+            # Import basins
+            # ------------------------------------------------------------------
+
             basins = {}
-            if True:
-                arcpy.SetProgressor("default", "Calculating volume of basins")
-                printStepAndTime("Calculating volume of basins")
-                # Import basins
-                with arcpy.da.SearchCursor(msm_Node, ["MUID", "GeometryID"],
-                                           where_clause="TypeNo = 2") as cursor:
+
+            with arcpy.da.SearchCursor(
+                    msm_Node,
+                    ["MUID", "GeometryID"],
+                    where_clause="TypeNo = 2"
+            ) as cursor:
+
+                for muid, geometry_id in cursor:
+                    basins[muid] = Basin(geometry_id)
+
+            if basins:
+
+                # Create a direct GeometryID -> Basin lookup.
+                #
+                # The old code searched through every basin for every ms_TabD
+                # row, which was unnecessarily O(n²).
+                basins_by_geometry = {
+                    basin.geometry_id: basin
+                    for basin in basins.values()
+                }
+
+                # ------------------------------------------------------------------
+                # Import basin geometry
+                # ------------------------------------------------------------------
+
+                geometry_ids = list(basins_by_geometry)
+
+                if geometry_ids:
+
+                    # Build the SQL using ArcPy's field delimiter/SQL helper
+                    # rather than manually constructing "IN ('...', '...')".
+                    tab_id_field = arcpy.AddFieldDelimiters(
+                        os.path.join(MU_database, "ms_TabD"),
+                        "TabID"
+                    )
+
+                    geometry_id_sql = ",".join(
+                        "'{}'".format(str(geometry_id).replace("'", "''"))
+                        for geometry_id in geometry_ids
+                    )
+
+                    where_clause = "{} IN ({})".format(
+                        tab_id_field,
+                        geometry_id_sql
+                    )
+
+                    with arcpy.da.SearchCursor(
+                            os.path.join(MU_database, "ms_TabD"),
+                            ["TabID", "Value1", "Value3"],
+                            where_clause=where_clause
+                    ) as cursor:
+
+                        for tab_id, elevation, surface_area in cursor:
+
+                            basin = basins_by_geometry.get(tab_id)
+
+                            if basin is None:
+                                continue
+
+                            if elevation is not None and surface_area is not None:
+                                basin.value1.append(elevation)
+                                basin.value3.append(surface_area)
+
+                # ------------------------------------------------------------------
+                # Create basin output
+                # ------------------------------------------------------------------
+
+                export_basins = getAvailableFilename(
+                    arcpy.env.scratchGDB + r"\basins",
+                    parent=MU_database
+                )
+
+                arcpy.Select_analysis(
+                    msm_Node,
+                    export_basins,
+                    where_clause="TypeNo = 2"
+                )
+
+                arcpy.management.AlterField(
+                    export_basins,
+                    "Description",
+                    field_length=500
+                )
+
+                arcpy.management.AddField(
+                    export_basins,
+                    "Volume",
+                    "FLOAT"
+                )
+
+                arcpy.management.AddField(
+                    export_basins,
+                    "MaxArea",
+                    "FLOAT"
+                )
+
+                # ------------------------------------------------------------------
+                # Calculate basin volumes
+                # ------------------------------------------------------------------
+
+                cursor_fields = [
+                    "MUID",
+                    "Volume",
+                    "CriticalLevel",
+                    "GeometryID",
+                    "Description",
+                    "GroundLevel",
+                    "InvertLevel",
+                    "MaxArea",
+                ]
+
+                with arcpy.da.UpdateCursor(
+                        export_basins,
+                        cursor_fields
+                ) as cursor:
+
                     for row in cursor:
-                        basins[row[0]] = Basin(row[1])
 
-                if len(basins) > 0:
-                    fromnode_fieldname = "fromnode" if not is_sqlite_database else "fromnodeid"
-                    tonode_fieldname = "tonode" if not is_sqlite_database else "tonodeid"
-                    outlet_feature_classes = {msm_Link: ["UpLevel", "DwLevel"],
-                                              msm_Orifice: ["InvertLevel"] * 2,
-                                              msm_Weir: ["CrestLevel"] * 2}
-                    tonodes = {}
+                        muid = row[0]
+                        basin = basins.get(muid)
 
-                    for feature_class, edgelevel_fieldname in zip(outlet_feature_classes.keys(),
-                                                                  outlet_feature_classes.values()):
-                        if fromnode_fieldname in [field.name.lower() for field in
-                                                  arcpy.ListFields(feature_class)]:
-                            with arcpy.da.SearchCursor(feature_class,
-                                                       [fromnode_fieldname, edgelevel_fieldname[0],
-                                                        edgelevel_fieldname[1], "MUID",
-                                                        tonode_fieldname],
-                                                       where_clause="%s IN ('%s')" % (fromnode_fieldname,
-                                                                                      "', '".join(
-                                                                                          basins.keys()))) as cursor:
-                                for row in cursor:
-                                    # arcpy.AddMessage(row)
-                                    if row[4]:
-                                        if row[0] in tonodes:
-                                            tonodes[row[0]].append(row[4])
-                                        else:
-                                            tonodes[row[0]] = [row[4]]
-                                    if row[1]:
-                                        basins[row[0]].edges.append(
-                                            basins[row[0]].Edge(row[3], max(row[1], row[2])))
+                        if basin is None:
+                            continue
 
-                    for feature_class, edgelevel_fieldname in zip(outlet_feature_classes.keys(),
-                                                                  outlet_feature_classes.values()):
-                        if fromnode_fieldname in [field.name.lower() for field in
-                                                  arcpy.ListFields(feature_class)]:
-                            with arcpy.da.SearchCursor(feature_class,
-                                                       [fromnode_fieldname, edgelevel_fieldname[0],
-                                                        edgelevel_fieldname[1], "MUID", tonode_fieldname],
-                                                       where_clause="%s IN ('%s')" % (fromnode_fieldname,
-                                                                                      "', '".join(
-                                                                                          [item for sublist in
-                                                                                           tonodes.values() for
-                                                                                           item in
-                                                                                           sublist]))) as cursor:
-                                for row in cursor:
-                                    basin_MUIDs = [a for a in tonodes if row[0] in tonodes[a]]
-                                    for basin_MUID in basin_MUIDs:
-                                        basins[basin_MUID].edges.append(
-                                            basins[basin_MUID].Edge(row[3], max(row[1], row[2])))
+                        try:
+                            basin.invert_level = row[6]
 
-                    with arcpy.da.SearchCursor(os.path.join(MU_database, r"ms_TabD"),
-                                               ["TabID", "Value1", "Value3"],
-                                               where_clause="TabID IN ('%s')" % ("', '".join(
-                                                   [basin.geometryID for basin in basins.values()]))) as cursor:
-                        for row in cursor:
-                            basin = [basin for basin in basins.values() if basin.geometryID == row[0]][0]
-                            basin.value1.append(row[1])
-                            basin.value3.append(row[2])
+                            # CriticalLevel from msm_Node overrides the
+                            # geometry-derived critical level.
+                            if row[2] is not None:
+                                basin.critical_level = row[2]
 
-                    exportBasins = getAvailableFilename(arcpy.env.scratchGDB + r"\basins", parent=MU_database)
-                    arcpy.Select_analysis(msm_Node, exportBasins, where_clause="TypeNo = 2")
-                    arcpy.management.AddField(exportBasins, "Volume", "FLOAT")
-                    arcpy.management.AddField(exportBasins, "MaxArea", "FLOAT")
-                    with arcpy.da.UpdateCursor(exportBasins,
-                                               ["MUID", "Volume", "CriticalLevel", "GeometryID", "Description",
-                                                "GroundLevel", "InvertLevel", "MaxArea"]) as cursor:
-                        for row in cursor:
-                            if row[0] in basins:
-                                basin = basins[row[0]]
-                                basin.invert_level = row[6]
-                                if row[2]:
-                                    basin.critical_level = row[2]
-                                try:
-                                    row[1] = basin.max_volume
-                                    row[7] = basin.max_area
+                            if not basin.value1:
+                                raise ValueError(
+                                    "No geometry elevations found."
+                                )
 
-                                    description = ""
-                                    #                                     arcpy.AddMessage(description)
-                                    elevation_discrepancy = basin.invert_level - basin.value1[0]
-                                    for elev in [e for e in sorted(basin.value1) if e < basin.critical_level]:
-                                        description += "%1.2f: %d m3\n" % (
-                                            elev + elevation_discrepancy, basin.get_volume(
-                                                elev + elevation_discrepancy))
+                            if not basin.value3:
+                                raise ValueError(
+                                    "No surface areas found."
+                                )
 
-                                    #                                     arcpy.AddMessage(description)
+                            # ------------------------------------------------------
+                            # Calculate volume and maximum area
+                            # ------------------------------------------------------
 
-                                    # Deprecated
-                                    if False and basin.edges:
-                                        for edge in basin.edges_sort:
-                                            description += "%s (%1.2f): %d m3\n" % (
-                                                edge.name, edge.uplevel, basin.get_volume(
-                                                    edge.uplevel)) if edge.uplevel and edge.uplevel < row[
-                                                5] and edge.uplevel > row[
-                                                                          6] else ""
+                            row[1] = basin.max_volume
+                            row[7] = basin.max_area
 
-                                    #                                     if len(description) > 255 - 30:
-                                    #                                         description = ""
-                                    #                                         if basin.edges:
-                                    #                                             for edge in basin.edges_sort:
-                                    #                                                 description += "%s. (%1.2f): %d m3\n" % (
-                                    #                                                     edge.name[0:5], edge.uplevel, basin.get_volume(
-                                    #                                                         edge.uplevel)) if edge.uplevel and edge.uplevel < row[
-                                    #                                                     5] and edge.uplevel > row[
-                                    #                                                                               6] else ""
+                            # ------------------------------------------------------
+                            # Build description
+                            # ------------------------------------------------------
 
-                                    #                                     if len(description) > 255 - 30:
-                                    #                                         description = ""
-                                    #                                         if basin.edges:
-                                    #                                             for edge in basin.edges_sort:
-                                    #                                                 description += "%1.2f: %d m3\n" % (edge.uplevel, basin.get_volume(
-                                    #                                                     edge.uplevel)) if edge.uplevel and edge.uplevel < row[
-                                    #                                                     5] and edge.uplevel > row[
-                                    #                                                                           6] else ""
+                            description_lines = []
 
-                                    if basin.critical_level and basin.critical_level < row[5]:
-                                        description += "Maks. (%1.2f): %d m3\n" % (
-                                            basin.critical_level, basin.get_volume(basin.critical_level))
-                                    else:
-                                        description += "Maks. (%1.2f): %d m3\n" % (
-                                            row[5], min(basin.max_volume, basin.get_volume(row[5])))
+                            # The old code used value1[0] here.
+                            #
+                            # Database row order is not guaranteed, so using the
+                            # minimum elevation is both safer and what the
+                            # calculation logically requires.
+                            elevation_discrepancy = (
+                                    basin.invert_level - min(basin.value1)
+                            )
 
-                                    row[4] = description[:220]
-                                    arcpy.AddMessage(description)
-                                    # cursor.updateRow(row)
-                                except Exception as e:
-                                    arcpy.AddWarning("Error: Could not calculate volume of basin %s" % (row[0]))
-                                    arcpy.AddWarning(basin.value1)
-                                    arcpy.AddWarning(basin.value3)
-                                    arcpy.AddWarning(basin.edges)
-                                    arcpy.AddWarning(traceback.format_exc())
+                            # Add volumes at the geometry elevations.
+                            geometry_elevations = sorted(
+                                elevation
+                                for elevation in basin.value1
+                                if elevation < basin.critical_level
+                            )
+                            for elevation in geometry_elevations:
+                                adjusted_elevation = (
+                                        elevation + elevation_discrepancy
+                                )
 
-                                # arcpy.AddMessage(row)
-                                # arcpy.AddMessage(len(description))
-                                cursor.updateRow(row)
+                                volume = basin.get_volume(
+                                    adjusted_elevation
+                                )
 
-                    printStepAndTime("Adding basins to map")
-                    arcpy.SetProgressor("default", "Adding basins to map")
-                    addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Basins.lyr",
-                             exportBasins, group=empty_group_layer, workspace_type="FILEGDB_WORKSPACE",
-                             definition_query=sql_query)
+                                description_lines.append(
+                                    "%1.2f: %d m3"
+                                    % (
+                                        adjusted_elevation,
+                                        volume
+                                    )
+                                )
+
+                            # ------------------------------------------------------
+                            # Add maximum volume
+                            # ------------------------------------------------------
+
+                            critical_level = basin.critical_level
+
+                            if (
+                                    critical_level is not None
+                                    and critical_level < row[5]
+                            ):
+                                maximum_level = critical_level
+                                maximum_volume = basin.get_volume(
+                                    critical_level
+                                )
+
+                            else:
+                                maximum_level = row[5]
+                                maximum_volume = min(
+                                    basin.max_volume,
+                                    basin.get_volume(row[5])
+                                )
+
+                            description_lines.append(
+                                "Maks. (%1.2f): %d m3"
+                                % (
+                                    maximum_level,
+                                    maximum_volume
+                                )
+                            )
+
+                            description = "\n".join(description_lines)
+
+                            # ArcGIS text field is limited here in practice,
+                            # so preserve the original 220-character behaviour.
+                            row[4] = description[:220]
+
+                            arcpy.AddMessage(description)
+
+                        except Exception:
+                            arcpy.AddWarning(
+                                "Error: Could not calculate volume of basin %s"
+                                % muid
+                            )
+
+                            arcpy.AddWarning(
+                                "Elevations: %s" % basin.value1
+                            )
+
+                            arcpy.AddWarning(
+                                "Surface areas: %s" % basin.value3
+                            )
+
+                            arcpy.AddWarning(
+                                traceback.format_exc()
+                            )
+
+                        cursor.updateRow(row)
+
+                # ------------------------------------------------------------------
+                # Add basins to map
+                # ------------------------------------------------------------------
+
+                printStepAndTime("Adding basins to map")
+
+                arcpy.SetProgressor(
+                    "default",
+                    "Adding basins to map"
+                )
+
+                addLayer(
+                    os.path.join(
+                        os.path.dirname(os.path.realpath(__file__)),
+                        "Data",
+                        "MOUSE Basins.lyr"
+                    ),
+                    export_basins,
+                    group=empty_group_layer,
+                    workspace_type="FILEGDB_WORKSPACE",
+                    definition_query=sql_query
+                )
 
         arcpy.SetProgressor("default", "Adding links, weirs and pumps to map")
 
@@ -1691,54 +1910,54 @@ class DisplaySqlitePro(object):
             templates_extension = ".lyrx" if arcgis_pro and is_sqlite_database else ".lyr"
 
             class Basin:
-                def __init__(self, geometryID):
-                    self.geometryID = geometryID if geometryID else ""
+                def __init__(self, geometry_id):
+                    self.geometryID = geometry_id or ""
                     self.value1 = []
                     self.value3 = []
-                    self.edges = []
                     self.permanent_level = None
                     self._critical_level = None
 
-                class Edge:
-                    def __init__(self, name, uplevel):
-                        self.name = name
-                        self.uplevel = uplevel
-
                 @property
-                def critical_level(self):  # overwritten if critical level in msm_Node
-                    if self._critical_level:
+                def critical_level(self):
+                    """Return the defined critical level or the maximum basin elevation."""
+                    if self._critical_level is not None:
                         return self._critical_level
-                    else:
-                        return np.max(self.elevations)
+
+                    return np.max(self.elevations)
 
                 @property
                 def elevations(self):
-                    if np.min(self.value1) < self.invert_level:
-                        return self.value1 + (self.invert_level - np.min(self.value1))
-                    else:
-                        return self.value1
+                    """Return basin elevations adjusted to the invert level."""
+                    min_elevation = np.min(self.value1)
 
-                @property
-                def edges_sort(self):
-                    if len(self.edges) > 1:
-                        idx_sort = np.argsort([edge.uplevel for edge in self.edges])
-                        return [self.edges[i] for i in idx_sort]
-                    else:
-                        return [self.edges[0]]
+                    if min_elevation != self.invert_level:
+                        return self.value1 + (self.invert_level - min_elevation)
 
                 @property
                 def terrain_elevation(self):
-                    return [elevation for elevation in self.elevations if elevation < self.critical_level] + [
-                        self.critical_level]
+                    return [
+                        elevation
+                        for elevation in self.elevations
+                        if elevation < self.critical_level
+                    ] + [self.critical_level]
 
                 @property
                 def max_volume(self):
-                    idxSort = np.argsort(self.elevations)
-                    elevations = np.array(self.elevations)[idxSort]
-                    surface_areas = np.array(self.value3)[idxSort]
-                    elevations = [elevation for elevation in elevations if elevation < self.critical_level] + [
-                        self.critical_level]
-                    surface_areas = np.interp(elevations, np.sort(self.elevations), surface_areas)
+                    elevations = np.sort(self.elevations)
+                    surface_areas = np.array(self.value3)[np.argsort(self.elevations)]
+
+                    elevations = [
+                                     elevation
+                                     for elevation in elevations
+                                     if elevation < self.critical_level
+                                 ] + [self.critical_level]
+
+                    surface_areas = np.interp(
+                        elevations,
+                        np.sort(self.elevations),
+                        surface_areas
+                    )
+
                     return np.trapz(surface_areas, elevations)
 
                 @property
@@ -1746,170 +1965,184 @@ class DisplaySqlitePro(object):
                     return np.max(self.value3)
 
                 def get_volume(self, level):
-                    idxSort = np.argsort(self.elevations)
-                    elevations = np.array(self.elevations)[idxSort]
-                    surface_areas = np.array(self.value3)[idxSort]
-                    elevations = [elevation for elevation in elevations if elevation < self.critical_level] + [
-                        self.critical_level]
-                    surface_areas = np.interp(elevations, np.sort(self.elevations), surface_areas)
+                    elevations = np.sort(self.elevations)
+                    surface_areas = np.array(self.value3)[np.argsort(self.elevations)]
+
+                    elevations = [
+                                     elevation
+                                     for elevation in elevations
+                                     if elevation < self.critical_level
+                                 ] + [self.critical_level]
+
+                    surface_areas = np.interp(
+                        elevations,
+                        np.sort(self.elevations),
+                        surface_areas
+                    )
+
+                    cumulative_volume = [0] + list(
+                        cumtrapz(surface_areas, elevations)
+                    )
+
+                    volume = np.interp(
+                        level,
+                        elevations,
+                        cumulative_volume
+                    )
+
                     if self.permanent_level:
-                        return np.interp(level, elevations,
-                                         [0] + list(cumtrapz(surface_areas, elevations))) - np.interp(
-                            self.permanent_level, elevations,
-                            [0] + list(cumtrapz(surface_areas, elevations)))
-                    else:
-                        return np.interp(level, elevations, [0] + list(cumtrapz(surface_areas, elevations)))
+                        volume -= np.interp(
+                            self.permanent_level,
+                            elevations,
+                            cumulative_volume
+                        )
+
+                    return volume
 
             if "Basins" in features_to_display:
+                arcpy.SetProgressor("default", "Calculating volume of basins")
+                printStepAndTime("Calculating volume of basins")
+
                 basins = {}
-                if True:
-                    arcpy.SetProgressor("default", "Calculating volume of basins")
-                    printStepAndTime("Calculating volume of basins")
-                    # Import basins
-                    with arcpy.da.SearchCursor(msm_Node, ["MUID", "GeometryID"],
-                                               where_clause="TypeNo = 2") as cursor:
+
+                # Import basins
+                with arcpy.da.SearchCursor(
+                        msm_Node,
+                        ["MUID", "GeometryID"],
+                        where_clause="TypeNo = 2"
+                ) as cursor:
+                    for muid, geometry_id in cursor:
+                        basins[muid] = Basin(geometry_id)
+
+                if basins:
+                    # Import basin geometry data
+                    geometry_ids = "', '".join(
+                        basin.geometryID for basin in basins.values()
+                    )
+
+                    with arcpy.da.SearchCursor(
+                            os.path.join(MU_database, "ms_TabD"),
+                            ["TabID", "Value1", "Value3"],
+                            where_clause="TabID IN ('%s')" % geometry_ids
+                    ) as cursor:
+                        basins_by_geometry_id = {
+                            basin.geometryID: basin
+                            for basin in basins.values()
+                        }
+
+                        for tab_id, value1, value3 in cursor:
+                            basin = basins_by_geometry_id.get(tab_id)
+
+                            if basin is not None:
+                                basin.value1.append(value1)
+                                basin.value3.append(value3)
+
+                    export_basins = getAvailableFilename(
+                        arcpy.env.scratchGDB + r"\basins",
+                        parent=MU_database
+                    )
+
+                    arcpy.Select_analysis(
+                        msm_Node,
+                        export_basins,
+                        where_clause="TypeNo = 2"
+                    )
+
+                    arcpy.management.AddField(
+                        export_basins,
+                        "Volume",
+                        "FLOAT"
+                    )
+                    arcpy.management.AddField(
+                        export_basins,
+                        "MaxArea",
+                        "FLOAT"
+                    )
+
+                    with arcpy.da.UpdateCursor(
+                            export_basins,
+                            [
+                                "MUID",
+                                "Volume",
+                                "CriticalLevel",
+                                "GeometryID",
+                                "Description",
+                                "GroundLevel",
+                                "InvertLevel",
+                                "MaxArea"
+                            ]
+                    ) as cursor:
                         for row in cursor:
-                            basins[row[0]] = Basin(row[1])
+                            basin = basins.get(row[0])
 
-                    if len(basins) > 0:
-                        fromnode_fieldname = "fromnode" if not is_sqlite_database else "fromnodeid"
-                        tonode_fieldname = "tonode" if not is_sqlite_database else "tonodeid"
-                        outlet_feature_classes = {msm_Link: ["UpLevel", "DwLevel"],
-                                                  msm_Orifice: ["InvertLevel"] * 2,
-                                                  msm_Weir: ["CrestLevel"] * 2}
-                        tonodes = {}
+                            if basin is None:
+                                continue
 
-                        for feature_class, edgelevel_fieldname in zip(outlet_feature_classes.keys(),
-                                                                      outlet_feature_classes.values()):
-                            if fromnode_fieldname in [field.name.lower() for field in
-                                                      arcpy.ListFields(feature_class)]:
-                                with arcpy.da.SearchCursor(feature_class,
-                                                           [fromnode_fieldname, edgelevel_fieldname[0],
-                                                            edgelevel_fieldname[1], "MUID",
-                                                            tonode_fieldname],
-                                                           where_clause="%s IN ('%s')" % (fromnode_fieldname,
-                                                                                          "', '".join(
-                                                                                              basins.keys()))) as cursor:
-                                    for row in cursor:
-                                        # arcpy.AddMessage(row)
-                                        if row[4]:
-                                            if row[0] in tonodes:
-                                                tonodes[row[0]].append(row[4])
-                                            else:
-                                                tonodes[row[0]] = [row[4]]
-                                        # if row[1]:
-                                            # basins[row[0]].edges.append(
-                                            #     basins[row[0]].Edge(row[3], max(row[1], row[2])))
-                        if False: #Deprecated
-                            for feature_class, edgelevel_fieldname in zip(outlet_feature_classes.keys(),
-                                                                          outlet_feature_classes.values()):
-                                if fromnode_fieldname in [field.name.lower() for field in
-                                                          arcpy.ListFields(feature_class)]:
-                                    with arcpy.da.SearchCursor(feature_class,
-                                                               [fromnode_fieldname, edgelevel_fieldname[0],
-                                                                edgelevel_fieldname[1], "MUID", tonode_fieldname],
-                                                               where_clause="%s IN ('%s')" % (fromnode_fieldname,
-                                                                                              "', '".join(
-                                                                                                  [item for sublist in
-                                                                                                   tonodes.values() for
-                                                                                                   item in
-                                                                                                   sublist]))) as cursor:
-                                        for row in cursor:
-                                            basin_MUIDs = [a for a in tonodes if row[0] in tonodes[a]]
-                                            for basin_MUID in basin_MUIDs:
-                                                arcpy.AddMessage((row[3], row[1], row[2]))
-                                                basins[basin_MUID].edges.append(
-                                                    basins[basin_MUID].Edge(row[3], max(row[1], row[2])))
+                            basin.invert_level = row[6]
 
-                        with arcpy.da.SearchCursor(os.path.join(MU_database, r"ms_TabD"),
-                                                   ["TabID", "Value1", "Value3"],
-                                                   where_clause="TabID IN ('%s')" % ("', '".join(
-                                                       [basin.geometryID for basin in basins.values()]))) as cursor:
-                            for row in cursor:
-                                basin = [basin for basin in basins.values() if basin.geometryID == row[0]][0]
-                                basin.value1.append(row[1])
-                                basin.value3.append(row[2])
+                            try:
+                                row[1] = basin.max_volume
+                                row[7] = basin.max_area
 
-                        exportBasins = getAvailableFilename(arcpy.env.scratchGDB + r"\basins", parent=MU_database)
-                        arcpy.Select_analysis(msm_Node, exportBasins, where_clause="TypeNo = 2")
-                        arcpy.management.AddField(exportBasins, "Volume", "FLOAT")
-                        arcpy.management.AddField(exportBasins, "MaxArea", "FLOAT")
-                        with arcpy.da.UpdateCursor(exportBasins,
-                                                   ["MUID", "Volume", "CriticalLevel", "GeometryID", "Description",
-                                                    "GroundLevel", "InvertLevel", "MaxArea"]) as cursor:
-                            for row in cursor:
-                                if row[0] in basins:
-                                    basin = basins[row[0]]
-                                    basin.invert_level = row[6]
-                                    # if row[2]:
-                                        # basin.critical_level = row[2]
-                                    try:
-                                        row[1] = basin.max_volume
-                                        row[7] = basin.max_area
+                                elevation_discrepancy = (
+                                        basin.invert_level - np.min(basin.value1)
+                                )
 
-                                        description = ""
-                                        #                                     arcpy.AddMessage(description)
-                                        elevation_discrepancy = basin.invert_level - basin.value1[0]
-                                        for elev in [e for e in sorted(basin.value1) if e < basin.critical_level]:
-                                            description += "%1.2f: %d m³\n" % (
-                                                elev + elevation_discrepancy, basin.get_volume(
-                                                    elev + elevation_discrepancy))
+                                description = ""
 
-                                        #                                     arcpy.AddMessage(description)
+                                for index in np.argsort(basin.value1):
+                                    elevation = basin.value1[index]
+                                    surface_area = basin.value3[index]
+                                    adjusted_elevation = (
+                                            elevation + elevation_discrepancy
+                                    )
 
-                                        # Deprecated
-                                        if False and basin.edges:
-                                            for edge in basin.edges_sort:
-                                                description += "%s (%1.2f): %d m³\n" % (
-                                                    edge.name, edge.uplevel, basin.get_volume(
-                                                        edge.uplevel)) if edge.uplevel and edge.uplevel < row[
-                                                    5] and edge.uplevel > row[
-                                                                              6] else ""
+                                    description += (
+                                            "%6.2f m\u00A0\u00A0%8d m²\u00A0\u00A0%8d m³\r\n"
+                                            % (
+                                                adjusted_elevation,
+                                                surface_area,
+                                                basin.get_volume(adjusted_elevation)
+                                            )
+                                    )
+                                    # arcpy.AddMessage((row[0], adjusted_elevation, elevation, surface_area))
+                                # if row[0].lower() == "kaxbas1":
+                                #     return
 
-                                        #                                     if len(description) > 255 - 30:
-                                        #                                         description = ""
-                                        #                                         if basin.edges:
-                                        #                                             for edge in basin.edges_sort:
-                                        #                                                 description += "%s. (%1.2f): %d m3\n" % (
-                                        #                                                     edge.name[0:5], edge.uplevel, basin.get_volume(
-                                        #                                                         edge.uplevel)) if edge.uplevel and edge.uplevel < row[
-                                        #                                                     5] and edge.uplevel > row[
-                                        #                                                                               6] else ""
+                                row[4] = description[:220]
 
-                                        #                                     if len(description) > 255 - 30:
-                                        #                                         description = ""
-                                        #                                         if basin.edges:
-                                        #                                             for edge in basin.edges_sort:
-                                        #                                                 description += "%1.2f: %d m3\n" % (edge.uplevel, basin.get_volume(
-                                        #                                                     edge.uplevel)) if edge.uplevel and edge.uplevel < row[
-                                        #                                                     5] and edge.uplevel > row[
-                                        #                                                                           6] else ""
+                            except Exception:
+                                arcpy.AddWarning(
+                                    "Could not calculate volume of basin %s"
+                                    % row[0]
+                                )
+                                arcpy.AddWarning(
+                                    "Value1: %s" % basin.value1
+                                )
+                                arcpy.AddWarning(
+                                    "Value3: %s" % basin.value3
+                                )
+                                arcpy.AddWarning(
+                                    traceback.format_exc()
+                                )
 
-                                        if basin.critical_level and basin.critical_level < row[5]:
-                                            description += "Maks. (%1.2f): %d m³\n" % (
-                                                basin.critical_level, basin.get_volume(basin.critical_level))
-                                        else:
-                                            description += "Maks. (%1.2f): %d m³\n" % (
-                                                row[5], min(basin.max_volume, basin.get_volume(row[5])))
+                            cursor.updateRow(row)
 
-                                        row[4] = description[:220]
-                                        # cursor.updateRow(row)
-                                    except Exception as e:
-                                        arcpy.AddWarning("Error: Could not calculate volume of basin %s" % (row[0]))
-                                        arcpy.AddWarning(basin.value1)
-                                        arcpy.AddWarning(basin.value3)
-                                        arcpy.AddWarning(basin.edges)
-                                        arcpy.AddWarning(traceback.format_exc())
+                    printStepAndTime("Adding basins to map")
+                    arcpy.SetProgressor("default", "Adding basins to map")
 
-                                    # arcpy.AddMessage(row)
-                                    # arcpy.AddMessage(len(description))
-                                    cursor.updateRow(row)
+                    addLayer(
+                        os.path.join(
+                            os.path.dirname(os.path.realpath(__file__)),
+                            "Data",
+                            "MOUSE Basins.lyr"
+                        ),
+                        export_basins,
+                        group=empty_group_layer,
+                        workspace_type="FILEGDB_WORKSPACE",
+                        definition_query=sql_query
+                    )
 
-                        printStepAndTime("Adding basins to map")
-                        arcpy.SetProgressor("default", "Adding basins to map")
-                        addLayer(os.path.dirname(os.path.realpath(__file__)) + "\Data\MOUSE Basins.lyr",
-                                 exportBasins, group=empty_group_layer, workspace_type="FILEGDB_WORKSPACE",
-                                 definition_query=sql_query)
             # return
             arcpy.SetProgressor("default", "Adding links, weirs and pumps to map")
 
